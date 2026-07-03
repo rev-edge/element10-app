@@ -401,7 +401,7 @@ function dInventory(){const t=invTotals();const admin=ROLE==='admin';
    <div><label>Condition/grade</label><input id="ivG" placeholder="PSA 10 / NM / Sealed"></div>
    <div><label>Image URL</label><input id="ivImg" placeholder="https://…"></div>
    <div><label>Owner</label><select id="ivOwner">${ownerOpts(ME)}</select></div></div>
-   <div class="row" style="margin-top:12px"><button class="btn v" onclick="addInv()">+ Add item</button><button class="btn sm" onclick="$('ivCSV').click()">Import CSV</button><input id="ivCSV" type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="importInv(this)"></div>
+   <div class="row" style="margin-top:12px"><button class="btn v" onclick="addInv()">+ Add item</button><button class="btn sm" onclick="downloadInvTemplate()">↓ CSV template</button><button class="btn sm" onclick="$('ivCSV').click()">Import CSV</button><input id="ivCSV" type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="importInv(this)"></div>
    <div class="lab" style="margin-top:8px">One physical pool. “Mine” shows items assigned to you; switch to Everyone for the full universal inventory.${admin?' As admin you can reassign any item.':''}</div></div>`;
  h+=`<div class="card" style="margin-top:16px"><div class="row" style="justify-content:space-between"><h3 style="font-size:15px">Inventory · ${invFilter==='mine'?'Mine':'Everyone'} (${t.cnt})</h3><span class="lab">value ${money(t.val)} · cost ${money(t.cost)}</span></div>
   <div style="overflow:auto;margin-top:10px"><table><tr><th>Name</th><th>Cat</th><th>Set</th><th>Qty</th><th>Cost</th><th>Value</th><th>Gain</th><th>Owner</th><th></th></tr>
@@ -410,9 +410,14 @@ function dInventory(){const t=invTotals();const admin=ROLE==='admin';
 function addInv(){const n=$('ivN').value.trim();if(!n)return;const owner=($('ivOwner')&&$('ivOwner').value!=='')?$('ivOwner').value:(ROLE==='admin'&&$('ivOwner')?null:ME);S.inventory.push({id:'i'+Date.now(),name:n,cat:$('ivC').value,set:$('ivS').value,qty:+$('ivQ').value||1,cost:+$('ivCo').value||0,value:+$('ivV').value||0,cond:$('ivG').value,img:$('ivImg').value,owner});save();dInventory();toast('Added');}
 function delInv(id){S.inventory=S.inventory.filter(x=>x.id!==id);save();dInventory();}
 function reassignInv(id,val){const it=S.inventory.find(x=>x.id===id);if(!it)return;it.owner=val||null;save();dInventory();toast('Reassigned to '+ownerName(it.owner));}
+function downloadInvTemplate(){const rows=[
+ ['Name','Category','Set','Qty','Unit Cost','Market Value','Condition','Image URL','Owner'],
+ ['Ascended Heroes Booster Box','Box','Ascended Heroes','1','89','140','Sealed','',''],
+ ['Charizard ex SIR','Slab','Ascended Heroes','1','120','260','PSA 10','','']];
+ csvDL('element10_inventory_template.csv',rows);toast('Template downloaded — keep the header row, then Import CSV');}
 function importInv(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{const p=parseCSV(e.target.result);const idx=rx=>p.columns.findIndex(c=>new RegExp(rx,'i').test(c));
- const ni=idx('name|title|card|product'),ci=idx('categor|type'),si=idx('set'),qi=idx('qty|quantity'),coi=idx('cost|paid'),vi=idx('value|market|price'),gi=idx('cond|grade');let n=0;
- p.rows.forEach(rw=>{const nm=ni>=0?rw[ni]:rw[0];if(!nm)return;S.inventory.push({id:'i'+Date.now()+n,name:nm,cat:(ci>=0&&rw[ci])?rw[ci]:'Other',set:si>=0?rw[si]:'',qty:qi>=0?(+rw[qi]||1):1,cost:coi>=0?(parseFloat((rw[coi]||'').replace(/[^0-9.]/g,''))||0):0,value:vi>=0?(parseFloat((rw[vi]||'').replace(/[^0-9.]/g,''))||0):0,cond:gi>=0?rw[gi]:'',owner:ME});n++;});save();dInventory();toast(n+' items imported to your inventory');};r.readAsText(f);inp.value='';}
+ const ni=idx('name|title|card|product'),ci=idx('categor|type'),si=idx('^set'),qi=idx('qty|quantity'),coi=idx('cost|paid'),vi=idx('value|market|price'),gi=idx('cond|grade'),imi=idx('image|img|url'),oi=idx('owner|assigned|streamer');let n=0;
+ p.rows.forEach(rw=>{const nm=ni>=0?rw[ni]:rw[0];if(!nm)return;const own=(oi>=0&&rw[oi]&&rw[oi].trim())?rw[oi].trim():ME;S.inventory.push({id:'i'+Date.now()+n,name:nm,cat:(ci>=0&&rw[ci])?rw[ci]:'Other',set:si>=0?rw[si]:'',qty:qi>=0?(+rw[qi]||1):1,cost:coi>=0?(parseFloat((rw[coi]||'').replace(/[^0-9.]/g,''))||0):0,value:vi>=0?(parseFloat((rw[vi]||'').replace(/[^0-9.]/g,''))||0):0,cond:gi>=0?rw[gi]:'',img:imi>=0?(rw[imi]||''):'',owner:own});n++;});save();dInventory();toast(n+' items imported');};r.readAsText(f);inp.value='';}
 function dChecklists(){const lm=[['characters','Chase characters'],['sets','Sets / products'],['formats','Show formats'],['diff','Trust / hooks']];
  let h=`<div class="card"><h3 style="font-size:15px">Checklists (CSV)</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">Upload a product/set checklist. Populate a pick-list from any column, or load chases into the Break Calculator.</div>
    <div class="drop" onclick="$('clFile').click()">Click to upload a .csv checklist</div><input id="clFile" type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="uploadChecklist(this)">
