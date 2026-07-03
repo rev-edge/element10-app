@@ -475,7 +475,7 @@ function delRepack(id){if(!confirm('Delete this product?'))return;S.repacks=S.re
 function editRepack(id){REPEDIT=id;renderRepackEditor();}
 function rpCur(){return S.repacks.find(x=>x.id===REPEDIT);}
 function rpList(){const p=rpCur();return p.mode==='random'?(p.pool=p.pool||[]):(p.cards=p.cards||[]);}
-function rpSet(k,v){const p=rpCur();if(!p)return;p[k]=v;save();if(k==='mode'||k==='name'||k==='kind')renderRepackEditor();}
+function rpSet(k,v){const p=rpCur();if(!p)return;p[k]=v;save();if(k==='name'){const hh=document.querySelector('#sec-repack .hero h1');if(hh)hh.textContent=v||'Product';}if(k==='mode')renderRepackEditor();}
 function rpCard(i,k,v){const l=rpList();if(l[i]){l[i][k]=v;save();}}
 function rpAddBlank(){rpList().push({name:'',category:'Pokémon',grade:'Raw',serial:'',year:'',set:'',era:'',img:'',marketValue:0,buyback:0,tier:'B',weight:1});save();renderRepackEditor();}
 function rpAddFromInv(){const ix=$('rpInv').value;if(ix==='')return;const it=S.inventory[+ix];if(!it)return;rpList().push({name:it.name,category:'',grade:it.cond||'Raw',serial:'',year:'',set:it.set||'',era:'',img:it.img||'',marketValue:+it.value||0,buyback:0,tier:'B',weight:1});save();renderRepackEditor();}
@@ -547,7 +547,7 @@ async function writeRow(id,owner,data){const rev=(REVS[id]||0)+1;REVS[id]=rev;co
 const _origSave=save;
 save=function(){_origSave();cloudSave();};
 function cloudSave(){if(!sb||_applyingRemote)return;pushFromS();clearTimeout(_st);_st=setTimeout(async()=>{
- await writeRow('shared',null,{comments:S.comments,todos:S.todos,streamers:S.streamers,lists:S.lists,attachments:S.attachments,checklists:S.checklists,inventory:S.inventory});
+ await writeRow('shared',null,{comments:S.comments,todos:S.todos,streamers:S.streamers,lists:S.lists,attachments:S.attachments,checklists:S.checklists,inventory:S.inventory,repacks:S.repacks});
  if(canEditScoped()){const owner=(SCOPE==='mine')?MEID:(SCOPE==='universal'?null:SCOPE);await writeRow(SCOPED_ID,owner,{shows:S.shows,breaks:S.breaks,dashCfg:S.dashCfg,sales:S.sales});}
 },600);}
 
