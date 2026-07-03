@@ -75,6 +75,7 @@ td{padding:8px 10px;border-bottom:1px solid var(--line)}
   <div class="sec" id="sec-copy"></div>
   <div class="sec" id="sec-gen"></div>
   <div class="sec" id="sec-break"></div>
+  <div class="sec" id="sec-repack"></div>
   <div class="sec" id="sec-data"></div>
   <div class="foot" id="foot"></div>
 </div>
@@ -117,13 +118,13 @@ function money(n){return '$'+Math.round(n).toLocaleString();}
 const L=k=>S.lists[k];
 
 /* ---------- nav ---------- */
-const SECTIONS=[['home','Home'],['schedule','Schedule'],['copy','Copy Studio'],['gen','Schedule Gen'],['break','Break Calculator'],['data','Data & Lists']];
+const SECTIONS=[['home','Home'],['schedule','Schedule'],['copy','Copy Studio'],['gen','Schedule Gen'],['break','Break Calculator'],['repack','Repack Studio'],['data','Data & Lists']];
 $('nav').innerHTML=SECTIONS.map((s,i)=>`<button class="tab ${i===0?'on':''}" data-s="${s[0]}" onclick="go('${s[0]}')">${s[1]}</button>`).join('');
-function go(s){document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.s===s));document.querySelectorAll('.sec').forEach(x=>x.classList.remove('on'));$('sec-'+s).classList.add('on');window.scrollTo(0,0);({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData}[s])();}
+function go(s){document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.s===s));document.querySelectorAll('.sec').forEach(x=>x.classList.remove('on'));$('sec-'+s).classList.add('on');window.scrollTo(0,0);({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData,repack:renderRepack}[s])();}
 $('foot').textContent='Element 10 · Command V2 · local preview (saves in this browser) — review before we host the shared, login-gated version.';
 function renderWho(){$('who').innerHTML=S.user?`<button class="btn sm" onclick="signIn()">👤 ${esc(S.user)}</button>`:`<button class="btn v sm" onclick="signIn()">Sign in</button>`;}
 function signIn(cb){window._siCb=(typeof cb==='function')?cb:null;$('modal').innerHTML=`<h3 style="font-size:18px">Sign in</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:6px 0 12px">Your name tags your notes and comments so the team knows who did what. Real email logins arrive when we host the shared version.</div><label>Your name</label><input id="siName" value="${esc(S.user||'')}" placeholder="e.g. Trent" onkeydown="if(event.key==='Enter')doSignIn()"><div class="row" style="margin-top:16px"><button class="btn v" onclick="doSignIn()">Save</button>${S.user?'<button class="btn sm" onclick="closeM()">Cancel</button>':''}</div>`;$('ov').style.display='flex';setTimeout(()=>{const el=$('siName');if(el)el.focus();},60);}
-function doSignIn(){const v=$('siName').value.trim();if(!v)return;S.user=v;save();renderWho();closeM();const cb=window._siCb;window._siCb=null;if(cb)cb();else{const on=document.querySelector('.tab.on');if(on)({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData}[on.dataset.s])();}}
+function doSignIn(){const v=$('siName').value.trim();if(!v)return;S.user=v;save();renderWho();closeM();const cb=window._siCb;window._siCb=null;if(cb)cb();else{const on=document.querySelector('.tab.on');if(on)({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData,repack:renderRepack}[on.dataset.s])();}}
 function requireUser(cb){if(S.user)cb();else signIn(cb);}
 renderWho();
 
@@ -459,6 +460,60 @@ function dLists(){const lm=[['characters','Chase characters'],['sets','Sets / pr
  h+=`<div><div class="lab">Streamers</div><div class="chipwrap">${S.streamers.map(v=>`<span class="pill">${esc(v)} <a onclick="rmStreamer('${esc(v)}')" style="color:var(--red)">✕</a></span>`).join('')}</div><div class="row"><input id="add_str" placeholder="Add streamer…" style="max-width:260px" onkeydown="if(event.key==='Enter')addStreamer()"><button class="btn sm" onclick="addStreamer()">+</button></div></div></div>`;
  $('dtc').innerHTML=h;}
 
+/* ---------- REPACK STUDIO ---------- */
+let REPEDIT=null;
+function renderRepack(){if(REPEDIT&&(S.repacks||[]).find(x=>x.id===REPEDIT))return renderRepackEditor();REPEDIT=null;
+ let h=`<div class="hero"><div><h1>Repack Studio</h1><div class="sub">Build cases, boxes &amp; packs · assign cards + odds · launch the live on-stream opener (full-screen, OBS-ready).</div></div><button class="btn v" onclick="newRepack()">+ New product</button></div>`;
+ if(!(S.repacks||[]).length){h+=`<div class="card" style="color:var(--mut)">No products yet. Create a pack, pull cards from your inventory or add them manually, set preset or random odds, then hit <b>▶ Open on stream</b> to launch the full-screen opener. Point OBS at that browser tab/window as a source.</div>`;}
+ else{h+=`<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(250px,1fr))">`+S.repacks.map(p=>{const cnt=p.mode==='random'?((p.pool||[]).length+' in pool'):((p.cards||[]).length+' cards');const val=(p.cards||[]).reduce((s,c)=>s+(+c.marketValue||0),0);
+   return `<div class="card"><div class="row" style="justify-content:space-between"><h3 style="font-size:16px">${esc(p.name)}</h3><span class="pill" style="margin:0">${esc(p.kind)}</span></div>
+    <div class="lab" style="margin:6px 0">${esc(p.mode)} · ${cnt}${p.mode==='preset'&&val?' · '+money(val):''} · chase ${esc(p.chase||'—')}</div>
+    <div class="row" style="margin-top:10px;gap:6px"><button class="btn v sm" onclick="launchOpen('${p.id}')">▶ Open on stream</button><button class="btn sm" onclick="editRepack('${p.id}')">Edit</button><button class="btn x" onclick="delRepack('${p.id}')">✕</button></div></div>`;}).join('')+`</div>`;}
+ $('sec-repack').innerHTML=h;}
+function newRepack(){S.repacks.push({id:'rp'+Date.now(),name:'New pack',kind:'pack',price:'$25–$100',chase:'1:4',mode:'preset',count:5,cards:[],pool:[]});save();editRepack(S.repacks[S.repacks.length-1].id);}
+function delRepack(id){if(!confirm('Delete this product?'))return;S.repacks=S.repacks.filter(x=>x.id!==id);save();renderRepack();}
+function editRepack(id){REPEDIT=id;renderRepackEditor();}
+function rpCur(){return S.repacks.find(x=>x.id===REPEDIT);}
+function rpList(){const p=rpCur();return p.mode==='random'?(p.pool=p.pool||[]):(p.cards=p.cards||[]);}
+function rpSet(k,v){const p=rpCur();if(!p)return;p[k]=v;save();if(k==='mode'||k==='name'||k==='kind')renderRepackEditor();}
+function rpCard(i,k,v){const l=rpList();if(l[i]){l[i][k]=v;save();}}
+function rpAddBlank(){rpList().push({name:'',category:'Pokémon',grade:'Raw',serial:'',year:'',set:'',era:'',img:'',marketValue:0,buyback:0,tier:'B',weight:1});save();renderRepackEditor();}
+function rpAddFromInv(){const ix=$('rpInv').value;if(ix==='')return;const it=S.inventory[+ix];if(!it)return;rpList().push({name:it.name,category:'',grade:it.cond||'Raw',serial:'',year:'',set:it.set||'',era:'',img:it.img||'',marketValue:+it.value||0,buyback:0,tier:'B',weight:1});save();renderRepackEditor();}
+function rpDelCard(i){rpList().splice(i,1);save();renderRepackEditor();}
+function renderRepackEditor(){const p=rpCur();if(!p){REPEDIT=null;return renderRepack();}const list=rpList();const rnd=p.mode==='random';const span=rnd?10:9;
+ let h=`<div class="hero"><div><h1>${esc(p.name||'Product')}</h1><div class="sub">Configure the product · add cards (from inventory or manual) · launch the opener.</div></div><div class="row" style="gap:6px"><button class="btn v" onclick="launchOpen('${p.id}')">▶ Open on stream</button><button class="btn sm" onclick="REPEDIT=null;renderRepack()">← All products</button></div></div>`;
+ h+=`<div class="card"><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
+   <div><label>Name</label><input value="${esc(p.name)}" oninput="rpSet('name',this.value)"></div>
+   <div><label>Type</label><select onchange="rpSet('kind',this.value)">${['pack','box','case'].map(k=>`<option ${p.kind===k?'selected':''}>${k}</option>`).join('')}</select></div>
+   <div><label>Price label</label><input value="${esc(p.price||'')}" oninput="rpSet('price',this.value)"></div>
+   <div><label>Chase label</label><input value="${esc(p.chase||'')}" oninput="rpSet('chase',this.value)"></div>
+   <div><label>Contents</label><select onchange="rpSet('mode',this.value)">${[['preset','Preset (exact cards)'],['random','Random roll (odds)']].map(m=>`<option value="${m[0]}" ${p.mode===m[0]?'selected':''}>${m[1]}</option>`).join('')}</select></div>
+   ${rnd?`<div><label>Cards per open</label><input type="number" value="${p.count||5}" oninput="rpSet('count',+this.value||1)"></div>`:''}</div>
+   <div class="lab" style="margin-top:8px">${rnd?'Random: each open rolls this pool by weight to pick the cards.':'Preset: opening reveals exactly these cards, in order.'}</div></div>`;
+ h+=`<div class="card" style="margin-top:14px"><div class="row" style="justify-content:space-between"><h3 style="font-size:15px">${rnd?'Card pool':'Cards in this pack'} (${list.length})</h3>
+   <div class="row" style="gap:6px"><select id="rpInv" style="max-width:210px"><option value="">+ pull from inventory…</option>${S.inventory.map((it,ix)=>`<option value="${ix}">${esc(it.name)} · ${money(it.value)}</option>`).join('')}</select><button class="btn sm" onclick="rpAddFromInv()">Add</button></div></div>
+   <div style="overflow:auto;margin-top:10px"><table><tr><th>Name</th><th>Cat</th><th>Grade</th><th>Serial</th><th>Year</th><th>Value</th><th>Buyback</th><th>Tier</th>${rnd?'<th>Wt</th>':''}<th></th></tr>
+   ${list.map((c,i)=>`<tr>
+     <td><input value="${esc(c.name||'')}" oninput="rpCard(${i},'name',this.value)" style="min-width:150px"></td>
+     <td><input value="${esc(c.category||'')}" oninput="rpCard(${i},'category',this.value)" style="width:82px" placeholder="Pokémon"></td>
+     <td><input value="${esc(c.grade||'')}" oninput="rpCard(${i},'grade',this.value)" style="width:76px" placeholder="PSA 10"></td>
+     <td><input value="${esc(c.serial||'')}" oninput="rpCard(${i},'serial',this.value)" style="width:64px" placeholder="/99"></td>
+     <td><input value="${esc(c.year||'')}" oninput="rpCard(${i},'year',this.value)" style="width:56px"></td>
+     <td><input type="number" value="${c.marketValue||0}" oninput="rpCard(${i},'marketValue',+this.value||0)" style="width:70px"></td>
+     <td><input type="number" value="${c.buyback||0}" oninput="rpCard(${i},'buyback',+this.value||0)" style="width:70px"></td>
+     <td><select onchange="rpCard(${i},'tier',this.value)">${['S','A','B','C'].map(t=>`<option ${c.tier===t?'selected':''}>${t}</option>`).join('')}</select></td>
+     ${rnd?`<td><input type="number" value="${c.weight||1}" oninput="rpCard(${i},'weight',+this.value||1)" style="width:52px"></td>`:''}
+     <td><button class="btn x" onclick="rpDelCard(${i})">✕</button></td></tr>
+     <tr><td colspan="${span}" style="padding-top:0"><input value="${esc(c.era||'')}" oninput="rpCard(${i},'era',this.value)" placeholder="Era (Pokémon: Vintage / Modern)" style="max-width:230px;font-size:12px"> <input value="${esc(c.set||'')}" oninput="rpCard(${i},'set',this.value)" placeholder="Set" style="max-width:170px;font-size:12px"> <input value="${esc(c.img||'')}" oninput="rpCard(${i},'img',this.value)" placeholder="Image URL (shows in the reveal)" style="max-width:300px;font-size:12px"></td></tr>`).join('')||`<tr><td colspan="${span}" style="color:var(--mut)">No cards yet — pull from inventory above or add a blank card.</td></tr>`}</table></div>
+   <button class="btn sm" style="margin-top:10px" onclick="rpAddBlank()">+ Add blank card</button></div>`;
+ $('sec-repack').innerHTML=h;}
+function rollRandom(p){const pool=(p.pool||[]).filter(c=>c.name);const n=Math.max(1,p.count||5);const out=[];if(!pool.length)return out;
+ for(let k=0;k<n;k++){const tot=pool.reduce((s,c)=>s+(+c.weight||1),0);let r=Math.random()*tot,pick=pool[0];for(const c of pool){r-=(+c.weight||1);if(r<=0){pick=c;break;}}out.push(pick);}return out;}
+function launchOpen(id){const p=(S.repacks||[]).find(x=>x.id===id);if(!p)return;const cards=(p.mode==='random'?rollRandom(p):(p.cards||[]).slice()).filter(c=>c&&c.name);
+ if(!cards.length){toast('Add cards first');return;}
+ try{localStorage.setItem('e10_open',JSON.stringify({product:{name:p.name,kind:p.kind,price:p.price,chase:p.chase},cards}));}catch(e){toast('Could not stage opener');return;}
+ const w=window.open('open.html','_blank');if(!w)toast('Allow pop-ups, then click ▶ again');else toast('Opener launched — share that tab in OBS');}
+
 /* ===== Element 10 cloud: multi-tenant (shared + universal + personal) + auth + realtime ===== */
 const SB_URL='https://ddhkkumiyidorzmajwde.supabase.co';
 const SB_KEY='sb_publishable_wRoaFNiqpZJaEJkQvLpnUw_7bpcXllv';
@@ -467,11 +522,11 @@ let SHARED={},SCOPED={},SCOPED_ID='',REVS={},MEMBERS=[];
 let SCOPE=localStorage.getItem('e10_scope')||'mine';         // 'mine' | 'universal' | '<uid>'
 let invFilter=localStorage.getItem('e10_invfilter')||'mine'; // 'mine' | 'all'
 const SCOPED_KEYS=['shows','breaks','dashCfg','sales'];
-const SHARED_KEYS=['comments','todos','streamers','lists','attachments','checklists','inventory'];
+const SHARED_KEYS=['comments','todos','streamers','lists','attachments','checklists','inventory','repacks'];
 
-function blankShared(){return{comments:[],todos:[],streamers:['Trent'],lists:JSON.parse(JSON.stringify(DEF_LISTS)),attachments:[],checklists:[],inventory:[]};}
+function blankShared(){return{comments:[],todos:[],streamers:['Trent'],lists:JSON.parse(JSON.stringify(DEF_LISTS)),attachments:[],checklists:[],inventory:[],repacks:[]};}
 function blankScoped(){return{shows:{},breaks:[],dashCfg:{catValue:true,costMarket:true,movement:true},sales:null};}
-function normShared(o){o=o||{};if(!o.comments)o.comments=[];if(!o.todos)o.todos=[];o.todos.forEach(t=>{if(t.desc==null)t.desc='';if(!t.comments)t.comments=[];});if(!o.streamers)o.streamers=['Trent'];if(!o.lists)o.lists=JSON.parse(JSON.stringify(DEF_LISTS));['characters','sets','formats','diff'].forEach(k=>{if(!o.lists[k])o.lists[k]=(DEF_LISTS[k]||[]).slice();});['attachments','checklists','inventory'].forEach(k=>{if(!o[k])o[k]=[];});o.inventory.forEach(it=>{if(!it.id)it.id='i'+Math.random().toString(36).slice(2);if(!('owner'in it))it.owner=null;});return o;}
+function normShared(o){o=o||{};if(!o.comments)o.comments=[];if(!o.todos)o.todos=[];o.todos.forEach(t=>{if(t.desc==null)t.desc='';if(!t.comments)t.comments=[];});if(!o.streamers)o.streamers=['Trent'];if(!o.lists)o.lists=JSON.parse(JSON.stringify(DEF_LISTS));['characters','sets','formats','diff'].forEach(k=>{if(!o.lists[k])o.lists[k]=(DEF_LISTS[k]||[]).slice();});['attachments','checklists','inventory','repacks'].forEach(k=>{if(!o[k])o[k]=[];});o.inventory.forEach(it=>{if(!it.id)it.id='i'+Math.random().toString(36).slice(2);if(!('owner'in it))it.owner=null;});o.repacks.forEach(p=>{if(!p.cards)p.cards=[];if(!p.pool)p.pool=[];});return o;}
 function normScoped(o){o=o||{};if(!o.shows)o.shows={};if(!o.breaks)o.breaks=[];if(!o.dashCfg)o.dashCfg={catValue:true,costMarket:true,movement:true};if(!('sales'in o))o.sales=null;return o;}
 function splitLegacy(d){const sh=blankShared(),sc=blankScoped();if(d&&typeof d==='object'){SHARED_KEYS.forEach(k=>{if(d[k]!=null)sh[k]=d[k];});SCOPED_KEYS.forEach(k=>{if(d[k]!=null)sc[k]=d[k];});}return{sh:normShared(sh),sc:normScoped(sc)};}
 
@@ -482,11 +537,11 @@ function invView(){return invFilter==='mine'?S.inventory.filter(i=>i.owner===ME)
 function roGuard(){toast('Read-only — switch to “My space” to edit');return false;}
 
 function rebuildS(){normShared(SHARED);normScoped(SCOPED);
- S={comments:SHARED.comments,todos:SHARED.todos,streamers:SHARED.streamers,lists:SHARED.lists,attachments:SHARED.attachments,checklists:SHARED.checklists,inventory:SHARED.inventory,
+ S={comments:SHARED.comments,todos:SHARED.todos,streamers:SHARED.streamers,lists:SHARED.lists,attachments:SHARED.attachments,checklists:SHARED.checklists,inventory:SHARED.inventory,repacks:SHARED.repacks,
     shows:SCOPED.shows,breaks:SCOPED.breaks,dashCfg:SCOPED.dashCfg,sales:SCOPED.sales,user:ME};}
-function pushFromS(){SHARED.comments=S.comments;SHARED.todos=S.todos;SHARED.streamers=S.streamers;SHARED.lists=S.lists;SHARED.attachments=S.attachments;SHARED.checklists=S.checklists;SHARED.inventory=S.inventory;
+function pushFromS(){SHARED.comments=S.comments;SHARED.todos=S.todos;SHARED.streamers=S.streamers;SHARED.lists=S.lists;SHARED.attachments=S.attachments;SHARED.checklists=S.checklists;SHARED.inventory=S.inventory;SHARED.repacks=S.repacks;
  SCOPED.shows=S.shows;SCOPED.breaks=S.breaks;SCOPED.dashCfg=S.dashCfg;SCOPED.sales=S.sales;}
-function currentRender(){const on=document.querySelector('.tab.on');if(on){({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData}[on.dataset.s])();}else renderHome();}
+function currentRender(){const on=document.querySelector('.tab.on');if(on){({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData,repack:renderRepack}[on.dataset.s])();}else renderHome();}
 
 async function writeRow(id,owner,data){const rev=(REVS[id]||0)+1;REVS[id]=rev;const row={id,data,rev,owner,updated_by:ME,updated_at:new Date().toISOString()};const{error}=await sb.from('e10_workspace').upsert(row);if(error)console.warn('save',id,error.message);}
 const _origSave=save;
