@@ -135,9 +135,9 @@ function scheduleGridHTML(){
    h+=`<div class="cell ${peak}" ondragover="event.preventDefault()" ondragenter="this.classList.add('dover')" ondragleave="this.classList.remove('dover')" ondrop="this.classList.remove('dover');dropShow('${k}')">${arr.map((s,i)=>`<div class="show" draggable="true" ondragstart="dragShow('${k}',${i})" onclick="event.stopPropagation();editShow('${k}',${i})"><div class="nm">${esc(s.name)}</div><div class="mt">${esc(s.fmt||'')} · ${esc(s.dur||'')}m · ${esc(s.host||'')}</div></div>`).join('')}<div class="addc" onclick="newShow('${k}')">+ add</div></div>`;});});
  h+=`</div></div>`;return h;}
 let DRAGS=null;function dragShow(k,i){DRAGS={k,i};}
-function dropShow(k){if(!DRAGS)return;const s=S.shows[DRAGS.k].splice(DRAGS.i,1)[0];if(!S.shows[DRAGS.k].length)delete S.shows[DRAGS.k];(S.shows[k]=S.shows[k]||[]).push(s);DRAGS=null;save();rerenderSchedule();}
+function dropShow(k){if(!DRAGS)return;if(!canEditScoped()){DRAGS=null;return roGuard();}const s=S.shows[DRAGS.k].splice(DRAGS.i,1)[0];if(!S.shows[DRAGS.k].length)delete S.shows[DRAGS.k];(S.shows[k]=S.shows[k]||[]).push(s);DRAGS=null;save();rerenderSchedule();}
 function rerenderSchedule(){if($('sec-schedule').classList.contains('on'))renderSchedule();if($('sec-home').classList.contains('on'))renderHome();}
-function newShow(k){showModal(null,k||(DAYS[0]+'|Evening'));}
+function newShow(k){if(!canEditScoped())return roGuard();showModal(null,k||(DAYS[0]+'|Evening'));}
 function editShow(k,i){showModal({k,i,...S.shows[k][i]},k);}
 function showModal(ex,k){ex=ex||{name:'',fmt:L('formats')[0],dur:90,host:S.streamers[0]||''};const[day,dp]=k.split('|');
  $('modal').innerHTML=`<h3 style="font-size:18px">${ex.k!=null?'Edit':'New'} show</h3>
@@ -149,9 +149,9 @@ function showModal(ex,k){ex=ex||{name:'',fmt:L('formats')[0],dur:90,host:S.strea
   <div style="margin-top:10px"><label>Streamer</label><select id="mhost">${S.streamers.map(s=>`<option ${s===ex.host?'selected':''}>${esc(s)}</option>`).join('')}</select></div>
   <div class="row" style="margin-top:18px"><button class="btn v" onclick="saveShow(${ex.k!=null?`'${ex.k}',${ex.i}`:'null,null'})">Save</button><button class="btn sm" onclick="closeM()">Cancel</button>${ex.k!=null?`<button class="btn x" style="margin-left:auto" onclick="delShow('${ex.k}',${ex.i})">Delete</button>`:''}</div>`;
  $('ov').style.display='flex';}
-function saveShow(ok,oi){const s={name:$('mname').value.trim()||'Untitled show',fmt:$('mfmt').value,dur:+$('mdur').value||60,host:$('mhost').value};const k=$('mday').value+'|'+$('mdp').value;
+function saveShow(ok,oi){if(!canEditScoped())return roGuard();const s={name:$('mname').value.trim()||'Untitled show',fmt:$('mfmt').value,dur:+$('mdur').value||60,host:$('mhost').value};const k=$('mday').value+'|'+$('mdp').value;
  if(ok!=null){S.shows[ok].splice(oi,1);if(!S.shows[ok].length)delete S.shows[ok];}(S.shows[k]=S.shows[k]||[]).push(s);save();closeM();rerenderSchedule();}
-function delShow(k,i){S.shows[k].splice(i,1);if(!S.shows[k].length)delete S.shows[k];save();closeM();rerenderSchedule();}
+function delShow(k,i){if(!canEditScoped())return roGuard();S.shows[k].splice(i,1);if(!S.shows[k].length)delete S.shows[k];save();closeM();rerenderSchedule();}
 function closeM(){$('ov').style.display='none';}
 
 /* ---------- HOME ---------- */
@@ -233,10 +233,10 @@ function renderGen(){
    <div><label>Include weekends</label><select id="gWknd"><option>Yes</option><option>No</option></select></div>
    <div><label>Flagship format</label><select id="gFlag">${L('formats').map(f=>`<option ${f==='Ceiling Ladder'?'selected':''}>${esc(f)}</option>`).join('')}</select></div>
    <div><label>Featured set</label><select id="gSet">${L('sets').map(x=>`<option>${esc(x)}</option>`).join('')}</select></div>
-   </div><div class="row" style="margin-top:14px"><button class="btn v" onclick="genSchedule()">Suggest a week</button><button class="btn sm" onclick="if(confirm('Replace current schedule?')){S.shows={};save();renderGen();}">Clear schedule</button></div>
+   </div><div class="row" style="margin-top:14px"><button class="btn v" onclick="genSchedule()">Suggest a week</button><button class="btn sm" onclick="clearSchedule()">Clear schedule</button></div>
    <div id="gout"></div></div>`;
 }
-function genSchedule(){const per=+$('gPer').value,wknd=$('gWknd').value==='Yes',flag=$('gFlag').value,set=$('gSet').value;
+function genSchedule(){if(!canEditScoped())return roGuard();const per=+$('gPer').value,wknd=$('gWknd').value==='Yes',flag=$('gFlag').value,set=$('gSet').value;
  const days=wknd?DAYS:DAYS.slice(0,5);
  const evening=[flag,'Grail Slab Break','Character Break'],afternoon=['$1 Singles Auction','RTYH','Vintage Rip'],morning=['RTYH','$1 Singles Auction'],late=['RTYH','Character Break'];
  const dur={'Ceiling Ladder':120,'Grail Slab Break':90,'Character Break':75,'RTYH':60,'$1 Singles Auction':90,'Box Break (new release)':90,'Pick-Your-Pokémon':60,'Repack':60,'Vintage Rip':75};
@@ -315,7 +315,9 @@ function calcBreak(){
   <div style="overflow:auto;max-height:300px;border:1px solid var(--line);border-radius:10px"><table><tr><th>Tier</th><th>Slot contents</th><th>Value</th><th>Exp. bid</th></tr>${rows}</table></div>`;
  BK._last={slots:sorted.length,tiers:T,gross:gAvg};
 }
-function saveBreak(){if(!BK._last)return;S.breaks.push({name:$('bName').value.trim()||'Break model',slots:BK._last.slots,tiers:BK._last.tiers,gross:BK._last.gross});save();toast('Saved to Home');}
+function clearSchedule(){if(!canEditScoped())return roGuard();if(confirm('Replace current schedule?')){S.shows={};save();renderGen();}}
+function toggleDash(k,v){if(!canEditScoped()){roGuard();dOverview();return;}S.dashCfg[k]=v;save();dOverview();}
+function saveBreak(){if(!BK._last)return;if(!canEditScoped())return roGuard();S.breaks.push({name:$('bName').value.trim()||'Break model',slots:BK._last.slots,tiers:BK._last.tiers,gross:BK._last.gross});save();toast('Saved to Home');}
 
 /* ---------- DATA & LISTS ---------- */
 function renderData(){dataHub();}
@@ -366,7 +368,7 @@ function dataHub(){
  $('sec-data').innerHTML=h;
  ({overview:dOverview,inventory:dInventory,checklists:dChecklists,reports:dReports,export:dExport,lists:dLists}[dataTab])();
 }
-function invTotals(){let cost=0,val=0,byCat={},qty=0;S.inventory.forEach(i=>{const q=+i.qty||1,c=(+i.cost||0)*q,v=(+i.value||0)*q;cost+=c;val+=v;qty+=q;byCat[i.cat]=(byCat[i.cat]||0)+v;});return{cost,val,byCat,qty,cnt:S.inventory.length,gain:val-cost};}
+function invTotals(){let cost=0,val=0,byCat={},qty=0;const view=invView();view.forEach(i=>{const q=+i.qty||1,c=(+i.cost||0)*q,v=(+i.value||0)*q;cost+=c;val+=v;qty+=q;byCat[i.cat]=(byCat[i.cat]||0)+v;});return{cost,val,byCat,qty,cnt:view.length,gain:val-cost};}
 function svgBars(entries){if(!entries.length)return '<div style="color:var(--mut);font-size:13px">No inventory yet.</div>';
  const max=Math.max(...entries.map(e=>e.value),1),bw=230,h=entries.length*30+8;let s=`<svg viewBox="0 0 440 ${h}" width="100%" style="max-width:470px">`;
  entries.forEach((e,i)=>{const y=i*30+6,w=Math.max(2,e.value/max*bw);s+=`<text x="0" y="${y+15}" font-size="12" fill="#6b6d73" font-family="'Space Grotesk',sans-serif">${esc(e.label)}</text><rect x="140" y="${y+4}" width="${w}" height="15" rx="4" fill="#0A0B0D"></rect><text x="${146+w}" y="${y+16}" font-size="11" fill="#0A0B0D" font-family="'Space Mono',monospace">${money(e.value)}</text>`;});
@@ -384,10 +386,12 @@ function dOverview(){const t=invTotals();const cat=Object.entries(t.byCat).map((
  if(S.dashCfg.catValue)h+=`<div class="card" style="margin-bottom:16px"><h3 style="font-size:15px">Value by category</h3><div style="margin-top:12px">${svgBars(cat)}</div></div>`;
  if(S.dashCfg.costMarket)h+=`<div class="card" style="margin-bottom:16px"><h3 style="font-size:15px">Cost vs market</h3><div style="margin-top:12px">${svgBars([{label:'Cost basis',value:t.cost},{label:'Market value',value:t.val}])}</div></div>`;
  if(S.dashCfg.movement)h+=`<div class="card" style="margin-bottom:16px"><h3 style="font-size:15px">Market movement</h3><div style="margin-top:12px">${svgSpark()}</div></div>`;
- h+=`<div class="card"><h3 style="font-size:15px">Configure dashboard</h3><div class="row" style="margin-top:10px;gap:18px">${[['catValue','Value by category'],['costMarket','Cost vs market'],['movement','Market movement']].map(([k,l])=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink);margin:0"><input type="checkbox" style="width:auto" ${S.dashCfg[k]?'checked':''} onchange="S.dashCfg['${k}']=this.checked;save();dOverview()"> ${l}</label>`).join('')}</div><div class="lab" style="margin-top:10px">Charts recalc from your inventory. Live market prices update these in the background via API once connected.</div></div>`;
+ h+=`<div class="card"><h3 style="font-size:15px">Configure dashboard</h3><div class="row" style="margin-top:10px;gap:18px">${[['catValue','Value by category'],['costMarket','Cost vs market'],['movement','Market movement']].map(([k,l])=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink);margin:0"><input type="checkbox" style="width:auto" ${S.dashCfg[k]?'checked':''} onchange="toggleDash('${k}',this.checked)"> ${l}</label>`).join('')}</div><div class="lab" style="margin-top:10px">Charts recalc from your inventory. Live market prices update these in the background via API once connected.</div></div>`;
  $('dtc').innerHTML=h;}
-function dInventory(){const t=invTotals();
- let h=`<div class="card"><h3 style="font-size:15px">Add inventory</h3><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(128px,1fr));margin-top:10px">
+function ownerOpts(sel){let opts=`<option value="">Universal / unassigned</option>`;const emails=MEMBERS.map(m=>m.email);if(sel&&!emails.includes(sel))opts+=`<option value="${esc(sel)}" selected>${esc(sel)}</option>`;opts+=MEMBERS.map(m=>`<option value="${esc(m.email)}" ${m.email===sel?'selected':''}>${esc(m.display_name||m.email)}</option>`).join('');return opts;}
+function dInventory(){const t=invTotals();const admin=ROLE==='admin';
+ let h=`<div class="card"><div class="row" style="justify-content:space-between"><h3 style="font-size:15px">Add inventory</h3><div class="row" style="gap:6px"><span class="lab" style="align-self:center">Show</span><select style="max-width:150px" onchange="invFilter=this.value;localStorage.setItem('e10_invfilter',invFilter);dInventory()"><option value="mine" ${invFilter==='mine'?'selected':''}>Mine</option><option value="all" ${invFilter==='all'?'selected':''}>Everyone (universal)</option></select></div></div>
+   <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(128px,1fr));margin-top:10px">
    <div><label>Name</label><input id="ivN" placeholder="e.g. Ascended Heroes Box"></div>
    <div><label>Category</label><select id="ivC">${INVCATS.map(c=>`<option>${c}</option>`).join('')}</select></div>
    <div><label>Set / product</label><select id="ivS"><option value="">—</option>${L('sets').map(s=>`<option>${esc(s)}</option>`).join('')}</select></div>
@@ -395,17 +399,20 @@ function dInventory(){const t=invTotals();
    <div><label>Unit cost $</label><input id="ivCo" type="number" placeholder="0"></div>
    <div><label>Market $</label><input id="ivV" type="number" placeholder="0"></div>
    <div><label>Condition/grade</label><input id="ivG" placeholder="PSA 10 / NM / Sealed"></div>
-   <div><label>Image URL</label><input id="ivImg" placeholder="https://…"></div></div>
-   <div class="row" style="margin-top:12px"><button class="btn v" onclick="addInv()">+ Add item</button><button class="btn sm" onclick="$('ivCSV').click()">Import CSV</button><input id="ivCSV" type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="importInv(this)"></div></div>`;
- h+=`<div class="card" style="margin-top:16px"><div class="row" style="justify-content:space-between"><h3 style="font-size:15px">Inventory (${t.cnt})</h3><span class="lab">value ${money(t.val)} · cost ${money(t.cost)}</span></div>
-  <div style="overflow:auto;margin-top:10px"><table><tr><th>Name</th><th>Cat</th><th>Set</th><th>Qty</th><th>Cost</th><th>Value</th><th>Gain</th><th></th></tr>
-  ${S.inventory.map((i,idx)=>{const q=+i.qty||1,g=((+i.value||0)-(+i.cost||0))*q;return `<tr><td>${esc(i.name)}</td><td><span class="pill" style="margin:0">${esc(i.cat)}</span></td><td>${esc(i.set||'')}</td><td class="mono">${q}</td><td class="mono">${money((+i.cost||0)*q)}</td><td class="mono">${money((+i.value||0)*q)}</td><td class="mono" style="color:${g>=0?'#0a8a4a':'var(--red)'}">${g>=0?'+':''}${money(g)}</td><td><button class="btn x" onclick="delInv(${idx})">✕</button></td></tr>`;}).join('')||'<tr><td colspan="8" style="color:var(--mut)">No inventory yet. Add items or import a CSV.</td></tr>'}</table></div></div>`;
+   <div><label>Image URL</label><input id="ivImg" placeholder="https://…"></div>
+   <div><label>Owner</label><select id="ivOwner">${ownerOpts(ME)}</select></div></div>
+   <div class="row" style="margin-top:12px"><button class="btn v" onclick="addInv()">+ Add item</button><button class="btn sm" onclick="$('ivCSV').click()">Import CSV</button><input id="ivCSV" type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="importInv(this)"></div>
+   <div class="lab" style="margin-top:8px">One physical pool. “Mine” shows items assigned to you; switch to Everyone for the full universal inventory.${admin?' As admin you can reassign any item.':''}</div></div>`;
+ h+=`<div class="card" style="margin-top:16px"><div class="row" style="justify-content:space-between"><h3 style="font-size:15px">Inventory · ${invFilter==='mine'?'Mine':'Everyone'} (${t.cnt})</h3><span class="lab">value ${money(t.val)} · cost ${money(t.cost)}</span></div>
+  <div style="overflow:auto;margin-top:10px"><table><tr><th>Name</th><th>Cat</th><th>Set</th><th>Qty</th><th>Cost</th><th>Value</th><th>Gain</th><th>Owner</th><th></th></tr>
+  ${invView().map(i=>{const q=+i.qty||1,g=((+i.value||0)-(+i.cost||0))*q;const own=admin?`<select style="max-width:120px;font-size:12px" onchange="reassignInv('${i.id}',this.value)">${ownerOpts(i.owner)}</select>`:esc(ownerName(i.owner));return `<tr><td>${esc(i.name)}</td><td><span class="pill" style="margin:0">${esc(i.cat)}</span></td><td>${esc(i.set||'')}</td><td class="mono">${q}</td><td class="mono">${money((+i.cost||0)*q)}</td><td class="mono">${money((+i.value||0)*q)}</td><td class="mono" style="color:${g>=0?'#0a8a4a':'var(--red)'}">${g>=0?'+':''}${money(g)}</td><td>${own}</td><td><button class="btn x" onclick="delInv('${i.id}')">✕</button></td></tr>`;}).join('')||`<tr><td colspan="9" style="color:var(--mut)">${invFilter==='mine'?'No items assigned to you yet. Add one, or switch to Everyone.':'No inventory yet. Add items or import a CSV.'}</td></tr>`}</table></div></div>`;
  $('dtc').innerHTML=h;}
-function addInv(){const n=$('ivN').value.trim();if(!n)return;S.inventory.push({id:'i'+Date.now(),name:n,cat:$('ivC').value,set:$('ivS').value,qty:+$('ivQ').value||1,cost:+$('ivCo').value||0,value:+$('ivV').value||0,cond:$('ivG').value,img:$('ivImg').value});save();dInventory();toast('Added');}
-function delInv(i){S.inventory.splice(i,1);save();dInventory();}
+function addInv(){const n=$('ivN').value.trim();if(!n)return;const owner=($('ivOwner')&&$('ivOwner').value!=='')?$('ivOwner').value:(ROLE==='admin'&&$('ivOwner')?null:ME);S.inventory.push({id:'i'+Date.now(),name:n,cat:$('ivC').value,set:$('ivS').value,qty:+$('ivQ').value||1,cost:+$('ivCo').value||0,value:+$('ivV').value||0,cond:$('ivG').value,img:$('ivImg').value,owner});save();dInventory();toast('Added');}
+function delInv(id){S.inventory=S.inventory.filter(x=>x.id!==id);save();dInventory();}
+function reassignInv(id,val){const it=S.inventory.find(x=>x.id===id);if(!it)return;it.owner=val||null;save();dInventory();toast('Reassigned to '+ownerName(it.owner));}
 function importInv(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{const p=parseCSV(e.target.result);const idx=rx=>p.columns.findIndex(c=>new RegExp(rx,'i').test(c));
  const ni=idx('name|title|card|product'),ci=idx('categor|type'),si=idx('set'),qi=idx('qty|quantity'),coi=idx('cost|paid'),vi=idx('value|market|price'),gi=idx('cond|grade');let n=0;
- p.rows.forEach(rw=>{const nm=ni>=0?rw[ni]:rw[0];if(!nm)return;S.inventory.push({id:'i'+Date.now()+n,name:nm,cat:(ci>=0&&rw[ci])?rw[ci]:'Other',set:si>=0?rw[si]:'',qty:qi>=0?(+rw[qi]||1):1,cost:coi>=0?(parseFloat((rw[coi]||'').replace(/[^0-9.]/g,''))||0):0,value:vi>=0?(parseFloat((rw[vi]||'').replace(/[^0-9.]/g,''))||0):0,cond:gi>=0?rw[gi]:''});n++;});save();dInventory();toast(n+' items imported');};r.readAsText(f);inp.value='';}
+ p.rows.forEach(rw=>{const nm=ni>=0?rw[ni]:rw[0];if(!nm)return;S.inventory.push({id:'i'+Date.now()+n,name:nm,cat:(ci>=0&&rw[ci])?rw[ci]:'Other',set:si>=0?rw[si]:'',qty:qi>=0?(+rw[qi]||1):1,cost:coi>=0?(parseFloat((rw[coi]||'').replace(/[^0-9.]/g,''))||0):0,value:vi>=0?(parseFloat((rw[vi]||'').replace(/[^0-9.]/g,''))||0):0,cond:gi>=0?rw[gi]:'',owner:ME});n++;});save();dInventory();toast(n+' items imported to your inventory');};r.readAsText(f);inp.value='';}
 function dChecklists(){const lm=[['characters','Chase characters'],['sets','Sets / products'],['formats','Show formats'],['diff','Trust / hooks']];
  let h=`<div class="card"><h3 style="font-size:15px">Checklists (CSV)</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">Upload a product/set checklist. Populate a pick-list from any column, or load chases into the Break Calculator.</div>
    <div class="drop" onclick="$('clFile').click()">Click to upload a .csv checklist</div><input id="clFile" type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="uploadChecklist(this)">
@@ -414,7 +421,7 @@ function dChecklists(){const lm=[['characters','Chase characters'],['sets','Sets
    <div class="drop" onclick="$('atFile').click()">Click to upload a file</div><input id="atFile" type="file" style="display:none" onchange="uploadAttach(this)">
    <div style="margin-top:12px">${S.attachments.map((a,i)=>`<div class="filerow"><span class="nm">📎 ${esc(a.name)} <span class="lab">${(a.size/1024).toFixed(0)} KB${a.data?'':' · reference'}</span></span>${a.data?`<a class="btn sm" href="${a.data}" download="${esc(a.name)}">Download</a>`:''}<button class="btn x" onclick="S.attachments.splice(${i},1);save();dChecklists()">✕</button></div>`).join('')||'<div style="color:var(--mut);font-size:13px">No attachments.</div>'}</div></div>`;
  $('dtc').innerHTML=h;}
-function dReports(){const t=invTotals();const cat=Object.entries(t.byCat).sort((a,b)=>b[1]-a[1]);const top=S.inventory.slice().sort((a,b)=>((+b.value||0)*(+b.qty||1))-((+a.value||0)*(+a.qty||1))).slice(0,10);
+function dReports(){const t=invTotals();const cat=Object.entries(t.byCat).sort((a,b)=>b[1]-a[1]);const top=invView().slice().sort((a,b)=>((+b.value||0)*(+b.qty||1))-((+a.value||0)*(+a.qty||1))).slice(0,10);
  let h=`<div class="card"><div class="row" style="justify-content:space-between"><h3 style="font-size:15px">Inventory report</h3><div class="row"><button class="btn sm" onclick="exportReport()">Download CSV</button><button class="btn sm" onclick="window.print()">Print</button></div></div>
   <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(138px,1fr));margin-top:12px">
    <div class="metric"><div class="n">${money(t.val)}</div><div class="l">Total value</div></div>
@@ -425,7 +432,7 @@ function dReports(){const t=invTotals();const cat=Object.entries(t.byCat).sort((
   <h3 style="font-size:13px;margin:18px 0 8px">Top items by value</h3><table><tr><th>Name</th><th>Cat</th><th>Qty</th><th>Value</th></tr>${top.map(i=>`<tr><td>${esc(i.name)}</td><td>${esc(i.cat)}</td><td class="mono">${+i.qty||1}</td><td class="mono">${money((+i.value||0)*(+i.qty||1))}</td></tr>`).join('')||'<tr><td colspan=4 style="color:var(--mut)">No data</td></tr>'}</table></div>`;
  $('dtc').innerHTML=h;}
 function csvDL(name,rows){const csv=rows.map(r=>r.map(c=>`"${(''+(c==null?'':c)).replace(/"/g,'""')}"`).join(',')).join('\n');const b=new Blob([csv],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name;a.click();}
-function exportReport(){const rows=[['Name','Category','Set','Qty','Unit cost','Unit value','Line value','Line gain','Condition']];S.inventory.forEach(i=>{const q=+i.qty||1;rows.push([i.name,i.cat,i.set,q,i.cost,i.value,(+i.value||0)*q,((+i.value||0)-(+i.cost||0))*q,i.cond]);});csvDL('element10_inventory_report.csv',rows);toast('Report downloaded');}
+function exportReport(){const rows=[['Name','Category','Set','Qty','Unit cost','Unit value','Line value','Line gain','Condition']];invView().forEach(i=>{const q=+i.qty||1;rows.push([i.name,i.cat,i.set,q,i.cost,i.value,(+i.value||0)*q,((+i.value||0)-(+i.cost||0))*q,i.cond]);});csvDL('element10_inventory_report.csv',rows);toast('Report downloaded');}
 function dExport(){let h=`<div class="card"><h3 style="font-size:15px">Export to Whatnot</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">Maps your inventory to Whatnot's bulk-import columns. Paste into their official region template for the real upload.</div>
   <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
    <div><label>Include categories</label><select id="exCat" onchange="updateExCount()"><option value="all">All</option><option value="Raw card">Raw cards</option><option value="Slab">Slabs</option><option value="ETB / Sealed">Sealed</option><option value="Box">Boxes</option></select></div>
@@ -436,7 +443,7 @@ function dExport(){let h=`<div class="card"><h3 style="font-size:15px">Export to
   <div class="lab" style="margin-top:10px">Columns: Category · Sub Category · Title · Description · Quantity · Type · Price · Shipping Profile · Offerable · Condition · Image URL 1–8.</div></div>`;
  $('dtc').innerHTML=h;updateExCount();}
 function exRows(){const cat=$('exCat').value,type=$('exType').value,ps=$('exPrice').value,sub=$('exSub').value;
- const items=S.inventory.filter(i=>cat==='all'||i.cat===cat);const price=i=>ps==='1'?1:ps==='value'?(+i.value||0):Math.round((+i.cost||0)*1.3);
+ const items=invView().filter(i=>cat==='all'||i.cat===cat);const price=i=>ps==='1'?1:ps==='value'?(+i.value||0):Math.round((+i.cost||0)*1.3);
  const head=['Category','Sub Category','Title','Description','Quantity','Type','Price','Shipping Profile','Offerable','Condition','Image URL 1','Image URL 2','Image URL 3','Image URL 4','Image URL 5','Image URL 6','Image URL 7','Image URL 8'];
  const rows=[head];items.forEach(i=>{rows.push(['Trading Card Games',sub,i.name,(i.cond?i.cond+' · ':'')+'ships fast, packaged to protect',(+i.qty||1),type,price(i),'',type==='Buy It Now'?'TRUE':'',i.cond||'',i.img||'','','','','','','','']);});return{rows,count:items.length};}
 function updateExCount(){const el=$('exCount');if(el)el.textContent=exRows().count+' items ready';}
@@ -447,18 +454,73 @@ function dLists(){const lm=[['characters','Chase characters'],['sets','Sets / pr
  h+=`<div><div class="lab">Streamers</div><div class="chipwrap">${S.streamers.map(v=>`<span class="pill">${esc(v)} <a onclick="rmStreamer('${esc(v)}')" style="color:var(--red)">✕</a></span>`).join('')}</div><div class="row"><input id="add_str" placeholder="Add streamer…" style="max-width:260px" onkeydown="if(event.key==='Enter')addStreamer()"><button class="btn sm" onclick="addStreamer()">+</button></div></div></div>`;
  $('dtc').innerHTML=h;}
 
-/* ===== Element 10 cloud: Supabase auth + realtime sync ===== */
+/* ===== Element 10 cloud: multi-tenant (shared + universal + personal) + auth + realtime ===== */
 const SB_URL='https://ddhkkumiyidorzmajwde.supabase.co';
 const SB_KEY='sb_publishable_wRoaFNiqpZJaEJkQvLpnUw_7bpcXllv';
-let sb=null,ME=null,REV=0,_st=null,_applyingRemote=false;
+let sb=null,ME=null,MEID=null,ROLE='member',_st=null,_applyingRemote=false;
+let SHARED={},SCOPED={},SCOPED_ID='',REVS={},MEMBERS=[];
+let SCOPE=localStorage.getItem('e10_scope')||'mine';         // 'mine' | 'universal' | '<uid>'
+let invFilter=localStorage.getItem('e10_invfilter')||'mine'; // 'mine' | 'all'
+const SCOPED_KEYS=['shows','breaks','dashCfg','sales'];
+const SHARED_KEYS=['comments','todos','streamers','lists','attachments','checklists','inventory'];
+
+function blankShared(){return{comments:[],todos:[],streamers:['Trent'],lists:JSON.parse(JSON.stringify(DEF_LISTS)),attachments:[],checklists:[],inventory:[]};}
+function blankScoped(){return{shows:{},breaks:[],dashCfg:{catValue:true,costMarket:true,movement:true},sales:null};}
+function normShared(o){o=o||{};if(!o.comments)o.comments=[];if(!o.todos)o.todos=[];o.todos.forEach(t=>{if(t.desc==null)t.desc='';if(!t.comments)t.comments=[];});if(!o.streamers)o.streamers=['Trent'];if(!o.lists)o.lists=JSON.parse(JSON.stringify(DEF_LISTS));['characters','sets','formats','diff'].forEach(k=>{if(!o.lists[k])o.lists[k]=(DEF_LISTS[k]||[]).slice();});['attachments','checklists','inventory'].forEach(k=>{if(!o[k])o[k]=[];});o.inventory.forEach(it=>{if(!it.id)it.id='i'+Math.random().toString(36).slice(2);if(!('owner'in it))it.owner=null;});return o;}
+function normScoped(o){o=o||{};if(!o.shows)o.shows={};if(!o.breaks)o.breaks=[];if(!o.dashCfg)o.dashCfg={catValue:true,costMarket:true,movement:true};if(!('sales'in o))o.sales=null;return o;}
+function splitLegacy(d){const sh=blankShared(),sc=blankScoped();if(d&&typeof d==='object'){SHARED_KEYS.forEach(k=>{if(d[k]!=null)sh[k]=d[k];});SCOPED_KEYS.forEach(k=>{if(d[k]!=null)sc[k]=d[k];});}return{sh:normShared(sh),sc:normScoped(sc)};}
+
+function canEditScoped(){return SCOPE==='mine'||ROLE==='admin';}
+function scopeLabel(){if(SCOPE==='mine')return 'My space';if(SCOPE==='universal')return 'Universal';const m=MEMBERS.find(x=>x.user_id===SCOPE);return (m?(m.display_name||m.email):'Member')+"’s space";}
+function ownerName(o){if(!o)return '—';const m=MEMBERS.find(x=>x.email===o);return m?(m.display_name||m.email):o;}
+function invView(){return invFilter==='mine'?S.inventory.filter(i=>i.owner===ME):S.inventory;}
+function roGuard(){toast('Read-only — switch to “My space” to edit');return false;}
+
+function rebuildS(){normShared(SHARED);normScoped(SCOPED);
+ S={comments:SHARED.comments,todos:SHARED.todos,streamers:SHARED.streamers,lists:SHARED.lists,attachments:SHARED.attachments,checklists:SHARED.checklists,inventory:SHARED.inventory,
+    shows:SCOPED.shows,breaks:SCOPED.breaks,dashCfg:SCOPED.dashCfg,sales:SCOPED.sales,user:ME};}
+function pushFromS(){SHARED.comments=S.comments;SHARED.todos=S.todos;SHARED.streamers=S.streamers;SHARED.lists=S.lists;SHARED.attachments=S.attachments;SHARED.checklists=S.checklists;SHARED.inventory=S.inventory;
+ SCOPED.shows=S.shows;SCOPED.breaks=S.breaks;SCOPED.dashCfg=S.dashCfg;SCOPED.sales=S.sales;}
+function currentRender(){const on=document.querySelector('.tab.on');if(on){({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData}[on.dataset.s])();}else renderHome();}
+
+async function writeRow(id,owner,data){const rev=(REVS[id]||0)+1;REVS[id]=rev;const row={id,data,rev,owner,updated_by:ME,updated_at:new Date().toISOString()};const{error}=await sb.from('e10_workspace').upsert(row);if(error)console.warn('save',id,error.message);}
 const _origSave=save;
 save=function(){_origSave();cloudSave();};
-function cloudSave(){if(!sb||_applyingRemote)return;clearTimeout(_st);_st=setTimeout(async()=>{REV++;const{error}=await sb.from('e10_workspace').update({data:S,rev:REV,updated_by:ME,updated_at:new Date().toISOString()}).eq('id','main');if(error)console.warn('save',error.message);},600);}
-function currentRender(){const on=document.querySelector('.tab.on');if(on){({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData}[on.dataset.s])();}else renderHome();}
-function normalizeState(){if(!S.lists)S.lists=JSON.parse(JSON.stringify(DEF_LISTS));['attachments','checklists','breaks','inventory'].forEach(k=>{if(!S[k])S[k]=[];});if(!S.todos)S.todos=[];if(!S.comments)S.comments=[];if(!S.shows)S.shows={};if(!S.streamers)S.streamers=['Trent'];if(!('user'in S))S.user=null;if(!S.dashCfg)S.dashCfg={catValue:true,costMarket:true,movement:true};S.todos.forEach(t=>{if(t.desc==null)t.desc='';if(!t.comments)t.comments=[];});}
-async function loadWorkspace(){try{const{data,error}=await sb.from('e10_workspace').select('data,rev').eq('id','main').single();if(!error&&data){REV=data.rev||0;if(data.data&&Object.keys(data.data).length){S=data.data;normalizeState();}else{normalizeState();_origSave();cloudSave();}}}catch(e){console.warn(e);}
- sb.channel('e10ws').on('postgres_changes',{event:'UPDATE',schema:'public',table:'e10_workspace',filter:'id=eq.main'},p=>{const n=p.new;if((n.rev||0)>REV){REV=n.rev;_applyingRemote=true;S=n.data;normalizeState();_origSave();currentRender();_applyingRemote=false;if(n.updated_by&&n.updated_by!==ME)toast('Updated by '+n.updated_by);}}).subscribe();}
-renderWho=function(){if($('who'))$('who').innerHTML=`<button class="btn sm" onclick="signOut()">\u{1F464} ${esc(ME||S.user||'')} · sign out</button>`;};
+function cloudSave(){if(!sb||_applyingRemote)return;pushFromS();clearTimeout(_st);_st=setTimeout(async()=>{
+ await writeRow('shared',null,{comments:S.comments,todos:S.todos,streamers:S.streamers,lists:S.lists,attachments:S.attachments,checklists:S.checklists,inventory:S.inventory});
+ if(canEditScoped()){const owner=(SCOPE==='mine')?MEID:(SCOPE==='universal'?null:SCOPE);await writeRow(SCOPED_ID,owner,{shows:S.shows,breaks:S.breaks,dashCfg:S.dashCfg,sales:S.sales});}
+},600);}
+
+function scopedIdFor(scope){return scope==='mine'?('user:'+MEID):scope==='universal'?'universal':('user:'+scope);}
+async function fetchRow(id){const{data,error}=await sb.from('e10_workspace').select('data,rev').eq('id',id).maybeSingle();if(error){console.warn('load',id,error.message);return null;}return data;}
+async function loadScopedFor(scope){const id=scopedIdFor(scope);SCOPED_ID=id;let row=await fetchRow(id);
+ if(!row){const uni=await fetchRow('universal');const base=uni&&uni.data?splitLegacy(uni.data).sc:blankScoped();
+  if(scope!=='universal'){const owner=(scope==='mine')?MEID:scope;await sb.from('e10_workspace').upsert({id,data:base,rev:1,owner,updated_by:ME});REVS[id]=1;}
+  SCOPED=base;}
+ else{REVS[id]=row.rev||0;SCOPED=row.data&&Object.keys(row.data).length?splitLegacy(row.data).sc:blankScoped();}
+ normScoped(SCOPED);}
+async function setScope(scope){SCOPE=scope;localStorage.setItem('e10_scope',scope);await loadScopedFor(scope);rebuildS();renderScopebar();currentRender();toast(canEditScoped()?('Editing '+scopeLabel()):('Viewing '+scopeLabel()+' — read-only'));}
+
+function renderScopebar(){let el=$('scopebar');if(!el){el=document.createElement('div');el.id='scopebar';el.style.cssText='display:flex;align-items:center;gap:6px;margin-left:auto';const who=$('who');who.style.marginLeft='10px';who.parentNode.insertBefore(el,who);}
+ let opts=`<option value="mine">My space</option><option value="universal">Universal</option>`;
+ if(ROLE==='admin')opts+=MEMBERS.filter(m=>m.user_id!==MEID).map(m=>`<option value="${m.user_id}">${esc(m.display_name||m.email)}’s space</option>`).join('');
+ el.innerHTML=`<span class="lab" style="font-size:11px">Viewing</span><select id="scopeSel" style="padding:6px 9px;font-size:12.5px;max-width:170px" onchange="setScope(this.value)">${opts}</select>${canEditScoped()?'':'<span class="pill" style="margin:0">read-only</span>'}`;
+ const sel=$('scopeSel');if(sel)sel.value=SCOPE;}
+
+function subscribeRealtime(){sb.channel('e10ws').on('postgres_changes',{event:'*',schema:'public',table:'e10_workspace'},p=>{const n=p.new;if(!n||!n.id)return;
+ if(n.id==='shared'&&(n.rev||0)>(REVS['shared']||0)){REVS['shared']=n.rev;_applyingRemote=true;SHARED=n.data&&Object.keys(n.data).length?splitLegacy(n.data).sh:blankShared();normShared(SHARED);rebuildS();currentRender();_applyingRemote=false;if(n.updated_by&&n.updated_by!==ME)toast('Team update by '+n.updated_by);}
+ else if(n.id===SCOPED_ID&&(n.rev||0)>(REVS[SCOPED_ID]||0)){REVS[SCOPED_ID]=n.rev;_applyingRemote=true;SCOPED=n.data&&Object.keys(n.data).length?splitLegacy(n.data).sc:blankScoped();normScoped(SCOPED);rebuildS();currentRender();_applyingRemote=false;if(n.updated_by&&n.updated_by!==ME)toast('Update by '+n.updated_by);}
+}).subscribe();}
+
+async function loadAll(){
+ try{await sb.from('e10_members').upsert({user_id:MEID,email:ME},{onConflict:'user_id',ignoreDuplicates:true});}catch(e){}
+ try{const me=await sb.from('e10_members').select('role').eq('user_id',MEID).maybeSingle();ROLE=(me.data&&me.data.role)||'member';}catch(e){ROLE='member';}
+ try{const mem=await sb.from('e10_members').select('user_id,email,display_name,role');MEMBERS=mem.data||[];}catch(e){MEMBERS=[];}
+ const sh=await fetchRow('shared');REVS['shared']=sh?(sh.rev||0):0;SHARED=sh&&sh.data&&Object.keys(sh.data).length?splitLegacy(sh.data).sh:blankShared();normShared(SHARED);
+ if(!sh||!sh.data||!Object.keys(sh.data).length)await writeRow('shared',null,SHARED);
+ if(SCOPE!=='mine'&&SCOPE!=='universal'&&ROLE!=='admin')SCOPE='mine';
+ await loadScopedFor(SCOPE);rebuildS();subscribeRealtime();}
+renderWho=function(){if($('who'))$('who').innerHTML=`<button class="btn sm" onclick="signOut()">\u{1F464} ${esc(ME||'')}${ROLE==='admin'?' · admin':''} · sign out</button>`;};
 function signOut(){sb.auth.signOut().then(()=>location.reload());}
 function authScreen(msg){document.body.innerHTML=`<div style="max-width:380px;margin:12vh auto;padding:24px;font-family:'Space Grotesk',system-ui,sans-serif">
  <div style="font-family:'Anton',sans-serif;font-size:34px;text-transform:uppercase;letter-spacing:.02em">ELEMENT<span style="background:#C6FF3A;padding:0 8px;border-radius:6px">10</span></div>
@@ -474,7 +536,7 @@ async function boot(){if(!window.supabase){authScreen('Auth library failed to lo
  sb=window.supabase.createClient(SB_URL,SB_KEY);
  const{data:{session}}=await sb.auth.getSession();
  if(!session){authScreen('');return;}
- ME=session.user.email;S.user=ME;
- await loadWorkspace();renderWho();currentRender();}
+ ME=session.user.email;MEID=session.user.id;S.user=ME;
+ await loadAll();renderWho();renderScopebar();currentRender();}
 boot();
 </script></body></html>
