@@ -351,7 +351,25 @@ function rmStreamer(v){S.streamers=S.streamers.filter(x=>x!==v);save();renderDat
 function parseCSV(text){const lines=text.replace(/\r/g,'').split('\n').filter(l=>l.trim().length);
  const pl=l=>{const out=[];let cur='',q=false;for(let i=0;i<l.length;i++){const c=l[i];if(q){if(c=='"'){if(l[i+1]=='"'){cur+='"';i++;}else q=false;}else cur+=c;}else{if(c=='"')q=true;else if(c==','||c=='\t'){out.push(cur);cur='';}else cur+=c;}}out.push(cur);return out.map(x=>x.trim());};
  const rows=lines.map(pl);const columns=rows.shift()||[];return{columns,rows};}
-function uploadChecklist(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{const p=parseCSV(e.target.result);S.checklists.push({name:f.name,columns:p.columns,rows:p.rows});save();renderData();toast('Checklist added');};r.readAsText(f);inp.value='';}
+function downloadChecklistTemplate(){csvDL('element10_checklist_template.csv',[['Card Name','Card Number','Set','Rarity','Market Value'],['Charizard ex','006/197','Ascended Heroes','Special Illustration Rare','260'],['Pikachu','025/165','Pokémon 151','Common','2']]);toast('Template downloaded — keep the header row, then upload');}
+function validateChecklist(p){const idx=rx=>p.columns.findIndex(c=>new RegExp(rx,'i').test(c));
+ const ni=idx('card ?name|^name$|name|title|card'),vi=idx('value|market|price');
+ const missing=[];if(ni<0)missing.push('Card Name');
+ const errors=[],valid=[];
+ p.rows.forEach((rw,i)=>{if(rw.every(c=>!(''+(c==null?'':c)).trim()))return;const rn=i+2,er=[];
+   const name=(ni>=0?(rw[ni]||''):'').trim();if(!name)er.push(['Card Name','Card Name is required']);
+   if(vi>=0&&(rw[vi]||'').trim()){const v=(rw[vi]||'').trim();const clean=v.replace(/[^0-9.]/g,'');if(clean===''||isNaN(parseFloat(clean)))er.push(['Market Value',`"${v}" is not a number`]);}
+   if(er.length)er.forEach(([c,m])=>errors.push({row:rn,col:c,msg:m}));else valid.push(rw);
+ });
+ return {missing,errors,valid,columns:p.columns};
+}
+function uploadChecklist(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{const p=parseCSV(e.target.result);const res=validateChecklist(p);
+ if(res.missing.length){importReport('Checklist upload',`Missing required column(s): ${res.missing.join(', ')}. Download the checklist template and keep its header row.`,null,null);return;}
+ const commit=rows=>{S.checklists.push({name:f.name,columns:res.columns,rows});save();renderData();toast('Checklist added ('+rows.length+' rows)');};
+ if(res.errors.length){importReport('Checklist upload',null,res.errors,res.valid.length?function(){commit(res.valid);}:null);return;}
+ if(!res.valid.length){importReport('Checklist upload','No data rows found in the file.',null,null);return;}
+ commit(res.valid);
+};r.readAsText(f);inp.value='';}
 function populateFromChecklist(i){const cl=S.checklists[i];const col=$('clcol_'+i).value,tgt=$('cltgt_'+i).value;const ci=cl.columns.indexOf(col);
  const vals=[...new Set(cl.rows.map(r=>r[ci]).filter(v=>v&&v.trim()))];if(!vals.length){toast('No values in that column');return;}
  S.lists[tgt]=[...new Set([...L(tgt),...vals])];save();renderData();toast(vals.length+' values → '+tgt);}
@@ -416,11 +434,43 @@ function downloadInvTemplate(){const rows=[
  ['Ascended Heroes Booster Box','Box','Ascended Heroes','1','89','140','Sealed','',''],
  ['Charizard ex SIR','Slab','Ascended Heroes','1','120','260','PSA 10','','']];
  csvDL('element10_inventory_template.csv',rows);toast('Template downloaded — keep the header row, then Import CSV');}
-function importInv(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{const p=parseCSV(e.target.result);const idx=rx=>p.columns.findIndex(c=>new RegExp(rx,'i').test(c));
- const ni=idx('name|title|card|product'),ci=idx('categor|type'),si=idx('^set'),qi=idx('qty|quantity'),coi=idx('cost|paid'),vi=idx('value|market|price'),gi=idx('cond|grade'),imi=idx('image|img|url'),oi=idx('owner|assigned|streamer');let n=0;
- p.rows.forEach(rw=>{const nm=ni>=0?rw[ni]:rw[0];if(!nm)return;const own=(oi>=0&&rw[oi]&&rw[oi].trim())?rw[oi].trim():ME;S.inventory.push({id:'i'+Date.now()+n,name:nm,cat:(ci>=0&&rw[ci])?rw[ci]:'Other',set:si>=0?rw[si]:'',qty:qi>=0?(+rw[qi]||1):1,cost:coi>=0?(parseFloat((rw[coi]||'').replace(/[^0-9.]/g,''))||0):0,value:vi>=0?(parseFloat((rw[vi]||'').replace(/[^0-9.]/g,''))||0):0,cond:gi>=0?rw[gi]:'',img:imi>=0?(rw[imi]||''):'',owner:own});n++;});save();dInventory();toast(n+' items imported');};r.readAsText(f);inp.value='';}
+/* ---- import validation (shared) ---- */
+let _impProceed=null;
+function importReport(title,msg,errors,onProceed){
+ _impProceed=onProceed?function(){onProceed();closeM();}:null;
+ let h=`<h3 style="font-size:18px">${esc(title)} — check your file</h3>`;
+ if(msg)h+=`<div style="color:var(--red);font-size:13px;margin:8px 0">${esc(msg)}</div>`;
+ if(errors&&errors.length){h+=`<div style="color:var(--mut);font-size:12.5px;margin:6px 0">${errors.length} issue${errors.length>1?'s':''} found. Fix these rows in your file and re-upload${onProceed?', or import the rows that passed':''}.</div>
+   <div style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:10px;margin-top:8px"><table><tr><th>Row</th><th>Column</th><th>Issue</th></tr>${errors.slice(0,300).map(x=>`<tr><td class="mono">${x.row}</td><td>${esc(x.col)}</td><td>${esc(x.msg)}</td></tr>`).join('')}</table></div>`;}
+ h+=`<div class="row" style="margin-top:16px">${onProceed?`<button class="btn v" onclick="_impProceed&&_impProceed()">Import valid rows</button>`:''}<button class="btn sm" onclick="closeM()">${onProceed?'Cancel':'OK'}</button></div>`;
+ $('modal').innerHTML=h;$('ov').style.display='flex';
+}
+function validateInv(p){const idx=rx=>p.columns.findIndex(c=>new RegExp(rx,'i').test(c));
+ const ni=idx('name|title|card|product'),ci=idx('categor|type'),si=idx('^set'),qi=idx('qty|quantity'),coi=idx('cost|paid'),vi=idx('value|market|price'),gi=idx('cond|grade'),imi=idx('image|img|url'),oi=idx('owner|assigned|streamer');
+ const missing=[];if(ni<0)missing.push('Name');
+ const errors=[],valid=[];
+ p.rows.forEach((rw,i)=>{if(rw.every(c=>!(''+(c==null?'':c)).trim()))return;const rn=i+2,er=[];
+   const name=(ni>=0?(rw[ni]||''):'').trim();if(!name)er.push(['Name','Name is required']);
+   let cat='Other';if(ci>=0&&(rw[ci]||'').trim()){const c=(rw[ci]||'').trim();const m=INVCATS.find(x=>x.toLowerCase()===c.toLowerCase());if(!m)er.push(['Category',`"${c}" must be one of: ${INVCATS.join(', ')}`]);else cat=m;}
+   let qty=1;if(qi>=0&&(rw[qi]||'').trim()){const q=(rw[qi]||'').trim();if(!/^\d+$/.test(q))er.push(['Qty',`"${q}" must be a whole number`]);else qty=+q;}
+   const num=(ix,lab)=>{if(ix<0)return 0;const v=(rw[ix]||'').toString().trim();if(!v)return 0;const clean=v.replace(/[^0-9.\-]/g,'');if(clean===''||isNaN(parseFloat(clean))){er.push([lab,`"${v}" is not a number`]);return 0;}return parseFloat(clean);};
+   const cost=num(coi,'Unit Cost'),value=num(vi,'Market Value');
+   const img=imi>=0?(rw[imi]||'').trim():'';if(img&&!/^https?:\/\//i.test(img))er.push(['Image URL','must start with http:// or https://']);
+   const owner=(oi>=0&&(rw[oi]||'').trim())?(rw[oi]||'').trim():ME;
+   if(er.length)er.forEach(([c,m])=>errors.push({row:rn,col:c,msg:m}));
+   else valid.push({id:'i'+Date.now()+i,name,cat,set:si>=0?(rw[si]||'').trim():'',qty,cost,value,cond:gi>=0?(rw[gi]||'').trim():'',img,owner});
+ });
+ return {missing,errors,valid};
+}
+function importInv(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{const p=parseCSV(e.target.result);const res=validateInv(p);
+ if(res.missing.length){importReport('Inventory import',`Missing required column(s): ${res.missing.join(', ')}. Download the CSV template and keep its header row.`,null,null);return;}
+ if(res.errors.length){importReport('Inventory import',null,res.errors,res.valid.length?function(){res.valid.forEach(it=>S.inventory.push(it));save();dInventory();toast(res.valid.length+' valid row(s) imported');}:null);return;}
+ if(!res.valid.length){importReport('Inventory import','No data rows found in the file.',null,null);return;}
+ res.valid.forEach(it=>S.inventory.push(it));save();dInventory();toast(res.valid.length+' items imported');
+};r.readAsText(f);inp.value='';}
 function dChecklists(){const lm=[['characters','Chase characters'],['sets','Sets / products'],['formats','Show formats'],['diff','Trust / hooks']];
  let h=`<div class="card"><h3 style="font-size:15px">Checklists (CSV)</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">Upload a product/set checklist. Populate a pick-list from any column, or load chases into the Break Calculator.</div>
+   <div class="row" style="margin-bottom:8px"><button class="btn sm" onclick="downloadChecklistTemplate()">↓ CSV template</button><span class="lab" style="align-self:center">Required column: <b>Card Name</b> · optional: Card Number, Set, Rarity, Market Value</span></div>
    <div class="drop" onclick="$('clFile').click()">Click to upload a .csv checklist</div><input id="clFile" type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="uploadChecklist(this)">
    <div style="margin-top:12px">${S.checklists.map((c,i)=>`<div class="filerow"><span class="nm">📄 ${esc(c.name)} <span class="lab">${c.rows.length} rows</span></span><select id="clcol_${i}" style="max-width:140px">${c.columns.map(col=>`<option>${esc(col)}</option>`).join('')}</select><select id="cltgt_${i}" style="max-width:120px">${lm.map(([k,label])=>`<option value="${k}">→ ${label}</option>`).join('')}</select><button class="btn sm" onclick="populateFromChecklist(${i})">Populate</button><button class="btn x" onclick="S.checklists.splice(${i},1);save();dChecklists()">✕</button></div>`).join('')||'<div style="color:var(--mut);font-size:13px">No checklists.</div>'}</div></div>`;
  h+=`<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Attachments</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">Images, PDFs, docs. Small files stored in-browser; large ones referenced only (move to cloud when hosted).</div>
