@@ -400,7 +400,7 @@ function dInventory(){const t=invTotals();const admin=ROLE==='admin';
    <div><label>Unit cost $</label><input id="ivCo" type="number" placeholder="0"></div>
    <div><label>Market $</label><input id="ivV" type="number" placeholder="0"></div>
    <div><label>Condition/grade</label><input id="ivG" placeholder="PSA 10 / NM / Sealed"></div>
-   <div><label>Image URL</label><input id="ivImg" placeholder="https://…"></div>
+   <div><label>Image</label><div class="row" style="gap:6px"><input id="ivImg" placeholder="URL or upload" style="min-width:0"><button class="btn sm" onclick="invUploadImg()">⬆</button></div><img id="ivImgPv" style="display:none;height:40px;border-radius:5px;margin-top:4px;border:1px solid var(--line)"></div>
    <div><label>Owner</label><select id="ivOwner">${ownerOpts(ME)}</select></div></div>
    <div class="row" style="margin-top:12px"><button class="btn v" onclick="addInv()">+ Add item</button><button class="btn sm" onclick="downloadInvTemplate()">↓ CSV template</button><button class="btn sm" onclick="$('ivCSV').click()">Import CSV</button><input id="ivCSV" type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="importInv(this)"></div>
    <div class="lab" style="margin-top:8px">One physical pool. “Mine” shows items assigned to you; switch to Everyone for the full universal inventory.${admin?' As admin you can reassign any item.':''}</div></div>`;
@@ -504,7 +504,7 @@ function renderRepackEditor(){const p=rpCur();if(!p){REPEDIT=null;return renderR
      <td><select onchange="rpCard(${i},'tier',this.value)">${['S','A','B','C'].map(t=>`<option ${c.tier===t?'selected':''}>${t}</option>`).join('')}</select></td>
      ${rnd?`<td><input type="number" value="${c.weight||1}" oninput="rpCard(${i},'weight',+this.value||1)" style="width:52px"></td>`:''}
      <td><button class="btn x" onclick="rpDelCard(${i})">✕</button></td></tr>
-     <tr><td colspan="${span}" style="padding-top:0"><input value="${esc(c.era||'')}" oninput="rpCard(${i},'era',this.value)" placeholder="Era (Pokémon: Vintage / Modern)" style="max-width:230px;font-size:12px"> <input value="${esc(c.set||'')}" oninput="rpCard(${i},'set',this.value)" placeholder="Set" style="max-width:170px;font-size:12px"> <input value="${esc(c.img||'')}" oninput="rpCard(${i},'img',this.value)" placeholder="Image URL (shows in the reveal)" style="max-width:300px;font-size:12px"></td></tr>`).join('')||`<tr><td colspan="${span}" style="color:var(--mut)">No cards yet — pull from inventory above or add a blank card.</td></tr>`}</table></div>
+     <tr><td colspan="${span}" style="padding-top:0"><input value="${esc(c.era||'')}" oninput="rpCard(${i},'era',this.value)" placeholder="Era (Pokémon: Vintage / Modern)" style="max-width:230px;font-size:12px"> <input value="${esc(c.set||'')}" oninput="rpCard(${i},'set',this.value)" placeholder="Set" style="max-width:170px;font-size:12px"> <input value="${esc(c.img||'')}" oninput="rpCard(${i},'img',this.value)" placeholder="Image URL or ⬆ upload" style="max-width:230px;font-size:12px"> <button class="btn sm" onclick="rpUploadImg(${i})">⬆ Upload</button>${c.img?`<img src="${esc(c.img)}" style="height:34px;border-radius:5px;vertical-align:middle;margin-left:6px;border:1px solid var(--line)">`:''}</td></tr>`).join('')||`<tr><td colspan="${span}" style="color:var(--mut)">No cards yet — pull from inventory above or add a blank card.</td></tr>`}</table></div>
    <button class="btn sm" style="margin-top:10px" onclick="rpAddBlank()">+ Add blank card</button></div>`;
  $('sec-repack').innerHTML=h;}
 function rollRandom(p){const pool=(p.pool||[]).filter(c=>c.name);const n=Math.max(1,p.count||5);const out=[];if(!pool.length)return out;
@@ -513,6 +513,13 @@ function launchOpen(id){const p=(S.repacks||[]).find(x=>x.id===id);if(!p)return;
  if(!cards.length){toast('Add cards first');return;}
  try{localStorage.setItem('e10_open',JSON.stringify({product:{name:p.name,kind:p.kind,price:p.price,chase:p.chase},cards}));}catch(e){toast('Could not stage opener');return;}
  const w=window.open('open.html','_blank');if(!w)toast('Allow pop-ups, then click ▶ again');else toast('Opener launched — share that tab in OBS');}
+
+/* ---------- image upload (Supabase Storage) ---------- */
+function pickImage(cb){const inp=document.createElement('input');inp.type='file';inp.accept='image/*';inp.onchange=()=>{if(inp.files&&inp.files[0])e10Upload(inp.files[0],cb);};inp.click();}
+function resizeImg(file){return new Promise((res,rej)=>{const img=new Image();img.onload=()=>{const max=1200;let w=img.width,h=img.height;if(w>max||h>max){const s=Math.min(max/w,max/h);w=Math.round(w*s);h=Math.round(h*s);}const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);c.toBlob(b=>b?res(b):rej('blob'),'image/jpeg',0.85);};img.onerror=()=>rej('img');img.src=URL.createObjectURL(file);});}
+async function e10Upload(file,cb){if(!sb){toast('Not connected');return;}toast('Uploading image…');try{let blob;try{blob=await resizeImg(file);}catch(e){blob=file;}const path='card/'+Date.now()+'_'+Math.random().toString(36).slice(2)+'.jpg';const{error}=await sb.storage.from('cards').upload(path,blob,{contentType:'image/jpeg',upsert:false});if(error){toast('Upload failed: '+error.message);return;}const{data}=sb.storage.from('cards').getPublicUrl(path);cb(data.publicUrl);toast('Image uploaded');}catch(e){toast('Upload error');}}
+function rpUploadImg(i){pickImage(url=>{const l=rpList();if(l[i]){l[i].img=url;save();renderRepackEditor();}});}
+function invUploadImg(){pickImage(url=>{const el=$('ivImg');if(el)el.value=url;const pv=$('ivImgPv');if(pv){pv.src=url;pv.style.display='inline-block';}toast('Image ready — click Add item');});}
 
 /* ===== Element 10 cloud: multi-tenant (shared + universal + personal) + auth + realtime ===== */
 const SB_URL='https://ddhkkumiyidorzmajwde.supabase.co';
