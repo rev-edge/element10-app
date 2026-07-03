@@ -45,35 +45,35 @@ html,body{height:100%;overflow:hidden;background:#05060a;font-family:'Space Grot
 @keyframes tearTop{to{transform:translateY(-140%) rotate(-8deg);opacity:0}}
 @keyframes tearBot{to{transform:translateY(6%)}}
 /* ---- CARD STAGE ---- */
-#cardStage{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px}
-.cardWrap{position:relative;width:min(58vh,420px);aspect-ratio:5/7}
-.card{position:absolute;inset:0;border-radius:18px;overflow:hidden;background:#111;box-shadow:0 30px 70px rgba(0,0,0,.65);border:1px solid rgba(255,255,255,.12)}
-.card .art{position:absolute;inset:0;background-size:cover;background-position:center;background-color:#1a1d22}
+#cardStage{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;padding:14px}
+.cardWrap{position:relative;width:min(50vh,350px);aspect-ratio:5/7}
+.card{position:absolute;inset:0;border-radius:14px;overflow:hidden;background:#0d0f13;box-shadow:0 30px 70px rgba(0,0,0,.6)}
+.card .art{position:absolute;inset:0;background-size:contain;background-repeat:no-repeat;background-position:center;background-color:#0d0f13}
 .card .artph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:20px;font-family:'Anton';text-transform:uppercase;font-size:26px;color:#fff;background:
  radial-gradient(circle at 50% 35%,rgba(58,209,58,.35),transparent 60%),linear-gradient(160deg,#20242b,#0d0f13)}
 .card .holoC{position:absolute;inset:0;pointer-events:none;mix-blend-mode:color-dodge;opacity:0;background:linear-gradient(115deg,transparent 25%,rgba(255,0,180,.6),rgba(0,220,255,.6),rgba(120,255,60,.6),transparent 75%);background-size:250% 250%;transition:opacity .6s}
 .card.revealed .holoC{opacity:.5;animation:holoShift 4s linear infinite}
-.tierGlow{position:absolute;inset:-3px;border-radius:20px;pointer-events:none;opacity:0;transition:opacity .6s}
-.card.revealed .tierGlow{opacity:1}
-/* info scratch panel */
-.infoPanel{position:absolute;left:0;right:0;top:0;z-index:5;background:rgba(6,8,11,.86);backdrop-filter:blur(2px);border-bottom:1px solid rgba(255,255,255,.12);padding:12px 14px;min-height:96px}
+.tierGlow{position:absolute;inset:-3px;border-radius:18px;pointer-events:none;opacity:0;transition:opacity .6s}
+#cw.revealed .tierGlow{opacity:1}
+/* info panel — sits ABOVE the slab, never covers it */
+.infoPanel{position:relative;width:min(50vh,350px);z-index:5;background:rgba(6,8,11,.9);border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:11px 14px;min-height:88px;overflow:hidden}
 .infoGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px 14px;position:relative;z-index:1}
 .infoGrid .k{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut)}
 .infoGrid .v{font-family:'Space Mono';font-weight:700;font-size:15px;color:#fff;margin-top:1px}
 .scratch{position:absolute;inset:0;z-index:3;cursor:grab;touch-action:none}
 .scratch canvas{width:100%;height:100%;display:block;border-radius:0}
 .scratchHint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Anton';text-transform:uppercase;letter-spacing:.08em;color:#0a0b0d;font-size:17px;pointer-events:none}
-/* cover card (peel) */
-.cover{position:absolute;inset:0;z-index:4;border-radius:18px;cursor:grab;touch-action:none;will-change:transform;transform-origin:100% 0;
- background:linear-gradient(135deg,#eef3f5,#c3cfd4 30%,#fff 50%,#b9c6cc 70%,#eef3f5);overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.5)}
+/* cover card (opaque — physically slides off to reveal) */
+.cover{position:absolute;inset:0;z-index:7;border-radius:14px;cursor:grab;touch-action:none;will-change:transform;
+ background:linear-gradient(135deg,#eef3f5,#c3cfd4 30%,#fff 50%,#b9c6cc 70%,#eef3f5);overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.55)}
 .cover .holo{position:absolute;inset:0;mix-blend-mode:overlay;opacity:.55;background:linear-gradient(115deg,transparent 20%,rgba(255,0,180,.5),rgba(0,220,255,.5),rgba(120,255,60,.5),transparent 80%);background-size:300% 300%;animation:holoShift 5s linear infinite}
 .cover .cc{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}
-.cover .cc .peelhint{position:absolute;top:12px;right:14px;font-size:10px;font-family:'Space Mono';color:#0a0b0d;opacity:.7}
-.cover.gone{transition:transform .55s cubic-bezier(.36,.9,.4,1),opacity .55s;transform:translate(120%,-40%) rotate(24deg)!important;opacity:0}
-.corner{position:absolute;top:0;right:0;width:52px;height:52px;border-radius:0 18px 0 60px;background:linear-gradient(225deg,rgba(58,209,58,.9),rgba(255,255,255,.2));z-index:6;cursor:grab;box-shadow:-3px 3px 8px rgba(0,0,0,.3)}
-/* card detail bar */
-.detail{position:absolute;left:0;right:0;bottom:0;z-index:6;background:linear-gradient(0deg,rgba(6,8,11,.94),rgba(6,8,11,.4));padding:14px 16px 16px;opacity:0;transform:translateY(12px);transition:.5s}
-.card.revealed .detail{opacity:1;transform:none}
+.cover .cc .peelhint{position:absolute;bottom:14px;left:0;right:0;text-align:center;font-size:11px;font-family:'Space Mono';color:#0a0b0d;transition:opacity .4s}
+.cover.gone{transition:transform .5s cubic-bezier(.36,.9,.4,1)}
+.corner{position:absolute;top:0;right:0;width:54px;height:54px;border-radius:0 14px 0 60px;background:linear-gradient(225deg,rgba(58,209,58,.95),rgba(255,255,255,.25));z-index:8;cursor:grab;box-shadow:-3px 3px 8px rgba(0,0,0,.3)}
+/* card detail bar — sits BELOW the slab */
+.detail{position:relative;width:min(50vh,350px);z-index:6;background:rgba(6,8,11,.72);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:11px 14px;opacity:0;transform:translateY(10px);transition:.5s}
+.detail.show{opacity:1;transform:none}
 .detail .nm{font-family:'Anton';text-transform:uppercase;font-size:20px;line-height:1}
 .detail .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center}
 .badge{border-radius:999px;padding:5px 12px;font-family:'Space Mono';font-weight:700;font-size:13px}
@@ -85,7 +85,7 @@ html,body{height:100%;overflow:hidden;background:#05060a;font-family:'Space Grot
 #recap{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:30px}
 .recapGrid{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;max-width:90vw}
 .rc{width:120px}
-.rc .thumb{width:120px;aspect-ratio:5/7;border-radius:10px;background-size:cover;background-position:center;border:1px solid rgba(255,255,255,.14);background-color:#1a1d22;display:flex;align-items:center;justify-content:center;text-align:center;font-family:'Anton';font-size:12px;text-transform:uppercase;padding:6px}
+.rc .thumb{width:120px;aspect-ratio:5/7;border-radius:10px;background-size:contain;background-repeat:no-repeat;background-position:center;border:1px solid rgba(255,255,255,.14);background-color:#0d0f13;display:flex;align-items:center;justify-content:center;text-align:center;font-family:'Anton';font-size:12px;text-transform:uppercase;padding:6px}
 .rc .cap{font-family:'Space Mono';font-size:12px;text-align:center;margin-top:6px;color:#dfe}
 .total{font-family:'Anton';text-transform:uppercase;font-size:clamp(24px,4vw,44px);text-shadow:0 4px 30px rgba(58,209,58,.4)}
 .flash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:60}
@@ -151,32 +151,30 @@ function showCard(i){idx=i;updateProg();const c=SESSION.cards[i];const cs=$('car
  const serialed=!!(c.serial&&c.serial.trim());
  const infoRows=[['Category',c.category||'—'],['Year',c.year||'—'],['Set',c.set||'—'],['Grade',c.grade||'Raw'],['Serial',serialed?c.serial:'—'],[c.category==='Pokémon'?'Era':'Type',c.era||(c.category==='Pokémon'?'—':(c.category||'—'))]];
  cs.innerHTML=`
+  <div class="infoPanel" id="infoPanel">
+    <div class="infoGrid">${infoRows.map(([k,v])=>`<div><div class="k">${k}</div><div class="v">${esc(v)}</div></div>`).join('')}</div>
+    <div class="scratch" id="scratch"><canvas id="scr"></canvas></div>
+    <div class="scratchHint" id="scrHint">SCRATCH TO REVEAL</div>
+  </div>
   <div class="cardWrap" id="cw">
    <div class="tierGlow" style="box-shadow:0 0 60px 6px ${TIERCOL[c.tier]||'#3ad13a'}"></div>
    <div class="card" id="card">
      ${c.img?`<div class="art" style="background-image:url('${(''+c.img).replace(/'/g,'')}')"></div>`:`<div class="artph">${esc(c.name||'Mystery Card')}</div>`}
      <div class="holoC"></div>
-     <div class="detail">
-       <div class="nm">${esc(c.name||'Card')}</div>
-       <div class="row">
-         <span class="badge val">${money(c.marketValue)}</span>
-         ${c.buyback?`<span class="badge buy">Buyback ${money(c.buyback)}</span>`:''}
-         <span class="badge tier" style="color:${TIERCOL[c.tier]||'#fff'}">${c.tier?c.tier+' tier':''}</span>
-       </div>
-     </div>
-     <!-- info scratch panel -->
-     <div class="infoPanel" id="infoPanel">
-       <div class="infoGrid">${infoRows.map(([k,v])=>`<div><div class="k">${k}</div><div class="v">${esc(v)}</div></div>`).join('')}</div>
-       <div class="scratch" id="scratch"><canvas id="scr"></canvas></div>
-       <div class="scratchHint" id="scrHint">SCRATCH TO REVEAL</div>
-     </div>
-     <!-- cover card (peel) -->
-     <div class="cover" id="cover"><div class="holo"></div>
-       <svg class="shield" style="width:44%" viewBox="0 0 100 118"><use href="#g"/><path d="M50 4 92 20v42c0 30-20 44-42 52C28 106 8 92 8 62V20z" fill="#2f7d3a" stroke="#fff" stroke-width="4"/><path d="M50 26l7 15 16 2-12 11 3 16-14-8-14 8 3-16-12-11 16-2z" fill="#fff"/></svg>
-       <div class="cc"><div class="peelhint">↖ grab a corner &amp; peel</div></div>
-       <div class="corner" id="corner"></div>
-     </div>
    </div>
+   <div class="cover" id="cover"><div class="holo"></div>
+     <svg class="shield" style="width:40%" viewBox="0 0 100 118"><path d="M50 4 92 20v42c0 30-20 44-42 52C28 106 8 92 8 62V20z" fill="#2f7d3a" stroke="#fff" stroke-width="4"/><path d="M50 26l7 15 16 2-12 11 3 16-14-8-14 8 3-16-12-11 16-2z" fill="#fff"/></svg>
+     <div class="cc"><div class="peelhint" id="peelhint" style="opacity:0">grab &amp; slide the cover off →</div></div>
+     <div class="corner" id="corner"></div>
+   </div>
+  </div>
+  <div class="detail" id="detail">
+    <div class="nm">${esc(c.name||'Card')}</div>
+    <div class="row">
+      <span class="badge val">${money(c.marketValue)}</span>
+      ${c.buyback?`<span class="badge buy">Buyback ${money(c.buyback)}</span>`:''}
+      <span class="badge tier" style="color:${TIERCOL[c.tier]||'#fff'}">${c.tier?c.tier+' tier':''}</span>
+    </div>
   </div>`;
  initScratch();initHolo();
 }
@@ -200,36 +198,27 @@ function initScratch(){const wrap=$('scratch'),cv=$('scr');const r=wrap.getBound
  wrap.addEventListener('touchstart',down,{passive:false});wrap.addEventListener('touchmove',move,{passive:false});wrap.addEventListener('touchend',up);
  wrap._cleanup=()=>{window.removeEventListener('mousemove',move);window.removeEventListener('mouseup',up);};
 }
-function finishScratch(){const p=$('infoPanel');const cv=$('scr');
- // wipe remaining
- const ctx=cv.getContext('2d');ctx.clearRect(0,0,cv.width,cv.height);
- $('scratch').style.pointerEvents='none';
- // reveal cover card for peel phase
- const cover=$('cover');cover.classList.remove('hide');
+function finishScratch(){const cv=$('scr');const ctx=cv.getContext('2d');ctx.clearRect(0,0,cv.width,cv.height);
+ $('scratch').style.pointerEvents='none';const ph=$('peelhint');if(ph)ph.style.opacity='.8';
  initPeel();
- // collapse info panel to top strip after a beat
- setTimeout(()=>{p.style.transition='min-height .5s,padding .5s';},50);
 }
 
-/* ---- peel phase ---- */
-function initPeel(){const cover=$('cover'),corner=$('corner'),card=$('card');
- let dragging=false,sx=0,sy=0;const W=cover.getBoundingClientRect().width,H=cover.getBoundingClientRect().height;
- const start=e=>{dragging=true;const t=e.touches?e.touches[0]:e;sx=t.clientX;sy=t.clientY;cover.style.transition='none';e.preventDefault();};
- const move=e=>{if(!dragging)return;const t=e.touches?e.touches[0]:e;const dx=t.clientX-sx,dy=t.clientY-sy;const dist=Math.hypot(dx,dy);
-   const rot=Math.max(-40,Math.min(40,dx/6));cover.style.transform=`translate(${dx*0.7}px,${dy*0.7}px) rotate(${rot}deg)`;cover.style.opacity=Math.max(.15,1-dist/(W*.9));e.preventDefault();
-   if(dist>W*0.55)release(true);};
- const end=()=>{if(!dragging)return;dragging=false;release(false);};
- function release(force){dragging=false;const dist=parseFloat(cover.style.opacity);
-   if(force||dist<0.45){cover.style.transition='';cover.classList.add('gone');flash();
-     window.removeEventListener('mousemove',move);window.removeEventListener('mouseup',end);
-     setTimeout(revealDone,420);}
-   else{cover.style.transition='transform .4s,opacity .4s';cover.style.transform='';cover.style.opacity=1;}}
+/* ---- peel phase: opaque cover physically slides off ---- */
+function initPeel(){const cover=$('cover'),corner=$('corner');
+ const r=cover.getBoundingClientRect();const W=r.width,H=r.height;
+ let dragging=false,sx=0,sy=0,baseX=0,baseY=0,curX=0,curY=0,done=false;
+ const apply=()=>{const rot=Math.max(-28,Math.min(28,curX/12));cover.style.transform=`translate(${curX}px,${curY}px) rotate(${rot}deg)`;};
+ const offEnough=()=>Math.abs(curX)>W*0.86||Math.abs(curY)>H*0.86;
+ const start=e=>{if(done)return;dragging=true;const t=e.touches?e.touches[0]:e;sx=t.clientX;sy=t.clientY;cover.style.transition='none';e.preventDefault();};
+ const move=e=>{if(!dragging||done)return;const t=e.touches?e.touches[0]:e;curX=baseX+(t.clientX-sx);curY=baseY+(t.clientY-sy);apply();if(offEnough())finish();e.preventDefault();};
+ const end=()=>{if(!dragging)return;dragging=false;baseX=curX;baseY=curY;};   /* keep revealed portion where released */
+ function finish(){if(done)return;done=true;dragging=false;const dir=curX>=0?1:-1;cover.classList.add('gone');cover.style.transform=`translate(${dir*135}%,${curY<0?-75:35}%) rotate(${dir*22}deg)`;window.removeEventListener('mousemove',move);window.removeEventListener('mouseup',end);flash();setTimeout(revealDone,420);}
  corner.addEventListener('mousedown',start);cover.addEventListener('mousedown',start);
  window.addEventListener('mousemove',move);window.addEventListener('mouseup',end);
  corner.addEventListener('touchstart',start,{passive:false});cover.addEventListener('touchstart',start,{passive:false});
  cover.addEventListener('touchmove',move,{passive:false});cover.addEventListener('touchend',end);
 }
-function revealDone(){const c=SESSION.cards[idx];$('card').classList.add('revealed');pulls[idx]=c;flash();
+function revealDone(){const c=SESSION.cards[idx];$('card').classList.add('revealed');const cw=$('cw');if(cw)cw.classList.add('revealed');const d=$('detail');if(d)d.classList.add('show');pulls[idx]=c;flash();
  const last=idx>=SESSION.cards.length-1;
  $('nextBar').classList.remove('hide');
  $('nextBar').innerHTML= last
