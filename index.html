@@ -179,10 +179,10 @@ function renderHome(){
 function acc(title,body,open){return `<div class="acc ${open?'open':''}"><div class="h" onclick="this.parentElement.classList.toggle('open')">${title}<span class="chev">▸</span></div><div class="b">${body}</div></div>`;}
 function todoHTML(){return S.todos.map((t,i)=>`<div class="todo ${t.done?'done':''}" draggable="true" ondragstart="tdDrag(${i})" ondragover="event.preventDefault()" ondragenter="this.classList.add('dover')" ondragleave="this.classList.remove('dover')" ondrop="this.classList.remove('dover');tdDrop(${i})"><span class="grip">↕</span><input type="checkbox" ${t.done?'checked':''} onchange="tdTog('${t.id}')"><span class="t" onclick="openTodo('${t.id}')">${esc(t.text)}</span>${t.comments.length?`<span class="badge">💬 ${t.comments.length}</span>`:''}${t.desc?`<span class="badge">📝</span>`:''}<button class="btn x" onclick="tdDel('${t.id}')">✕</button></div>`).join('')||'<div style="color:var(--mut)">Nothing yet.</div>';}
 function addTodo(){const v=$('todoin').value.trim();if(!v)return;S.todos.push({id:'t'+Date.now(),text:v,done:false,desc:'',comments:[]});save();$('todos').innerHTML=todoHTML();$('todoin').value='';}
-function tdTog(id){const t=S.todos.find(x=>x.id===id);t.done=!t.done;save();renderHome();}
+function tdTog(id){const t=S.todos.find(x=>x.id===id);if(!t)return;t.done=!t.done;save();renderHome();}
 function tdDel(id){S.todos=S.todos.filter(x=>x.id!==id);save();$('todos').innerHTML=todoHTML();}
 let TD=null;function tdDrag(i){TD=i;}function tdDrop(i){if(TD==null||TD===i)return;const m=S.todos.splice(TD,1)[0];S.todos.splice(i,0,m);TD=null;save();$('todos').innerHTML=todoHTML();}
-function openTodo(id){const t=S.todos.find(x=>x.id===id);
+function openTodo(id){const t=S.todos.find(x=>x.id===id);if(!t)return;
  $('modal').innerHTML=`<h3 style="font-size:18px">Task</h3>
   <div style="margin-top:12px"><label>Title</label><input id="tdTitle" value="${esc(t.text)}" oninput="S.todos.find(x=>x.id==='${id}').text=this.value;save()"></div>
   <div style="margin-top:10px"><label>Details</label><textarea id="tdDesc" placeholder="Add notes, links, requirements…" oninput="S.todos.find(x=>x.id==='${id}').desc=this.value;save()">${esc(t.desc)}</textarea></div>
@@ -191,7 +191,7 @@ function openTodo(id){const t=S.todos.find(x=>x.id===id);
   <div class="row" style="margin-top:18px"><button class="btn v" onclick="closeM();renderHome()">Done</button></div>`;
  $('ov').style.display='flex';}
 function todoCmtHTML(t){return t.comments.length?t.comments.map(c=>`<div class="cmt"><div class="who">${esc(c.who)} · ${new Date(c.when).toLocaleDateString()}</div>${esc(c.text)}</div>`).join(''):'<div style="color:var(--mut);font-size:13px">No comments yet.</div>';}
-function addTodoCmt(id){const v=$('tdCin').value.trim();if(!v)return;const t=S.todos.find(x=>x.id===id);t.comments.push({who:S.user||'You',when:Date.now(),text:v});save();$('tdCmts').innerHTML=todoCmtHTML(t);$('tdCin').value='';}
+function addTodoCmt(id){const v=$('tdCin').value.trim();if(!v)return;const t=S.todos.find(x=>x.id===id);if(!t)return;t.comments.push({who:S.user||'You',when:Date.now(),text:v});save();$('tdCmts').innerHTML=todoCmtHTML(t);$('tdCin').value='';}
 function addNote(){const v=$('cmtin').value.trim();if(!v)return;const kind=$('noteKind')?$('noteKind').value:'Note';requireUser(()=>{S.comments.push({who:S.user,when:Date.now(),text:v,kind});save();renderHome();});}
 function planHTML(){return `<p style="color:var(--mut);font-size:13px">Each show carries its format, duration and streamer — set them in the <a onclick="go('schedule')">Schedule</a>. Manage your streamer roster in <a onclick="go('data')">Data &amp; Lists</a>.</p>
  <div style="margin-top:8px">${S.streamers.map(s=>`<span class="pill">${esc(s)}</span>`).join('')}</div>`;}
@@ -322,28 +322,6 @@ function saveBreak(){if(!BK._last)return;if(!canEditScoped())return roGuard();S.
 
 /* ---------- DATA & LISTS ---------- */
 function renderData(){dataHub();}
-function _dead_renderData(){
- let h=`<div class="hero"><div><h1>Data &amp; Lists</h1><div class="sub">Edit the dropdowns, upload checklists to auto-populate them, and store attachments.</div></div></div>`;
- // pick-lists
- h+=`<div class="card"><h3 style="font-size:16px">Pick-lists</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">These feed every dropdown across the app.</div>`;
- const listmap=[['characters','Chase characters'],['sets','Sets / products'],['formats','Show formats'],['diff','Trust / hooks']];
- listmap.forEach(([k,label])=>{h+=`<div style="margin-bottom:14px"><div class="lab">${label}</div><div class="chipwrap">${L(k).map(v=>`<span class="pill">${esc(v)} <a onclick="rmList('${k}','${esc(v)}')" style="color:var(--red)">✕</a></span>`).join('')}</div>
-   <div class="row"><input id="add_${k}" placeholder="Add…" style="max-width:260px" onkeydown="if(event.key==='Enter')addList('${k}')"><button class="btn sm" onclick="addList('${k}')">+</button></div></div>`;});
- h+=`<div style="margin-bottom:6px"><div class="lab">Streamers</div><div class="chipwrap">${S.streamers.map(v=>`<span class="pill">${esc(v)} <a onclick="rmStreamer('${esc(v)}')" style="color:var(--red)">✕</a></span>`).join('')}</div>
-   <div class="row"><input id="add_str" placeholder="Add streamer…" style="max-width:260px" onkeydown="if(event.key==='Enter')addStreamer()"><button class="btn sm" onclick="addStreamer()">+</button></div></div></div>`;
- // checklists
- h+=`<div class="card" style="margin-top:16px"><h3 style="font-size:16px">Checklists (CSV)</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">Upload a product/set checklist. Use it to populate a pick-list, or load chases straight into the Break Calculator.</div>
-   <div class="drop" onclick="$('clFile').click()">Click to upload a .csv checklist</div><input id="clFile" type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="uploadChecklist(this)">
-   <div style="margin-top:12px">${S.checklists.map((c,i)=>`<div class="filerow"><span class="nm">📄 ${esc(c.name)} <span class="lab">${c.rows.length} rows · ${c.columns.length} cols</span></span>
-     <select id="clcol_${i}" style="max-width:150px">${c.columns.map(col=>`<option>${esc(col)}</option>`).join('')}</select>
-     <select id="cltgt_${i}" style="max-width:130px">${listmap.map(([k,label])=>`<option value="${k}">→ ${label}</option>`).join('')}</select>
-     <button class="btn sm" onclick="populateFromChecklist(${i})">Populate</button><button class="btn x" onclick="S.checklists.splice(${i},1);save();renderData()">✕</button></div>`).join('')||'<div style="color:var(--mut);font-size:13px">No checklists uploaded.</div>'}</div></div>`;
- // attachments
- h+=`<div class="card" style="margin-top:16px"><h3 style="font-size:16px">Attachments</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">Images, PDFs, docs. Small files are stored in-browser; large ones are kept as a reference only (they'll move to cloud storage when we host).</div>
-   <div class="drop" onclick="$('atFile').click()">Click to upload a file</div><input id="atFile" type="file" style="display:none" onchange="uploadAttach(this)">
-   <div style="margin-top:12px">${S.attachments.map((a,i)=>`<div class="filerow"><span class="nm">📎 ${esc(a.name)} <span class="lab">${(a.size/1024).toFixed(0)} KB${a.data?'':' · reference only'}</span></span>${a.data?`<a class="btn sm" href="${a.data}" download="${esc(a.name)}">Download</a>`:''}<button class="btn x" onclick="S.attachments.splice(${i},1);save();renderData()">✕</button></div>`).join('')||'<div style="color:var(--mut);font-size:13px">No attachments.</div>'}</div></div>`;
- $('sec-data').innerHTML=h;
-}
 function addList(k){const el=$('add_'+k),v=el.value.trim();if(v&&!L(k).includes(v)){L(k).push(v);save();renderData();}}
 function rmList(k,v){S.lists[k]=L(k).filter(x=>x!==v);save();renderData();}
 function addStreamer(){const v=$('add_str').value.trim();if(v&&!S.streamers.includes(v)){S.streamers.push(v);save();renderData();}}
@@ -599,14 +577,28 @@ function rebuildS(){normShared(SHARED);normScoped(SCOPED);
 function pushFromS(){SHARED.comments=S.comments;SHARED.todos=S.todos;SHARED.streamers=S.streamers;SHARED.lists=S.lists;SHARED.attachments=S.attachments;SHARED.checklists=S.checklists;SHARED.inventory=S.inventory;SHARED.repacks=S.repacks;
  SCOPED.shows=S.shows;SCOPED.breaks=S.breaks;SCOPED.dashCfg=S.dashCfg;SCOPED.sales=S.sales;}
 function currentRender(){const on=document.querySelector('.tab.on');if(on){({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData,repack:renderRepack}[on.dataset.s])();}else renderHome();}
+/* Preserve typing across realtime updates: defer a section re-render while an input is focused. */
+let _pendingRender=false;
+function isEditing(){const a=document.activeElement;return !!a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.tagName==='SELECT');}
+function safeRender(){if(isEditing()){_pendingRender=true;return;}currentRender();}
+document.addEventListener('focusout',()=>{setTimeout(()=>{if(_pendingRender&&!isEditing()){_pendingRender=false;currentRender();}},0);});
 
 async function writeRow(id,owner,data){const rev=(REVS[id]||0)+1;REVS[id]=rev;const row={id,data,rev,owner,updated_by:ME,updated_at:new Date().toISOString()};const{error}=await sb.from('e10_workspace').upsert(row);if(error)console.warn('save',id,error.message);}
 const _origSave=save;
-save=function(){_origSave();cloudSave();};
-function cloudSave(){if(!sb||_applyingRemote)return;pushFromS();clearTimeout(_st);_st=setTimeout(async()=>{
- await writeRow('shared',null,{comments:S.comments,todos:S.todos,streamers:S.streamers,lists:S.lists,attachments:S.attachments,checklists:S.checklists,inventory:S.inventory,repacks:S.repacks});
- if(canEditScoped()){const owner=(SCOPE==='mine')?MEID:(SCOPE==='universal'?null:SCOPE);await writeRow(SCOPED_ID,owner,{shows:S.shows,breaks:S.breaks,dashCfg:S.dashCfg,sales:S.sales});}
-},600);}
+let _lsTimer=null;                        // debounce the localStorage mirror (was written on every keystroke)
+save=function(){clearTimeout(_lsTimer);_lsTimer=setTimeout(_origSave,400);cloudSave();};
+let _lastShared=null,_lastScoped=null;     // last payloads written — used to skip redundant cloud writes
+function cloudSave(){if(!sb||_applyingRemote)return;pushFromS();clearTimeout(_st);_st=setTimeout(doCloudWrite,600);}
+async function doCloudWrite(){_st=null;
+ const shared={comments:S.comments,todos:S.todos,streamers:S.streamers,lists:S.lists,attachments:S.attachments,checklists:S.checklists,inventory:S.inventory,repacks:S.repacks};
+ const sj=JSON.stringify(shared);if(sj!==_lastShared){_lastShared=sj;await writeRow('shared',null,shared);}
+ if(canEditScoped()){const scoped={shows:S.shows,breaks:S.breaks,dashCfg:S.dashCfg,sales:S.sales};const cj=JSON.stringify(scoped);
+  if(cj!==_lastScoped){_lastScoped=cj;const owner=(SCOPE==='mine')?MEID:(SCOPE==='universal'?null:SCOPE);await writeRow(SCOPED_ID,owner,scoped);}}
+}
+/* Flush pending debounced saves before the tab is hidden/closed so the last edits aren't lost. */
+function flushSaves(){if(_lsTimer){clearTimeout(_lsTimer);_lsTimer=null;try{_origSave();}catch(e){}}if(_st){clearTimeout(_st);_st=null;if(sb&&!_applyingRemote)doCloudWrite();}}
+window.addEventListener('pagehide',flushSaves);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')flushSaves();});
 
 function scopedIdFor(scope){return scope==='mine'?('user:'+MEID):scope==='universal'?'universal':('user:'+scope);}
 async function fetchRow(id){const{data,error}=await sb.from('e10_workspace').select('data,rev').eq('id',id).maybeSingle();if(error){console.warn('load',id,error.message);return null;}return data;}
@@ -616,7 +608,7 @@ async function loadScopedFor(scope){const id=scopedIdFor(scope);SCOPED_ID=id;let
   SCOPED=base;}
  else{REVS[id]=row.rev||0;SCOPED=row.data&&Object.keys(row.data).length?splitLegacy(row.data).sc:blankScoped();}
  normScoped(SCOPED);}
-async function setScope(scope){SCOPE=scope;localStorage.setItem('e10_scope',scope);await loadScopedFor(scope);rebuildS();renderScopebar();currentRender();toast(canEditScoped()?('Editing '+scopeLabel()):('Viewing '+scopeLabel()+' — read-only'));}
+async function setScope(scope){SCOPE=scope;localStorage.setItem('e10_scope',scope);await loadScopedFor(scope);_lastScoped=null;rebuildS();renderScopebar();currentRender();toast(canEditScoped()?('Editing '+scopeLabel()):('Viewing '+scopeLabel()+' — read-only'));}
 
 function renderScopebar(){let el=$('scopebar');if(!el){el=document.createElement('div');el.id='scopebar';el.style.cssText='display:flex;align-items:center;gap:6px;margin-left:auto';const who=$('who');who.style.marginLeft='10px';who.parentNode.insertBefore(el,who);}
  let opts=`<option value="mine">My space</option><option value="universal">Universal</option>`;
@@ -625,8 +617,8 @@ function renderScopebar(){let el=$('scopebar');if(!el){el=document.createElement
  const sel=$('scopeSel');if(sel)sel.value=SCOPE;}
 
 function subscribeRealtime(){sb.channel('e10ws').on('postgres_changes',{event:'*',schema:'public',table:'e10_workspace'},p=>{const n=p.new;if(!n||!n.id)return;
- if(n.id==='shared'&&(n.rev||0)>(REVS['shared']||0)){REVS['shared']=n.rev;_applyingRemote=true;SHARED=n.data&&Object.keys(n.data).length?splitLegacy(n.data).sh:blankShared();normShared(SHARED);rebuildS();currentRender();_applyingRemote=false;if(n.updated_by&&n.updated_by!==ME)toast('Team update by '+n.updated_by);}
- else if(n.id===SCOPED_ID&&(n.rev||0)>(REVS[SCOPED_ID]||0)){REVS[SCOPED_ID]=n.rev;_applyingRemote=true;SCOPED=n.data&&Object.keys(n.data).length?splitLegacy(n.data).sc:blankScoped();normScoped(SCOPED);rebuildS();currentRender();_applyingRemote=false;if(n.updated_by&&n.updated_by!==ME)toast('Update by '+n.updated_by);}
+ if(n.id==='shared'&&(n.rev||0)>(REVS['shared']||0)){REVS['shared']=n.rev;_applyingRemote=true;SHARED=n.data&&Object.keys(n.data).length?splitLegacy(n.data).sh:blankShared();normShared(SHARED);_lastShared=null;rebuildS();safeRender();_applyingRemote=false;if(n.updated_by&&n.updated_by!==ME)toast('Team update by '+n.updated_by);}
+ else if(n.id===SCOPED_ID&&(n.rev||0)>(REVS[SCOPED_ID]||0)){REVS[SCOPED_ID]=n.rev;_applyingRemote=true;SCOPED=n.data&&Object.keys(n.data).length?splitLegacy(n.data).sc:blankScoped();normScoped(SCOPED);_lastScoped=null;rebuildS();safeRender();_applyingRemote=false;if(n.updated_by&&n.updated_by!==ME)toast('Update by '+n.updated_by);}
 }).subscribe();}
 
 async function loadAll(){
