@@ -121,7 +121,7 @@ const L=k=>S.lists[k];
 const SECTIONS=[['home','Home'],['schedule','Schedule'],['copy','Copy Studio'],['gen','Schedule Gen'],['break','Break Calculator'],['repack','Repack Studio'],['data','Data & Lists']];
 $('nav').innerHTML=SECTIONS.map((s,i)=>`<button class="tab ${i===0?'on':''}" data-s="${s[0]}" onclick="go('${s[0]}')">${s[1]}</button>`).join('');
 function go(s){document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.s===s));document.querySelectorAll('.sec').forEach(x=>x.classList.remove('on'));$('sec-'+s).classList.add('on');window.scrollTo(0,0);({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData,repack:renderRepack}[s])();}
-$('foot').textContent='Element 10 · Command V2 · local preview (saves in this browser) — review before we host the shared, login-gated version.';
+$('foot').textContent='Element 10 · Command · shared team workspace · synced live';
 function renderWho(){$('who').innerHTML=S.user?`<button class="btn sm" onclick="signIn()">👤 ${esc(S.user)}</button>`:`<button class="btn v sm" onclick="signIn()">Sign in</button>`;}
 function signIn(cb){window._siCb=(typeof cb==='function')?cb:null;$('modal').innerHTML=`<h3 style="font-size:18px">Sign in</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:6px 0 12px">Your name tags your notes and comments so the team knows who did what. Real email logins arrive when we host the shared version.</div><label>Your name</label><input id="siName" value="${esc(S.user||'')}" placeholder="e.g. Trent" onkeydown="if(event.key==='Enter')doSignIn()"><div class="row" style="margin-top:16px"><button class="btn v" onclick="doSignIn()">Save</button>${S.user?'<button class="btn sm" onclick="closeM()">Cancel</button>':''}</div>`;$('ov').style.display='flex';setTimeout(()=>{const el=$('siName');if(el)el.focus();},60);}
 function doSignIn(){const v=$('siName').value.trim();if(!v)return;S.user=v;save();renderWho();closeM();const cb=window._siCb;window._siCb=null;if(cb)cb();else{const on=document.querySelector('.tab.on');if(on)({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData,repack:renderRepack}[on.dataset.s])();}}
@@ -201,7 +201,7 @@ function delBreak(i){S.breaks.splice(i,1);save();renderHome();}
 
 /* ---------- SCHEDULE ---------- */
 function renderSchedule(){
- $('sec-schedule').innerHTML=`<div class="hero"><div><h1>Schedule</h1><div class="sub">Drag shows across the week. Peak windows (evening/late) are shaded.</div></div><button class="btn v" onclick="newShow()">+ New show</button></div>${scheduleGridHTML()}`;
+ $('sec-schedule').innerHTML=`<div class="hero"><div><h1>Schedule</h1><div class="sub">Drag shows across the week. Peak windows (evening/late) are shaded.</div></div><div class="row" style="gap:6px">${ROLE==='admin'?`<button class="btn sm" onclick="copyWeekToUniversal()" title="Publish this week to the team baseline everyone sees">Copy week → Universal</button>`:''}<button class="btn v" onclick="newShow()">+ New show</button></div></div>${scheduleGridHTML()}`;
 }
 
 /* ---------- COPY STUDIO ---------- */
@@ -234,7 +234,7 @@ function renderGen(){
    <div><label>Include weekends</label><select id="gWknd"><option>Yes</option><option>No</option></select></div>
    <div><label>Flagship format</label><select id="gFlag">${L('formats').map(f=>`<option ${f==='Ceiling Ladder'?'selected':''}>${esc(f)}</option>`).join('')}</select></div>
    <div><label>Featured set</label><select id="gSet">${L('sets').map(x=>`<option>${esc(x)}</option>`).join('')}</select></div>
-   </div><div class="row" style="margin-top:14px"><button class="btn v" onclick="genSchedule()">Suggest a week</button><button class="btn sm" onclick="clearSchedule()">Clear schedule</button></div>
+   </div><div class="row" style="margin-top:14px"><button class="btn v" onclick="genSchedule()">Suggest a week</button><button class="btn sm" onclick="clearSchedule()">Clear schedule</button>${ROLE==='admin'?`<button class="btn sm" onclick="copyWeekToUniversal()" title="Publish this week to the team baseline everyone sees">Copy week → Universal</button>`:''}</div>
    <div id="gout"></div></div>`;
 }
 function genSchedule(){if(!canEditScoped())return roGuard();const per=+$('gPer').value,wknd=$('gWknd').value==='Yes',flag=$('gFlag').value,set=$('gSet').value;
@@ -609,11 +609,22 @@ async function loadScopedFor(scope){const id=scopedIdFor(scope);SCOPED_ID=id;let
  else{REVS[id]=row.rev||0;SCOPED=row.data&&Object.keys(row.data).length?splitLegacy(row.data).sc:blankScoped();}
  normScoped(SCOPED);}
 async function setScope(scope){SCOPE=scope;localStorage.setItem('e10_scope',scope);await loadScopedFor(scope);_lastScoped=null;rebuildS();renderScopebar();currentRender();toast(canEditScoped()?('Editing '+scopeLabel()):('Viewing '+scopeLabel()+' — read-only'));}
+/* Publish the current week's schedule to the Universal (team baseline) row. Admin-only; Universal is admin-write via RLS. Fetch-merge so other Universal fields (breaks/dashCfg/sales) are preserved. */
+async function copyWeekToUniversal(){
+ if(ROLE!=='admin'){toast('Admin only — Universal is admin-managed');return;}
+ if(!Object.values(S.shows||{}).flat().length){toast('No shows to publish this week');return;}
+ if(!confirm('Publish this week’s schedule to Universal? Everyone on the team sees Universal as the baseline.'))return;
+ const uni=await fetchRow('universal');if(uni)REVS['universal']=uni.rev||0;
+ const base=uni&&uni.data&&Object.keys(uni.data).length?splitLegacy(uni.data).sc:blankScoped();
+ base.shows=JSON.parse(JSON.stringify(S.shows));
+ await writeRow('universal',null,{shows:base.shows,breaks:base.breaks,dashCfg:base.dashCfg,sales:base.sales});
+ toast('Published this week to Universal');
+}
 
-function renderScopebar(){let el=$('scopebar');if(!el){el=document.createElement('div');el.id='scopebar';el.style.cssText='display:flex;align-items:center;gap:6px;margin-left:auto';const who=$('who');who.style.marginLeft='10px';who.parentNode.insertBefore(el,who);}
+function renderScopebar(){let el=$('scopebar');if(!el){el=document.createElement('div');el.id='scopebar';el.style.cssText='display:flex;flex-direction:column;align-items:flex-end;gap:2px;margin-left:auto';const who=$('who');who.style.marginLeft='10px';who.parentNode.insertBefore(el,who);}
  let opts=`<option value="mine">My space</option><option value="universal">Universal</option>`;
  if(ROLE==='admin')opts+=MEMBERS.filter(m=>m.user_id!==MEID).map(m=>`<option value="${m.user_id}">${esc(m.display_name||m.email)}’s space</option>`).join('');
- el.innerHTML=`<span class="lab" style="font-size:11px">Viewing</span><select id="scopeSel" style="padding:6px 9px;font-size:12.5px;max-width:170px" onchange="setScope(this.value)">${opts}</select>${canEditScoped()?'':'<span class="pill" style="margin:0">read-only</span>'}`;
+ el.innerHTML=`<div style="display:flex;align-items:center;gap:6px"><span class="lab" style="font-size:11px">Viewing</span><select id="scopeSel" style="padding:6px 9px;font-size:12.5px;max-width:170px" onchange="setScope(this.value)">${opts}</select>${canEditScoped()?'':'<span class="pill" style="margin:0">read-only</span>'}</div><div class="lab" style="font-size:9.5px;max-width:250px;text-align:right;line-height:1.25;text-transform:none;letter-spacing:0">My space = your personal schedules, breaks &amp; dashboards. Universal = the team baseline everyone sees.</div>`;
  const sel=$('scopeSel');if(sel)sel.value=SCOPE;}
 
 function subscribeRealtime(){sb.channel('e10ws').on('postgres_changes',{event:'*',schema:'public',table:'e10_workspace'},p=>{const n=p.new;if(!n||!n.id)return;
