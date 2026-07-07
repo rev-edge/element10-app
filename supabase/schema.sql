@@ -60,3 +60,22 @@ create policy ws_sel on public.e10_workspace for select to authenticated using (
 create policy ws_ins on public.e10_workspace for insert to authenticated with check (id='shared' or (id='universal' and public.e10_is_admin()) or owner=auth.uid() or public.e10_is_admin());
 create policy ws_upd on public.e10_workspace for update to authenticated using (id='shared' or (id='universal' and public.e10_is_admin()) or owner=auth.uid() or public.e10_is_admin()) with check (id='shared' or (id='universal' and public.e10_is_admin()) or owner=auth.uid() or public.e10_is_admin());
 create policy ws_del on public.e10_workspace for delete to authenticated using (owner=auth.uid() or public.e10_is_admin());
+
+-- ─────────────────────────────────────────────────────────────
+-- APPLIED (migration e10_live_break_sessions): Live Break Session primitive
+-- One session + slots + append-only event log; four surfaces read the same object.
+--   e10_break_sessions  (id, name, streamer_uid, status, stash_or_pass, case_hit, share_code, ...)
+--   e10_break_slots     (id, session_id, label, tier, price, state, case_hit, buyer_handle, buyer_uid, position)
+--   e10_break_events    (id bigint identity, session_id, slot_id, type, payload jsonb, actor_uid, created_at)  -- Tier-2 analytics substrate; indexed on (session_id, created_at), (type), (session_id, type, created_at)
+--   e10_viewers         (user_id, whatnot_handle)              -- viewer identity/handle link (viewers are NOT e10_members)
+--   e10_session_viewers (session_id, user_id)                  -- share_code redemptions / explicit viewer grants
+-- Helper fns (security definer): e10_is_member(), e10_my_handle(), e10_owns_session(uuid),
+--   e10_can_read_session(uuid), e10_redeem_code(text) [links caller to a session by unguessable code].
+-- RLS: streamer/admin CRUD their own sessions/slots/events; a viewer may READ a session (+slots/events)
+--   only if linked (a slot's buyer_uid=them or buyer_handle=their handle) OR they redeemed the share_code.
+--   Overlay authenticates as the streamer (no public/anon read path). Realtime on sessions/slots/events.
+-- SECURITY NOTE — two existing policies were TIGHTENED so viewers get ZERO e10_workspace access
+--   (member/admin access is unchanged, verified by simulation):
+--     ws_sel/ws_ins/ws_upd  — the shared/universal branches now require e10_is_member()
+--     m_ins                 — e10_members self-insert is now admin-only (members provisioned by admin;
+--                             this closes viewer->member self-escalation). Default role stays 'member'.

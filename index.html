@@ -75,6 +75,7 @@ td{padding:8px 10px;border-bottom:1px solid var(--line)}
   <div class="sec" id="sec-copy"></div>
   <div class="sec" id="sec-gen"></div>
   <div class="sec" id="sec-break"></div>
+  <div class="sec" id="sec-live"></div>
   <div class="sec" id="sec-repack"></div>
   <div class="sec" id="sec-data"></div>
   <div class="foot" id="foot"></div>
@@ -118,13 +119,13 @@ function money(n){return '$'+Math.round(n).toLocaleString();}
 const L=k=>S.lists[k];
 
 /* ---------- nav ---------- */
-const SECTIONS=[['home','Home'],['schedule','Schedule'],['copy','Copy Studio'],['gen','Schedule Gen'],['break','Break Calculator'],['repack','Repack Studio'],['data','Data & Lists']];
+const SECTIONS=[['home','Home'],['schedule','Schedule'],['copy','Copy Studio'],['gen','Schedule Gen'],['break','Break Calculator'],['live','Live Break'],['repack','Repack Studio'],['data','Data & Lists']];
 $('nav').innerHTML=SECTIONS.map((s,i)=>`<button class="tab ${i===0?'on':''}" data-s="${s[0]}" onclick="go('${s[0]}')">${s[1]}</button>`).join('');
-function go(s){document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.s===s));document.querySelectorAll('.sec').forEach(x=>x.classList.remove('on'));$('sec-'+s).classList.add('on');window.scrollTo(0,0);({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData,repack:renderRepack}[s])();}
+function go(s){document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.s===s));document.querySelectorAll('.sec').forEach(x=>x.classList.remove('on'));$('sec-'+s).classList.add('on');window.scrollTo(0,0);({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData,repack:renderRepack,live:renderLive}[s])();}
 $('foot').textContent='Element 10 · Command · shared team workspace · synced live';
 function renderWho(){$('who').innerHTML=S.user?`<button class="btn sm" onclick="signIn()">👤 ${esc(S.user)}</button>`:`<button class="btn v sm" onclick="signIn()">Sign in</button>`;}
 function signIn(cb){window._siCb=(typeof cb==='function')?cb:null;$('modal').innerHTML=`<h3 style="font-size:18px">Sign in</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:6px 0 12px">Your name tags your notes and comments so the team knows who did what. Real email logins arrive when we host the shared version.</div><label>Your name</label><input id="siName" value="${esc(S.user||'')}" placeholder="e.g. Trent" onkeydown="if(event.key==='Enter')doSignIn()"><div class="row" style="margin-top:16px"><button class="btn v" onclick="doSignIn()">Save</button>${S.user?'<button class="btn sm" onclick="closeM()">Cancel</button>':''}</div>`;$('ov').style.display='flex';setTimeout(()=>{const el=$('siName');if(el)el.focus();},60);}
-function doSignIn(){const v=$('siName').value.trim();if(!v)return;S.user=v;save();renderWho();closeM();const cb=window._siCb;window._siCb=null;if(cb)cb();else{const on=document.querySelector('.tab.on');if(on)({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData,repack:renderRepack}[on.dataset.s])();}}
+function doSignIn(){const v=$('siName').value.trim();if(!v)return;S.user=v;save();renderWho();closeM();const cb=window._siCb;window._siCb=null;if(cb)cb();else{const on=document.querySelector('.tab.on');if(on)({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData,repack:renderRepack,live:renderLive}[on.dataset.s])();}}
 function requireUser(cb){if(S.user)cb();else signIn(cb);}
 renderWho();
 
@@ -576,7 +577,7 @@ function rebuildS(){normShared(SHARED);normScoped(SCOPED);
     shows:SCOPED.shows,breaks:SCOPED.breaks,dashCfg:SCOPED.dashCfg,sales:SCOPED.sales,user:ME};}
 function pushFromS(){SHARED.comments=S.comments;SHARED.todos=S.todos;SHARED.streamers=S.streamers;SHARED.lists=S.lists;SHARED.attachments=S.attachments;SHARED.checklists=S.checklists;SHARED.inventory=S.inventory;SHARED.repacks=S.repacks;
  SCOPED.shows=S.shows;SCOPED.breaks=S.breaks;SCOPED.dashCfg=S.dashCfg;SCOPED.sales=S.sales;}
-function currentRender(){const on=document.querySelector('.tab.on');if(on){({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData,repack:renderRepack}[on.dataset.s])();}else renderHome();}
+function currentRender(){const on=document.querySelector('.tab.on');if(on){({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData,repack:renderRepack,live:renderLive}[on.dataset.s])();}else renderHome();}
 /* Preserve typing across realtime updates: defer a section re-render while an input is focused. */
 let _pendingRender=false;
 function isEditing(){const a=document.activeElement;return !!a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.tagName==='SELECT');}
@@ -658,5 +659,100 @@ async function boot(){if(!window.supabase){authScreen('Auth library failed to lo
  if(!session){authScreen('');return;}
  ME=session.user.email;MEID=session.user.id;S.user=ME;
  await loadAll();renderWho();renderScopebar();currentRender();}
+/* ========== LIVE BREAK SESSION — streamer control panel ========== */
+let LIVE={session:null,slots:[],chan:null};
+async function renderLive(){
+ if(!sb){$('sec-live').innerHTML='<div class="card">Connecting…</div>';return;}
+ if(!LIVE.session)await liveLoadActive();
+ $('sec-live').innerHTML=LIVE.session?liveActiveHTML():liveStartHTML();
+}
+async function liveLoadActive(){
+ try{const{data}=await sb.from('e10_break_sessions').select('*').eq('streamer_uid',MEID).eq('status','active').order('created_at',{ascending:false}).limit(1);
+  if(data&&data[0]){LIVE.session=data[0];await liveLoadSlots();liveSubscribe();}}catch(e){}
+}
+async function liveLoadSlots(){try{const{data}=await sb.from('e10_break_slots').select('*').eq('session_id',LIVE.session.id).order('position');LIVE.slots=data||[];}catch(e){LIVE.slots=[];}}
+async function liveEvent(type,slot_id,payload){try{await sb.from('e10_break_events').insert({session_id:LIVE.session.id,slot_id:slot_id||null,type,payload:payload||{},actor_uid:MEID});}catch(e){console.warn('event',e.message);}}
+function liveSubscribe(){if(!LIVE.session)return;if(LIVE.chan)sb.removeChannel(LIVE.chan);
+ LIVE.chan=sb.channel('live_'+LIVE.session.id)
+  .on('postgres_changes',{event:'*',schema:'public',table:'e10_break_slots',filter:'session_id=eq.'+LIVE.session.id},()=>liveRefresh())
+  .on('postgres_changes',{event:'*',schema:'public',table:'e10_break_sessions',filter:'id=eq.'+LIVE.session.id},p=>{if(p.new){LIVE.session=p.new;liveRefreshRender();}})
+  .subscribe();}
+async function liveRefresh(){if(!LIVE.session)return;await liveLoadSlots();liveRefreshRender();}
+function liveRefreshRender(){if($('sec-live').classList.contains('on')&&!isEditing())renderLive();}
+async function liveStart(){const name=($('liveName')&&$('liveName').value.trim())||'Live Break';const mi=$('liveModel')?$('liveModel').value:'';
+ const{data,error}=await sb.from('e10_break_sessions').insert({streamer_uid:MEID,name}).select().maybeSingle();
+ if(error){toast('Could not start: '+error.message);return;}
+ LIVE.session=data;LIVE.slots=[];await liveEvent('session_started',null,{name});
+ if(mi!==''&&S.breaks[+mi]){const n=Math.max(1,+S.breaks[+mi].slots||1);for(let i=0;i<n;i++){try{const{data:sl}=await sb.from('e10_break_slots').insert({session_id:LIVE.session.id,label:'Spot '+(i+1),position:i}).select().maybeSingle();if(sl)LIVE.slots.push(sl);}catch(e){}}}
+ liveSubscribe();renderLive();toast('Live break started');
+}
+async function liveEnd(){if(!LIVE.session||!confirm('End this live break session?'))return;
+ try{await sb.from('e10_break_sessions').update({status:'ended',ended_at:new Date().toISOString()}).eq('id',LIVE.session.id);await liveEvent('session_ended',null,{});}catch(e){}
+ if(LIVE.chan){sb.removeChannel(LIVE.chan);LIVE.chan=null;}LIVE.session=null;LIVE.slots=[];renderLive();toast('Session ended');
+}
+async function liveAddSlot(){if(!LIVE.session)return;const label=($('slotLabel')&&$('slotLabel').value.trim())||'';const pos=LIVE.slots.length;
+ const{data,error}=await sb.from('e10_break_slots').insert({session_id:LIVE.session.id,label:label||('Spot '+(pos+1)),position:pos}).select().maybeSingle();
+ if(error){toast(error.message);return;}LIVE.slots.push(data);await liveEvent('assigned',data.id,{label:data.label});renderLive();
+}
+async function liveAssign(id){const sl=LIVE.slots.find(x=>x.id===id);if(!sl)return;
+ const label=$('al_'+id)?$('al_'+id).value.trim():sl.label;const handle=$('ah_'+id)?$('ah_'+id).value.trim():sl.buyer_handle;
+ try{await sb.from('e10_break_slots').update({label,buyer_handle:handle||null,updated_at:new Date().toISOString()}).eq('id',id);}catch(e){toast(e.message);return;}
+ sl.label=label;sl.buyer_handle=handle;await liveEvent('assigned',id,{label,buyer_handle:handle});toast('Spot saved');renderLive();
+}
+async function liveSlotState(id,state){const sl=LIVE.slots.find(x=>x.id===id);if(!sl)return;
+ try{await sb.from('e10_break_slots').update({state,updated_at:new Date().toISOString()}).eq('id',id);}catch(e){toast(e.message);return;}
+ sl.state=state;await liveEvent(state==='sold'?'spot_sold':'spot_released',id,{label:sl.label,state});renderLive();
+}
+async function liveSlotCaseHit(id){const sl=LIVE.slots.find(x=>x.id===id);if(!sl)return;const v=!sl.case_hit;
+ try{await sb.from('e10_break_slots').update({case_hit:v}).eq('id',id);}catch(e){toast(e.message);return;}
+ sl.case_hit=v;await liveEvent('case_hit',id,{case_hit:v,label:sl.label,scope:'slot'});renderLive();
+}
+async function liveDelSlot(id){try{await sb.from('e10_break_slots').delete().eq('id',id);}catch(e){}LIVE.slots=LIVE.slots.filter(x=>x.id!==id);renderLive();}
+async function liveToggleStash(){if(!LIVE.session)return;const v=!LIVE.session.stash_or_pass;
+ try{await sb.from('e10_break_sessions').update({stash_or_pass:v}).eq('id',LIVE.session.id);}catch(e){toast(e.message);return;}
+ LIVE.session.stash_or_pass=v;await liveEvent('stash_toggled',null,{stash_or_pass:v});renderLive();
+}
+async function liveCaseHit(){if(!LIVE.session)return;const v=!LIVE.session.case_hit;
+ try{await sb.from('e10_break_sessions').update({case_hit:v}).eq('id',LIVE.session.id);}catch(e){toast(e.message);return;}
+ LIVE.session.case_hit=v;await liveEvent('case_hit',null,{case_hit:v,scope:'session'});renderLive();
+}
+function liveDirUrl(){return location.href.replace(/[?#].*$/,'').replace(/\/[^\/]*$/,'/');}
+function liveStartHTML(){const models=(S.breaks||[]);
+ return `<div class="hero"><div><h1>Live Break</h1><div class="sub">Run a live break — spots, stash-or-pass &amp; case hits push straight to your OBS overlay and viewers' companion.</div></div></div>
+ <div class="card" style="max-width:560px"><h3 style="font-size:15px">Start a session</h3>
+  <div style="margin-top:12px"><label>Session name</label><input id="liveName" placeholder="e.g. Friday Ascended Heroes Case Break"></div>
+  ${models.length?`<div style="margin-top:10px"><label>Seed spots from a saved break model (optional)</label><select id="liveModel"><option value="">— none (add spots manually) —</option>${models.map((m,i)=>`<option value="${i}">${esc(m.name)} · ${m.slots} spots</option>`).join('')}</select></div>`:''}
+  <div class="row" style="margin-top:16px"><button class="btn v" onclick="liveStart()">▶ Start live break</button></div>
+  <div class="lab" style="margin-top:10px">Only you (and admin) can control your sessions. Viewers see only the spots they're in.</div></div>`;
+}
+function liveActiveHTML(){const s=LIVE.session;const dir=liveDirUrl();const overlayUrl=dir+'overlay.html?code='+s.share_code;const companionUrl=dir+'companion.html';
+ const sold=LIVE.slots.filter(x=>x.state==='sold').length,avail=LIVE.slots.filter(x=>x.state==='available').length;
+ return `<div class="hero"><div><h1>${esc(s.name)}</h1><div class="sub">Live break in progress · share code <b class="mono">${esc(s.share_code)}</b></div></div><button class="btn x" onclick="liveEnd()">End session</button></div>
+ <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-bottom:14px">
+   <div class="metric"><div class="n">${LIVE.slots.length}</div><div class="l">Spots</div></div>
+   <div class="metric"><div class="n">${sold}</div><div class="l">Sold</div></div>
+   <div class="metric"><div class="n">${avail}</div><div class="l">Available</div></div></div>
+ <div class="card" style="margin-bottom:14px"><div class="row" style="gap:10px;align-items:center;flex-wrap:wrap">
+   <button class="btn ${s.stash_or_pass?'v':''}" onclick="liveToggleStash()">Stash-or-pass: <b>${s.stash_or_pass?'ON':'OFF'}</b></button>
+   <button class="btn ${s.case_hit?'d':''}" onclick="liveCaseHit()">${s.case_hit?'🔥 CASE HIT — live':'Flag case hit'}</button>
+   <span class="lab">These flip instantly on the overlay &amp; companion.</span></div></div>
+ <div class="card" style="margin-bottom:14px"><h3 style="font-size:14px">Broadcast links</h3>
+   <div class="row" style="margin-top:8px;gap:6px"><input value="${esc(overlayUrl)}" readonly style="flex:2;font-size:12px" onclick="this.select()"><button class="btn sm" onclick="copy('${esc(overlayUrl)}')">Copy OBS overlay link</button></div>
+   <div class="row" style="margin-top:6px;gap:6px"><input value="${esc(companionUrl)}" readonly style="flex:2;font-size:12px" onclick="this.select()"><button class="btn sm" onclick="copy('${esc(companionUrl)}')">Copy viewer companion link</button></div>
+   <div class="lab" style="margin-top:6px">Add the overlay as an OBS <b>Browser</b> source (transparent). Viewers open the companion, sign in, and link their Whatnot handle once.</div></div>
+ <div class="card"><div class="row" style="justify-content:space-between"><h3 style="font-size:15px">Spots (${LIVE.slots.length})</h3></div>
+   <div class="row" style="margin-top:8px;gap:6px"><input id="slotLabel" placeholder="Team / character (e.g. Charizard, Team 3)" style="flex:2" onkeydown="if(event.key==='Enter')liveAddSlot()"><button class="btn sm" onclick="liveAddSlot()">+ Add spot</button></div>
+   <div style="overflow:auto;margin-top:10px"><table><tr><th>#</th><th>Team / label</th><th>Buyer (Whatnot)</th><th>State</th><th>Case</th><th></th></tr>
+   ${LIVE.slots.map((sl,i)=>liveSlotRow(sl,i)).join('')||`<tr><td colspan="6" style="color:var(--mut)">No spots yet — add one above.</td></tr>`}</table></div></div>`;
+}
+function liveSlotRow(sl,i){const st=sl.state;
+ return `<tr>
+  <td class="mono">${i+1}</td>
+  <td><input id="al_${sl.id}" value="${esc(sl.label||'')}" style="min-width:150px"></td>
+  <td><input id="ah_${sl.id}" value="${esc(sl.buyer_handle||'')}" placeholder="@handle" style="width:130px"></td>
+  <td><select onchange="liveSlotState('${sl.id}',this.value)">${['available','sold','held'].map(x=>`<option ${x===st?'selected':''}>${x}</option>`).join('')}</select></td>
+  <td style="text-align:center"><button class="btn x" style="color:${sl.case_hit?'var(--red)':'var(--mut2)'}" onclick="liveSlotCaseHit('${sl.id}')">${sl.case_hit?'🔥':'○'}</button></td>
+  <td><button class="btn sm" onclick="liveAssign('${sl.id}')">Save</button> <button class="btn x" onclick="liveDelSlot('${sl.id}')">✕</button></td></tr>`;
+}
 boot();
 </script></body></html>

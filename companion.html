@@ -1,0 +1,122 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Element 10 — Live Companion</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Grotesk:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--volt:#C6FF3A;--ink:#0A0B0D;--red:#E8332B;--gold:#ffd23a;--blue:#1F5EFF}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{min-height:100%;background:#05060a;color:#fff;font-family:'Space Grotesk',system-ui,sans-serif}
+body{background:radial-gradient(900px 500px at 50% -10%,rgba(198,255,58,.10),transparent 60%),radial-gradient(700px 500px at 90% 110%,rgba(31,94,255,.12),transparent 60%),#05060a}
+.wrap{max-width:520px;margin:0 auto;padding:22px 18px 40px}
+.brand{font-family:'Anton',sans-serif;font-size:24px;text-transform:uppercase;letter-spacing:.02em}
+.brand b{background:var(--volt);color:#000;padding:0 7px;border-radius:5px}
+.card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:16px 18px;margin-top:14px}
+h1{font-family:'Anton',sans-serif;text-transform:uppercase;font-size:26px;line-height:1;margin:0}
+.sub{color:#9aa0a6;font-size:13px;margin-top:4px}
+label{font-size:12px;color:#9aa0a6;display:block;margin:8px 0 4px}
+input{width:100%;padding:11px;border-radius:9px;border:1px solid #2a2f36;background:#12151a;color:#fff;font-family:inherit;font-size:15px}
+button{font-family:inherit;font-weight:700;border:none;border-radius:999px;padding:11px 18px;cursor:pointer;background:var(--volt);color:#000}
+button.ghost{background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.2)}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.msg{color:#9aa0a6;font-size:12px;margin-top:8px}.err{color:var(--red)}
+.flags{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.flag{font-family:'Space Mono',monospace;font-weight:700;font-size:12px;padding:6px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.2)}
+.flag.on{background:var(--volt);color:#000;border-color:var(--volt)}
+.mine{background:rgba(198,255,58,.12);border:1px solid rgba(198,255,58,.5);border-radius:12px;padding:12px 14px;margin-top:10px}
+.mine .lab{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.1em;color:var(--volt)}
+.mine .nm{font-family:'Anton',sans-serif;text-transform:uppercase;font-size:20px;margin-top:2px}
+.mine .st{font-family:'Space Mono',monospace;font-size:12px;color:#c7ccd2;margin-top:4px}
+.big{font-family:'Anton',sans-serif;font-size:40px}
+.hide{display:none!important}
+.case{background:linear-gradient(90deg,rgba(255,210,58,.15),rgba(255,210,58,.35));border:1px solid var(--gold);border-radius:12px;padding:12px;text-align:center;font-family:'Anton',sans-serif;text-transform:uppercase;font-size:20px;margin-top:12px;color:#ffe9a3}
+.top{display:flex;justify-content:space-between;align-items:center}
+.small{font-size:12px;color:#9aa0a6}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+</head><body>
+<div class="wrap">
+  <div class="top"><div class="brand">ELEMENT<b>10</b></div><button id="signout" class="ghost hide" style="padding:6px 12px;font-size:12px" onclick="doSignout()">Sign out</button></div>
+  <div id="view"></div>
+</div>
+<script>
+const SB_URL='https://ddhkkumiyidorzmajwde.supabase.co';
+const SB_KEY='sb_publishable_wRoaFNiqpZJaEJkQvLpnUw_7bpcXllv';
+const $=id=>document.getElementById(id);
+const esc=s=>{s=(s==null?'':''+s);return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));};
+const CODE=new URLSearchParams(location.search).get('code')||'';
+let sb=null,ME=null,MEID=null,HANDLE=null,SESSION=null,SLOTS=[],chan=null;
+
+/* ---- auth ---- */
+function authView(msg){$('signout').classList.add('hide');$('view').innerHTML=`
+ <div class="card"><h1>Live Companion</h1><div class="sub">Sign in to follow your spots in the live break — what you're in, what you pulled, how many spots are left.</div>
+ <label>Email</label><input id="em" type="email">
+ <label>Password</label><input id="pw" type="password">
+ <div class="row" style="margin-top:14px"><button onclick="doLogin()">Sign in</button><button class="ghost" onclick="doSignup()">Create account</button></div>
+ <div class="msg err" id="amsg">${esc(msg||'')}</div></div>`;}
+async function doLogin(){const email=$('em').value.trim(),password=$('pw').value;const{error}=await sb.auth.signInWithPassword({email,password});if(error)$('amsg').textContent=error.message;else init();}
+async function doSignup(){const email=$('em').value.trim(),password=$('pw').value;if(password.length<6){$('amsg').textContent='Password must be 6+ characters';return;}
+ const{data,error}=await sb.auth.signUp({email,password});if(error){$('amsg').textContent=error.message;}else if(data.session){init();}else{$('amsg').textContent='Account created — check your email to confirm, then sign in.';}}
+function doSignout(){sb.auth.signOut().then(()=>location.reload());}
+
+/* ---- handle linking ---- */
+function handleView(msg){$('signout').classList.remove('hide');$('view').innerHTML=`
+ <div class="card"><h1>Link your handle</h1><div class="sub">Enter your Whatnot username so we can show you the spots you win. You only do this once.</div>
+ <label>Whatnot username</label><input id="wh" placeholder="e.g. pokefan_mike" value="${esc(HANDLE||'')}">
+ <div class="row" style="margin-top:14px"><button onclick="saveHandle()">Save</button></div>
+ <div class="msg err" id="hmsg">${esc(msg||'')}</div></div>`;}
+async function saveHandle(){const h=$('wh').value.trim();if(!h){$('hmsg').textContent='Enter your handle';return;}
+ const{error}=await sb.from('e10_viewers').upsert({user_id:MEID,whatnot_handle:h},{onConflict:'user_id'});
+ if(error){$('hmsg').textContent=error.message;return;}HANDLE=h;loadSession();}
+
+/* ---- session ---- */
+async function loadSession(){
+ if(CODE){try{await sb.rpc('e10_redeem_code',{code:CODE});}catch(e){}}
+ const{data}=await sb.from('e10_break_sessions').select('*').eq('status','active').order('created_at',{ascending:false}).limit(1);
+ if(!data||!data[0]){return noSession();}
+ SESSION=data[0];await loadSlots();subscribe();render();
+}
+async function loadSlots(){const{data}=await sb.from('e10_break_slots').select('*').eq('session_id',SESSION.id).order('position');SLOTS=data||[];}
+function subscribe(){if(chan)sb.removeChannel(chan);
+ chan=sb.channel('cp_'+SESSION.id)
+  .on('postgres_changes',{event:'*',schema:'public',table:'e10_break_slots',filter:'session_id=eq.'+SESSION.id},async()=>{await loadSlots();render();})
+  .on('postgres_changes',{event:'*',schema:'public',table:'e10_break_sessions',filter:'id=eq.'+SESSION.id},p=>{if(p.new){SESSION=p.new;render();}})
+  .subscribe();}
+function mine(s){return (s.buyer_uid&&s.buyer_uid===MEID)||(s.buyer_handle&&HANDLE&&s.buyer_handle.toLowerCase()===HANDLE.toLowerCase());}
+function noSession(){$('signout').classList.remove('hide');$('view').innerHTML=`
+ <div class="card"><h1>No live break yet</h1><div class="sub">Signed in as <b>${esc(HANDLE||ME)}</b>. When your streamer starts a break and you're in it, it shows here automatically.</div>
+ <label>Have a share code from the stream?</label><div class="row"><input id="cc" placeholder="paste code"><button onclick="redeem()">Join</button></div>
+ <div class="msg" id="cmsg"></div></div>`;}
+async function redeem(){const c=$('cc').value.trim();if(!c)return;const{data,error}=await sb.rpc('e10_redeem_code',{code:c});
+ if(error||!data){$('cmsg').textContent='That code did not match an active break.';return;}loadSession();}
+function render(){$('signout').classList.remove('hide');
+ const myslots=SLOTS.filter(mine);const avail=SLOTS.filter(s=>s.state==='available').length;
+ const caseOn=SESSION.case_hit||SLOTS.some(s=>s.case_hit&&mine(s));
+ let h=`<div class="card"><div class="top"><h1>${esc(SESSION.name||'Live Break')}</h1></div>
+  <div class="flags"><span class="flag ${SESSION.stash_or_pass?'on':''}">STASH-OR-PASS ${SESSION.stash_or_pass?'ON':'OFF'}</span>
+   <span class="flag">${avail} spots left</span></div>`;
+ if(caseOn)h+=`<div class="case">🔥 Case hit — check your spots!</div>`;
+ h+=`<div style="margin-top:12px"><div class="small">Your spots (${myslots.length})</div>`;
+ if(myslots.length){h+=myslots.map(s=>`<div class="mine"><div class="lab">YOURS · ${esc(s.state)}</div><div class="nm">${esc(s.label||'Spot')}</div>${s.case_hit?'<div class="st">🔥 case hit on this spot</div>':''}${s.tier?`<div class="st">tier ${esc(s.tier)}</div>`:''}</div>`).join('');}
+ else h+=`<div class="mine" style="background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.12)"><div class="st">You're not in a spot yet. Win one on the stream and it shows here instantly.</div></div>`;
+ h+=`</div><div class="small" style="margin-top:12px">${avail} of ${SLOTS.length} spots available · live</div></div>`;
+ $('view').innerHTML=h;
+}
+
+/* ---- boot ---- */
+async function init(){
+ const{data:{session}}=await sb.auth.getSession();
+ if(!session){authView('');return;}
+ ME=session.user.email;MEID=session.user.id;
+ const{data}=await sb.from('e10_viewers').select('whatnot_handle').eq('user_id',MEID).maybeSingle();
+ HANDLE=data&&data.whatnot_handle?data.whatnot_handle:null;
+ if(!HANDLE){handleView('');return;}
+ loadSession();
+}
+(async function(){
+ if(!window.supabase){$('view').innerHTML='<div class="card">Connection library failed to load.</div>';return;}
+ sb=window.supabase.createClient(SB_URL,SB_KEY);
+ init();
+})();
+</script>
+</body></html>
