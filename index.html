@@ -96,7 +96,7 @@ const TITLE_TPL={curiosity:["$P START — is [SET] worth ripping? [CHAR] chase w
 const DESC_TPL=["[SET] on the wall. Every card ships, packaged to protect, fast shipping. $P starts — [CHAR] and more. [DIFF].","Ripping [SET] — [FMT]. [DIFF]. $P starts, no reseals, all cards ship. Bookmark for [TIME] ET.","[CHAR] chase night. [SET] [FMT] at $P. Real odds, clean cards, quick shipping."];
 const SHORT_TPL=["$[LOW] pack → pulled the [CHAR]?! ([SET])","I opened $[X] of [SET] to see if it's WORTH IT","the rarest [CHAR] in [SET] just hit the wall","should I rip it or keep it sealed? [SET] [CHAR]"];
 const rand=a=>a[Math.floor(Math.random()*a.length)]||'';
-const fill=(t,d)=>t.replace(/\[CHAR\]/g,d.char).replace(/\[SET\]/g,d.set).replace(/\[FMT\]/g,d.fmt).replace(/\[HOST\]/g,d.host||'[host]').replace(/\[DIFF\]/g,d.diff).replace(/\[TIME\]/g,d.time||'8:00').replace(/\$P/g,'$'+d.price).replace(/\[LOW\]/g,d.low||'4').replace(/\[X\]/g,d.x||'400');
+const fill=(t,d)=>{const host=(d.host||'').trim();return t.replace(/\[CHAR\]/g,d.char).replace(/\[SET\]/g,d.set).replace(/\[FMT\]/g,d.fmt).replace(/\s*w\/\s*\[HOST\]/gi,host?(' w/ '+host):'').replace(/\[HOST\]/g,host).replace(/\[DIFF\]/g,d.diff).replace(/\[TIME\]/g,d.time||'8:00').replace(/\$P/g,'$'+d.price).replace(/\[LOW\]/g,d.low||'4').replace(/\[X\]/g,d.x||'400').replace(/\s{2,}/g,' ').trim();};
 
 /* ---------- state ---------- */
 const KEY='element10_v2';
@@ -238,14 +238,14 @@ function renderGen(){
    </div><div class="row" style="margin-top:14px"><button class="btn v" onclick="genSchedule()">Suggest a week</button><button class="btn sm" onclick="clearSchedule()">Clear schedule</button>${ROLE==='admin'?`<button class="btn sm" onclick="copyWeekToUniversal()" title="Publish this week to the team baseline everyone sees">Copy week → Universal</button>`:''}</div>
    <div id="gout"></div></div>`;
 }
-function genSchedule(){if(!canEditScoped())return roGuard();const per=+$('gPer').value,wknd=$('gWknd').value==='Yes',flag=$('gFlag').value,set=$('gSet').value;
+function genSchedule(){if(!canEditScoped())return roGuard();if(Object.values(S.shows||{}).flat().length&&!confirm('Replace the current schedule with a freshly generated week?'))return;const per=+$('gPer').value,wknd=$('gWknd').value==='Yes',flag=$('gFlag').value,set=$('gSet').value;
  const days=wknd?DAYS:DAYS.slice(0,5);
  const evening=[flag,'Grail Slab Break','Character Break'],afternoon=['$1 Singles Auction','RTYH','Vintage Rip'],morning=['RTYH','$1 Singles Auction'],late=['RTYH','Character Break'];
  const dur={'Ceiling Ladder':120,'Grail Slab Break':90,'Character Break':75,'RTYH':60,'$1 Singles Auction':90,'Box Break (new release)':90,'Pick-Your-Pokémon':60,'Repack':60,'Vintage Rip':75};
  S.shows={};let hi=0;
  days.forEach(day=>{['Evening','Afternoon','Late night','Morning'].slice(0,per).forEach(dp=>{
    const pool=dp==='Evening'?evening:dp==='Afternoon'?afternoon:dp==='Late night'?late:morning;
-   const fmt=pool.filter(f=>L('formats').includes(f))[0]||rand(L('formats'));
+   const fmt=dp==='Evening'?flag:(pool.filter(f=>L('formats').includes(f))[0]||rand(L('formats')));
    const d={set,char:rand(L('characters')),fmt,price:rand(['1','2']),host:S.streamers[hi++%S.streamers.length]||'',diff:rand(L('diff')),time:DAYPARTS.find(x=>x[0]===dp)[2].replace(/:00.*/,'')};
    (S.shows[day+'|'+dp]=S.shows[day+'|'+dp]||[]).push({name:fill(rand(TITLE_TPL.search),d),fmt,dur:dur[fmt]||60,host:d.host});
  });});
@@ -304,7 +304,7 @@ function calcBreak(){
  if(!slots.length){$('bout').innerHTML='<div style="color:var(--mut)">Add products, chases or auctions to model slots.</div>';BK._last=null;return;}
  const sorted=slots.slice().sort((a,b)=>b.val-a.val);const labels=['S','A','B','C'];
  sorted.forEach((s,i)=>{s.tier=labels[Math.min(T-1,Math.floor(i/(sorted.length/T)))];});
- const tierRatio=ti=>{const idx=labels.indexOf(ti);return 0.78+(idx/Math.max(1,T-1))*0.5;};
+ const tierRatio=ti=>{const idx=labels.indexOf(ti);return 1.28-(idx/Math.max(1,T-1))*0.5;};/* top tiers bid ABOVE value, lower tiers below — coherent with slot value */
  let totVal=0,gCold=0,gAvg=0,gHot=0;
  sorted.forEach(s=>{const avg=s.val*tierRatio(s.tier)*(1+MK*0.25);s.avg=avg;totVal+=s.val;gCold+=avg*0.85;gAvg+=avg;gHot+=avg*1.2;});
  const cost=BK.cost||0,net=g=>g*0.91-cost;
@@ -313,7 +313,7 @@ function calcBreak(){
    <div class="metric"><div class="n" style="font-size:22px">${money(gAvg)}</div><div class="l">Exp. gross (avg)</div></div>
    <div class="metric"><div class="n" style="font-size:22px">${money(net(gAvg))}</div><div class="l">Proj. profit</div></div>
    <div class="metric"><div class="n" style="font-size:22px">${sorted.length}</div><div class="l">Total slots</div></div></div>
-  <div style="font-size:12px;color:var(--mut);margin:10px 0">Room range — cold ${money(gCold)} → hot ${money(gHot)} · card value ${money(totVal)} · sell-through ${totVal?(gAvg/totVal*100).toFixed(0):0}% · minus cost ${money(cost)} &amp; ~9% fees</div>
+  <div style="font-size:12px;color:var(--mut);margin:10px 0">Room range — cold ${money(gCold)} → hot ${money(gHot)} · card value ${money(totVal)} · gross vs card value ${totVal?(gAvg/totVal*100).toFixed(0):0}% · minus cost ${money(cost)} &amp; ~9% fees</div>
   <div style="overflow:auto;max-height:300px;border:1px solid var(--line);border-radius:10px"><table><tr><th>Tier</th><th>Slot contents</th><th>Value</th><th>Exp. bid</th></tr>${rows}</table></div>`;
  BK._last={slots:sorted.length,tiers:T,gross:gAvg};
 }
@@ -373,7 +373,7 @@ function svgBars(entries){if(!entries.length)return '<div style="color:var(--mut
  return s+`</svg>`;}
 function svgSpark(){const base=invTotals().val||1000,pts=[];for(let i=0;i<12;i++)pts.push(base*(0.92+0.16*Math.sin(i/2)+i/60));
  const max=Math.max(...pts),min=Math.min(...pts),W=440,H=90;const path=pts.map((p,i)=>`${(i/(pts.length-1)*W).toFixed(0)},${(H-((p-min)/(max-min||1))*(H-14)-6).toFixed(0)}`).join(' ');
- return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:470px"><polyline points="${path}" fill="none" stroke="#1F5EFF" stroke-width="2" stroke-dasharray="5 4"/></svg><div class="lab" style="margin-top:6px">Illustrative — live market movement plugs in via API once connected.</div>`;}
+ return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:470px"><polyline points="${path}" fill="none" stroke="#1F5EFF" stroke-width="2" stroke-dasharray="5 4"/></svg><div class="lab" style="margin-top:6px;color:var(--red)">⚠ Illustrative sample — not live data. Connect a price source (TCGplayer / PriceCharting) to populate.</div>`;}
 function dOverview(){const t=invTotals();const cat=Object.entries(t.byCat).map(([k,v])=>({label:k,value:v})).sort((a,b)=>b.value-a.value);
  let h=`<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(138px,1fr));margin-bottom:16px">
    <div class="metric"><div class="n">${money(t.val)}</div><div class="l">Inventory value</div></div>
