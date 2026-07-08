@@ -2,17 +2,17 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <title>Element 10 — Live Companion</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Grotesk:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{--volt:#C6FF3A;--ink:#0A0B0D;--red:#E8332B;--gold:#ffd23a;--blue:#1F5EFF}
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{min-height:100%;background:#05060a;color:#fff;font-family:'Space Grotesk',system-ui,sans-serif}
+html,body{min-height:100%;background:#05060a;color:#fff;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif}
 body{background:radial-gradient(900px 500px at 50% -10%,rgba(198,255,58,.10),transparent 60%),radial-gradient(700px 500px at 90% 110%,rgba(31,94,255,.12),transparent 60%),#05060a}
 .wrap{max-width:520px;margin:0 auto;padding:22px 18px 40px}
-.brand{font-family:'Anton',sans-serif;font-size:24px;text-transform:uppercase;letter-spacing:.02em}
+.brand{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:24px;text-transform:uppercase;letter-spacing:.02em}
 .brand b{background:var(--volt);color:#000;padding:0 7px;border-radius:5px}
 .card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:16px 18px;margin-top:14px}
-h1{font-family:'Anton',sans-serif;text-transform:uppercase;font-size:26px;line-height:1;margin:0}
+h1{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;text-transform:uppercase;font-size:26px;line-height:1;margin:0}
 .sub{color:#9aa0a6;font-size:13px;margin-top:4px}
 label{font-size:12px;color:#9aa0a6;display:block;margin:8px 0 4px}
 input{width:100%;padding:11px;border-radius:9px;border:1px solid #2a2f36;background:#12151a;color:#fff;font-family:inherit;font-size:15px}
@@ -21,17 +21,18 @@ button.ghost{background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(2
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .msg{color:#9aa0a6;font-size:12px;margin-top:8px}.err{color:var(--red)}
 .flags{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-.flag{font-family:'Space Mono',monospace;font-weight:700;font-size:12px;padding:6px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.2)}
+.flag{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace;font-weight:700;font-size:12px;padding:6px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.2)}
 .flag.on{background:var(--volt);color:#000;border-color:var(--volt)}
 .mine{background:rgba(198,255,58,.12);border:1px solid rgba(198,255,58,.5);border-radius:12px;padding:12px 14px;margin-top:10px}
-.mine .lab{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.1em;color:var(--volt)}
-.mine .nm{font-family:'Anton',sans-serif;text-transform:uppercase;font-size:20px;margin-top:2px}
-.mine .st{font-family:'Space Mono',monospace;font-size:12px;color:#c7ccd2;margin-top:4px}
-.big{font-family:'Anton',sans-serif;font-size:40px}
+.mine .lab{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace;font-size:10px;letter-spacing:.1em;color:var(--volt)}
+.mine .nm{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;text-transform:uppercase;font-size:20px;margin-top:2px}
+.mine .st{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace;font-size:12px;color:#c7ccd2;margin-top:4px}
+.big{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:40px}
 .hide{display:none!important}
-.case{background:linear-gradient(90deg,rgba(255,210,58,.15),rgba(255,210,58,.35));border:1px solid var(--gold);border-radius:12px;padding:12px;text-align:center;font-family:'Anton',sans-serif;text-transform:uppercase;font-size:20px;margin-top:12px;color:#ffe9a3}
+.case{background:linear-gradient(90deg,rgba(255,210,58,.15),rgba(255,210,58,.35));border:1px solid var(--gold);border-radius:12px;padding:12px;text-align:center;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;text-transform:uppercase;font-size:20px;margin-top:12px;color:#ffe9a3}
 .top{display:flex;justify-content:space-between;align-items:center}
 .small{font-size:12px;color:#9aa0a6}
+.brand,h1,.mine .nm,.big,.case{font-weight:700;letter-spacing:.01em}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 </head><body>

@@ -2,11 +2,11 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>Element 10 — Live Opening</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Grotesk:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{--ink:#0A0B0D;--volt:#C6FF3A;--green:#3ad13a;--blue:#1F5EFF;--silver:#e9ecee;--mut:#8b9098;--red:#E8332B;--gold:#ffd23a}
 *{box-sizing:border-box;margin:0;padding:0;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
-html,body{height:100%;overflow:hidden;background:#05060a;font-family:'Space Grotesk',system-ui,sans-serif;color:#fff;touch-action:none}
+html,body{height:100%;overflow:hidden;background:#05060a;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:#fff;touch-action:none}
 #stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:
  radial-gradient(1200px 700px at 50% -10%,rgba(58,209,58,.20),transparent 60%),
  radial-gradient(900px 600px at 85% 110%,rgba(31,94,255,.16),transparent 60%),
@@ -14,15 +14,15 @@ html,body{height:100%;overflow:hidden;background:#05060a;font-family:'Space Grot
  #05060a;overflow:hidden}
 #fx{position:absolute;inset:0;pointer-events:none;opacity:.5;background-image:radial-gradient(1px 1px at 20% 30%,#fff,transparent),radial-gradient(1px 1px at 70% 60%,#cfe,transparent),radial-gradient(1px 1px at 40% 80%,#fff,transparent),radial-gradient(1px 1px at 85% 20%,#dfe,transparent),radial-gradient(1px 1px at 55% 45%,#fff,transparent);background-size:auto;animation:tw 6s ease-in-out infinite alternate}
 @keyframes tw{from{opacity:.25}to{opacity:.6}}
-.brand{position:fixed;top:20px;left:24px;font-family:'Anton',sans-serif;font-size:26px;letter-spacing:.02em;text-transform:uppercase;z-index:40;opacity:.92}
+.brand{position:fixed;top:20px;left:24px;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:26px;letter-spacing:.02em;text-transform:uppercase;z-index:40;opacity:.92}
 .brand b{background:var(--volt);color:#000;padding:0 8px;border-radius:6px}
 .hud{position:fixed;top:22px;right:24px;z-index:40;display:flex;gap:8px;align-items:center;font-size:12px;color:var(--mut)}
-.hud .prog{font-family:'Space Mono',monospace;color:#fff;background:rgba(255,255,255,.08);padding:5px 10px;border-radius:999px}
-.btn{font-family:'Space Grotesk';font-weight:700;font-size:13px;border:none;border-radius:999px;padding:11px 20px;cursor:pointer;background:var(--volt);color:#000}
+.hud .prog{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace;color:#fff;background:rgba(255,255,255,.08);padding:5px 10px;border-radius:999px}
+.btn{font-family:'Inter';font-weight:700;font-size:13px;border:none;border-radius:999px;padding:11px 20px;cursor:pointer;background:var(--volt);color:#000}
 .btn.ghost{background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.18)}
 .hide{display:none!important}
 .center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px}
-.title{font-family:'Anton',sans-serif;text-transform:uppercase;font-size:clamp(28px,5vw,58px);letter-spacing:.01em;text-align:center;line-height:.98;text-shadow:0 4px 40px rgba(58,209,58,.35)}
+.title{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;text-transform:uppercase;font-size:clamp(28px,5vw,58px);letter-spacing:.01em;text-align:center;line-height:.98;text-shadow:0 4px 40px rgba(58,209,58,.35)}
 .sub{color:var(--mut);font-size:15px;text-align:center;max-width:520px}
 /* ---- PACK ---- */
 .pack{position:relative;width:min(46vh,340px);aspect-ratio:5/8;cursor:pointer;transition:transform .25s;filter:drop-shadow(0 30px 60px rgba(0,0,0,.6))}
@@ -35,9 +35,9 @@ html,body{height:100%;overflow:hidden;background:#05060a;font-family:'Space Grot
 .pack .ring{position:absolute;inset:12%;border-radius:50%;background:radial-gradient(circle,rgba(58,209,58,.28),transparent 62%);animation:pulse 2.6s ease-in-out infinite}
 @keyframes pulse{0%,100%{transform:scale(.92);opacity:.7}50%{transform:scale(1.06);opacity:1}}
 .shield{position:absolute;left:50%;top:44%;transform:translate(-50%,-50%);width:46%;filter:drop-shadow(0 6px 18px rgba(0,0,0,.35))}
-.pack .plabel{position:absolute;left:0;right:0;bottom:9%;text-align:center;font-family:'Anton';text-transform:uppercase;color:#0a0b0d;font-size:15px;letter-spacing:.03em}
+.pack .plabel{position:absolute;left:0;right:0;bottom:9%;text-align:center;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;text-transform:uppercase;color:#0a0b0d;font-size:15px;letter-spacing:.03em}
 .pack .chips{position:absolute;left:0;right:0;bottom:4%;display:flex;gap:6px;justify-content:center}
-.pack .chip{background:rgba(10,11,13,.06);border:1px solid rgba(10,11,13,.18);border-radius:8px;padding:3px 8px;font-size:9px;font-family:'Space Mono';color:#0a0b0d}
+.pack .chip{background:rgba(10,11,13,.06);border:1px solid rgba(10,11,13,.18);border-radius:8px;padding:3px 8px;font-size:9px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace;color:#0a0b0d}
 .pack.torn .top{animation:tearTop .7s forwards cubic-bezier(.4,1.4,.5,1)}
 .pack.torn .bot{animation:tearBot .7s forwards cubic-bezier(.4,1.4,.5,1)}
 .pack .top,.pack .bot{position:absolute;left:0;right:0;overflow:hidden}
@@ -49,7 +49,7 @@ html,body{height:100%;overflow:hidden;background:#05060a;font-family:'Space Grot
 .cardWrap{position:relative;width:min(50vh,350px);aspect-ratio:5/7}
 .card{position:absolute;inset:0;border-radius:14px;overflow:hidden;background:#0d0f13;box-shadow:0 30px 70px rgba(0,0,0,.6)}
 .card .art{position:absolute;inset:0;background-size:contain;background-repeat:no-repeat;background-position:center;background-color:#0d0f13}
-.card .artph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:20px;font-family:'Anton';text-transform:uppercase;font-size:26px;color:#fff;background:
+.card .artph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:20px;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;text-transform:uppercase;font-size:26px;color:#fff;background:
  radial-gradient(circle at 50% 35%,rgba(58,209,58,.35),transparent 60%),linear-gradient(160deg,#20242b,#0d0f13)}
 .card .holoC{position:absolute;inset:0;pointer-events:none;mix-blend-mode:color-dodge;opacity:0;background:linear-gradient(115deg,transparent 25%,rgba(255,0,180,.6),rgba(0,220,255,.6),rgba(120,255,60,.6),transparent 75%);background-size:250% 250%;transition:opacity .6s}
 .card.revealed .holoC{opacity:.5;animation:holoShift 4s linear infinite}
@@ -59,24 +59,24 @@ html,body{height:100%;overflow:hidden;background:#05060a;font-family:'Space Grot
 .infoPanel{position:relative;width:min(50vh,350px);z-index:5;background:rgba(6,8,11,.9);border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:11px 14px;min-height:88px;overflow:hidden}
 .infoGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px 14px;position:relative;z-index:1}
 .infoGrid .k{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut)}
-.infoGrid .v{font-family:'Space Mono';font-weight:700;font-size:15px;color:#fff;margin-top:1px}
+.infoGrid .v{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace;font-weight:700;font-size:15px;color:#fff;margin-top:1px}
 .scratch{position:absolute;inset:0;z-index:3;cursor:grab;touch-action:none}
 .scratch canvas{width:100%;height:100%;display:block;border-radius:0}
-.scratchHint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Anton';text-transform:uppercase;letter-spacing:.08em;color:#0a0b0d;font-size:17px;pointer-events:none}
+.scratchHint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;text-transform:uppercase;letter-spacing:.08em;color:#0a0b0d;font-size:17px;pointer-events:none}
 /* cover card (opaque — physically slides off to reveal) */
 .cover{position:absolute;inset:0;z-index:7;border-radius:14px;cursor:grab;touch-action:none;will-change:transform;
  background:linear-gradient(135deg,#eef3f5,#c3cfd4 30%,#fff 50%,#b9c6cc 70%,#eef3f5);overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.55)}
 .cover .holo{position:absolute;inset:0;mix-blend-mode:overlay;opacity:.55;background:linear-gradient(115deg,transparent 20%,rgba(255,0,180,.5),rgba(0,220,255,.5),rgba(120,255,60,.5),transparent 80%);background-size:300% 300%;animation:holoShift 5s linear infinite}
 .cover .cc{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}
-.cover .cc .peelhint{position:absolute;bottom:14px;left:0;right:0;text-align:center;font-size:11px;font-family:'Space Mono';color:#0a0b0d;transition:opacity .4s}
+.cover .cc .peelhint{position:absolute;bottom:14px;left:0;right:0;text-align:center;font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace;color:#0a0b0d;transition:opacity .4s}
 .cover.gone{transition:transform .5s cubic-bezier(.36,.9,.4,1)}
 .corner{position:absolute;top:0;right:0;width:54px;height:54px;border-radius:0 14px 0 60px;background:linear-gradient(225deg,rgba(58,209,58,.95),rgba(255,255,255,.25));z-index:8;cursor:grab;box-shadow:-3px 3px 8px rgba(0,0,0,.3)}
 /* card detail bar — sits BELOW the slab */
 .detail{position:relative;width:min(50vh,350px);z-index:6;background:rgba(6,8,11,.72);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:11px 14px;opacity:0;transform:translateY(10px);transition:.5s}
 .detail.show{opacity:1;transform:none}
-.detail .nm{font-family:'Anton';text-transform:uppercase;font-size:20px;line-height:1}
+.detail .nm{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;text-transform:uppercase;font-size:20px;line-height:1}
 .detail .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center}
-.badge{border-radius:999px;padding:5px 12px;font-family:'Space Mono';font-weight:700;font-size:13px}
+.badge{border-radius:999px;padding:5px 12px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace;font-weight:700;font-size:13px}
 .badge.val{background:var(--volt);color:#000}
 .badge.buy{background:rgba(31,94,255,.9);color:#fff}
 .badge.tier{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.25)}
@@ -85,17 +85,19 @@ html,body{height:100%;overflow:hidden;background:#05060a;font-family:'Space Grot
 #recap{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:30px}
 .recapGrid{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;max-width:90vw}
 .rc{width:120px}
-.rc .thumb{width:120px;aspect-ratio:5/7;border-radius:10px;background-size:contain;background-repeat:no-repeat;background-position:center;border:1px solid rgba(255,255,255,.14);background-color:#0d0f13;display:flex;align-items:center;justify-content:center;text-align:center;font-family:'Anton';font-size:12px;text-transform:uppercase;padding:6px}
-.rc .cap{font-family:'Space Mono';font-size:12px;text-align:center;margin-top:6px;color:#dfe}
-.total{font-family:'Anton';text-transform:uppercase;font-size:clamp(24px,4vw,44px);text-shadow:0 4px 30px rgba(58,209,58,.4)}
+.rc .thumb{width:120px;aspect-ratio:5/7;border-radius:10px;background-size:contain;background-repeat:no-repeat;background-position:center;border:1px solid rgba(255,255,255,.14);background-color:#0d0f13;display:flex;align-items:center;justify-content:center;text-align:center;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:12px;text-transform:uppercase;padding:6px}
+.rc .cap{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace;font-size:12px;text-align:center;margin-top:6px;color:#dfe}
+.total{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;text-transform:uppercase;font-size:clamp(24px,4vw,44px);text-shadow:0 4px 30px rgba(58,209,58,.4)}
 .flash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:60}
 .flash.on{animation:fl .5s ease-out}
 @keyframes fl{0%{opacity:.85}100%{opacity:0}}
 #confetti{position:fixed;inset:0;pointer-events:none;z-index:70}
-#celebrate{position:fixed;top:11%;left:50%;transform:translateX(-50%) scale(.8);z-index:75;font-family:'Anton',sans-serif;text-transform:uppercase;font-size:clamp(28px,6vw,64px);color:#ffd23a;text-shadow:0 4px 34px rgba(255,210,58,.65);opacity:0;transition:.3s;pointer-events:none;text-align:center;letter-spacing:.03em}
+#celebrate{position:fixed;top:11%;left:50%;transform:translateX(-50%) scale(.8);z-index:75;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;text-transform:uppercase;font-size:clamp(28px,6vw,64px);color:#ffd23a;text-shadow:0 4px 34px rgba(255,210,58,.65);opacity:0;transition:.3s;pointer-events:none;text-align:center;letter-spacing:.03em}
 #celebrate.on{opacity:1;transform:translateX(-50%) scale(1)}
 #stage.shake{animation:shk .6s cubic-bezier(.36,.07,.19,.97)}
 @keyframes shk{10%{transform:translate(-6px,3px)}20%{transform:translate(7px,-4px)}30%{transform:translate(-8px,2px)}40%{transform:translate(6px,4px)}50%{transform:translate(-5px,-3px)}60%{transform:translate(5px,2px)}70%{transform:translate(-4px,3px)}80%{transform:translate(3px,-2px)}100%{transform:none}}
+/* Inter has no built-in display weight like the prior Anton face — make former-display elements bold. */
+.brand,.title,.card .artph,.scratchHint,.pack .plabel,.detail .nm,.rc .thumb,.total,#celebrate{font-weight:700}
 </style></head>
 <body>
 <div class="brand">ELEMENT<b>10</b></div>
