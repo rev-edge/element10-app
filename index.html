@@ -55,6 +55,25 @@ table{border-collapse:collapse;width:100%;font-size:13px}
 th{font-family:var(--mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
 td{padding:8px 10px;border-bottom:1px solid var(--line)}
 .tierS{color:var(--red);font-weight:700}.tierA{color:var(--blue);font-weight:700}.tierB{color:#0a8a4a;font-weight:700}.tierC{color:var(--mut);font-weight:700}
+/* ── shared data-grid: framed, ruled, zebra (built from the app's own tokens) ── */
+.egrid{border:0.5px solid var(--line);border-radius:var(--r);overflow:auto;background:var(--surface)}
+.egrid table{border-collapse:collapse;width:100%;font-size:13px}
+.egrid.wide table{min-width:680px}
+.egrid th{background:var(--surface2);border:0.5px solid var(--line);border-bottom:1.5px solid var(--line);white-space:nowrap;position:sticky;top:0;z-index:1}
+.egrid td{border:0.5px solid var(--line);vertical-align:middle}
+.egrid tr:nth-child(even) td{background:var(--bg)}
+.egrid th.srt{cursor:pointer;user-select:none}
+.egrid th.srt .chev{color:var(--mut2);margin-left:5px;font-size:9px}
+.egrid th.srt.on .chev{color:var(--ink)}
+.egrid td .actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-end}
+/* ── toolbar above a grid: bordered fields + segmented control ── */
+.etool{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px}
+.etool>div{display:flex;flex-direction:column}
+.eseg{display:inline-flex;border:0.5px solid var(--line);border-radius:8px;overflow:hidden}
+.eseg button{border:none;border-right:0.5px solid var(--line);background:var(--surface);color:var(--ink);font-family:var(--sans);font-weight:500;font-size:12.5px;padding:9px 14px;cursor:pointer}
+.eseg button:last-child{border-right:none}
+.eseg button:hover{background:var(--surface2)}
+.eseg button.on{background:var(--ink);color:#fff}
 .ov{position:fixed;inset:0;background:#0008;display:none;align-items:center;justify-content:center;z-index:60;padding:18px}
 .modal{background:var(--surface);border-radius:var(--r);padding:22px;max-width:520px;width:100%;max-height:88vh;overflow:auto}
 .hero{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:14px}
@@ -314,12 +333,7 @@ function saveCopySet(){if(!CS_LAST||!CS_LAST.items.length){toast('Generate copy 
  const name=($('csName')&&$('csName').value.trim())||(CS_LAST.type+' set');
  S.copySets.unshift({id:'cs'+Date.now(),name,ts:Date.now(),type:CS_LAST.type,items:CS_LAST.items});save();renderCopyHist();const nm=$('csName');if(nm)nm.value='';toast('Saved copy set');}
 function renderCopyHist(){const el=$('csHist');if(!el)return;
- el.innerHTML=(S.copySets||[]).length?S.copySets.map(cs=>`<div class="filerow"><span class="nm">📝 ${esc(cs.name)} <span class="lab">${esc(cs.type)} · ${cs.items.length} · ${cs.ts?new Date(cs.ts).toLocaleDateString():''}</span></span>
-   <button class="btn sm" onclick="reopenCopy('${cs.id}')">Reopen</button>
-   <button class="btn sm" onclick="dupCopy('${cs.id}')">Duplicate</button>
-   <button class="btn sm" onclick="renameCopy('${cs.id}')">Rename</button>
-   <select onchange="attachCopyToShow('${cs.id}',this.value);this.value=''" style="max-width:150px;font-size:12px">${showPickerOptions('')}</select>
-   <button class="btn x" onclick="delCopy('${cs.id}')">✕</button></div>`).join(''):'<div style="color:var(--mut);font-size:13px">No saved copy sets yet. Generate, name it, then Save set.</div>';}
+ el.innerHTML=(S.copySets||[]).length?`<div class="egrid wide"><table><tr><th>Copy set</th><th>Details</th><th></th></tr>${S.copySets.map(cs=>`<tr><td>📝 ${esc(cs.name)}</td><td class="lab" style="text-transform:none;letter-spacing:0">${esc(cs.type)} · ${cs.items.length} · ${cs.ts?new Date(cs.ts).toLocaleDateString():''}</td><td><div class="actions"><button class="btn sm" onclick="reopenCopy('${cs.id}')">Reopen</button><button class="btn sm" onclick="dupCopy('${cs.id}')">Duplicate</button><button class="btn sm" onclick="renameCopy('${cs.id}')">Rename</button><select onchange="attachCopyToShow('${cs.id}',this.value);this.value=''" style="max-width:150px;font-size:12px">${showPickerOptions('')}</select><button class="btn x" onclick="delCopy('${cs.id}')">✕</button></div></td></tr>`).join('')}</table></div>`:'<div style="color:var(--mut);font-size:13px">No saved copy sets yet. Generate, name it, then Save set.</div>';}
 function reopenCopy(id){const cs=(S.copySets||[]).find(x=>x.id===id);if(!cs)return;CS_LAST={type:cs.type,items:cs.items};const o=$('cout');if(o)o.innerHTML=copyOutHTML(cs.items);const nm=$('csName');if(nm)nm.value=cs.name;toast('Reopened '+cs.name);}
 function dupCopy(id){if(!canEditScoped())return roGuard();const cs=(S.copySets||[]).find(x=>x.id===id);if(!cs)return;S.copySets.unshift({id:'cs'+Date.now(),name:cs.name+' (copy)',ts:Date.now(),type:cs.type,items:cs.items.slice()});save();renderCopyHist();}
 function renameCopy(id){if(!canEditScoped())return roGuard();const cs=(S.copySets||[]).find(x=>x.id===id);if(!cs)return;const v=prompt('Rename copy set',cs.name);if(v==null)return;cs.name=v.trim()||cs.name;save();renderCopyHist();}
@@ -429,7 +443,7 @@ function calcBreak(){
    <div class="metric"><div class="n" style="font-size:22px">${money(net(gAvg))}</div><div class="l">Proj. profit</div></div>
    <div class="metric"><div class="n" style="font-size:22px">${sorted.length}</div><div class="l">Total slots</div></div></div>
   <div style="font-size:12px;color:var(--mut);margin:10px 0">Room range — cold ${money(gCold)} → hot ${money(gHot)} · card value ${money(totVal)} · gross vs card value ${totVal?(gAvg/totVal*100).toFixed(0):0}% · minus cost ${money(cost)} &amp; ~9% fees</div>
-  <div style="overflow:auto;max-height:300px;border:1px solid var(--line);border-radius:10px"><table><tr><th>Tier</th><th>Slot contents</th><th>Value</th><th>Exp. bid</th></tr>${rows}</table></div>`;
+  <div class="egrid" style="max-height:300px"><table><tr><th>Tier</th><th>Slot contents</th><th>Value</th><th>Exp. bid</th></tr>${rows}</table></div>`;
  BK._last={slots:sorted.length,tiers:T,gross:gAvg,
    rows:sorted.map(s=>({label:s.items.map(i=>i.name).join(' + '),tier:s.tier,val:s.val,exp:s.avg})),
    economics:{grossAvg:gAvg,profit:net(gAvg),cost:cost,totVal:totVal,cold:gCold,hot:gHot}};
@@ -444,12 +458,7 @@ function saveBreak(){if(!BK._last)return;if(!canEditScoped())return roGuard();
    invItems:BK.invItems.slice()});
  save();renderBreakHist();const nm=$('bName');if(nm)nm.value='';toast('Saved break model');}
 function renderBreakHist(){const el=$('bkHist');if(!el)return;
- el.innerHTML=(S.breaks||[]).length?S.breaks.map(b=>`<div class="filerow"><span class="nm">📊 ${esc(b.name)} <span class="lab">${b.slots} slots · ${b.tiers} tiers · exp ${money(b.gross)}${b.economics?' · profit '+money(b.economics.profit):''}${(b.invItems&&b.invItems.length)?' · '+b.invItems.length+' inv':''}</span></span>
-   <button class="btn sm" onclick="reopenBreak('${b.id}')">Reopen</button>
-   <button class="btn sm" onclick="dupBreak('${b.id}')">Duplicate</button>
-   <button class="btn sm" onclick="renameBreak('${b.id}')">Rename</button>
-   <select onchange="attachBreakToShow('${b.id}',this.value);this.value=''" style="max-width:150px;font-size:12px">${showPickerOptions('')}</select>
-   <button class="btn x" onclick="delBreakById('${b.id}')">✕</button></div>`).join(''):'<div style="color:var(--mut);font-size:13px">No saved models yet. Build one above, name it, then Save model.</div>';}
+ el.innerHTML=(S.breaks||[]).length?`<div class="egrid wide"><table><tr><th>Break model</th><th>Details</th><th></th></tr>${S.breaks.map(b=>`<tr><td>📊 ${esc(b.name)}</td><td class="lab" style="text-transform:none;letter-spacing:0">${b.slots} slots · ${b.tiers} tiers · exp ${money(b.gross)}${b.economics?' · profit '+money(b.economics.profit):''}${(b.invItems&&b.invItems.length)?' · '+b.invItems.length+' inv':''}</td><td><div class="actions"><button class="btn sm" onclick="reopenBreak('${b.id}')">Reopen</button><button class="btn sm" onclick="dupBreak('${b.id}')">Duplicate</button><button class="btn sm" onclick="renameBreak('${b.id}')">Rename</button><select onchange="attachBreakToShow('${b.id}',this.value);this.value=''" style="max-width:150px;font-size:12px">${showPickerOptions('')}</select><button class="btn x" onclick="delBreakById('${b.id}')">✕</button></div></td></tr>`).join('')}</table></div>`:'<div style="color:var(--mut);font-size:13px">No saved models yet. Build one above, name it, then Save model.</div>';}
 function reopenBreak(id){const b=(S.breaks||[]).find(x=>x.id===id);if(!b)return;
  if(b.inputs){BK.products=(b.inputs.products||[]).slice();BK.chases=(b.inputs.chases||[]).slice();BK.auctions=(b.inputs.auctions||[]).slice();BK.cost=+b.inputs.cost||0;}
  else{BK.products=[];BK.chases=[];BK.auctions=[];BK.cost=0;}
@@ -543,7 +552,7 @@ function invRows(){let rows=invView();const q=invSearch.trim().toLowerCase();
  else if(invStatusF==='reserved')rows=rows.filter(i=>invReserved(i)>0);
  const c=invSort.col,d=invSort.dir,key=i=>c==='name'?(i.name||'').toLowerCase():c==='onhand'?invAvailable(i):c==='cost'?(+i.cost||0):c==='market'?(+i.value||0):c==='gain'?((+i.value||0)-(+i.cost||0))*(+i.qty||1):c==='age'?invAge(i):0;
  return rows.slice().sort((a,b)=>{const ka=key(a),kb=key(b);return (ka<kb?-1:ka>kb?1:0)*d;});}
-function invSortTh(col,label){const on=invSort.col===col;return `<th style="cursor:pointer;white-space:nowrap" onclick="invSortSet('${col}')">${label}${on?(invSort.dir>0?' ▲':' ▼'):''}</th>`;}
+function invSortTh(col,label){const on=invSort.col===col;return `<th class="srt${on?' on':''}" onclick="invSortSet('${col}')">${label}<span class="chev">${on?(invSort.dir>0?'▲':'▼'):'↕'}</span></th>`;}
 function invSortSet(col){if(invSort.col===col)invSort.dir*=-1;else{invSort.col=col;invSort.dir=1;}renderInvList();}
 function invRowHTML(i,admin){const q=+i.qty||0,av=invAvailable(i),rsv=invReserved(i),g=((+i.value||0)-(+i.cost||0))*q,age=invAge(i);
  const pills=(i.reservations||[]).map(r=>`<span class="pill" style="margin:2px">${esc(r.showLabel||'show')} ×${r.qty}${(admin||r.streamerUid===MEID)?` <a onclick="releaseReservation('${i.id}','${r.showId}','${r.streamerUid}')" style="color:var(--red)">✕</a>`:''}</span>`).join('')||'<span class="lab">—</span>';
@@ -558,7 +567,7 @@ function invRowHTML(i,admin){const q=+i.qty||0,av=invAvailable(i),rsv=invReserve
   <td class="mono" style="${age>30?'color:var(--red)':''}">${age}d${age>30?' ⚠':''}</td>
   <td style="white-space:nowrap"><button class="btn sm" onclick="reserveModal('${i.id}')">Reserve</button> <button class="btn sm" onclick="sellModal('${i.id}')">Sold</button>${admin?` <select style="max-width:110px;font-size:11px" onchange="reassignInv('${i.id}',this.value)">${ownerOpts(i.owner)}</select>`:''} <button class="btn x" onclick="delInv('${i.id}')">✕</button></td></tr>`;}
 function renderInvList(){const box=$('invListBox');if(!box)return;const admin=ROLE==='admin';const rows=invRows();
- box.innerHTML=`<div style="overflow:auto;margin-top:12px"><table><tr>${invSortTh('name','Item')}${invSortTh('onhand','On hand / free')}${invSortTh('cost','Unit cost')}${invSortTh('market','Market')}${invSortTh('gain','Gain')}<th>Allocated to</th>${invSortTh('age','Age')}<th></th></tr>${rows.map(i=>invRowHTML(i,admin)).join('')||`<tr><td colspan="8" style="color:var(--mut)">No items match these filters.</td></tr>`}</table></div><div class="lab" style="margin-top:8px">${rows.length} shown · reservations hard-lock units to a show (app-enforced). ${admin?'Admin: reassign owner, reserve beyond free, release anyone.':'You can release only your own reservations.'}</div>`;}
+ box.innerHTML=`<div class="egrid wide" style="margin-top:12px"><table><tr>${invSortTh('name','Item')}${invSortTh('onhand','On hand / free')}${invSortTh('cost','Unit cost')}${invSortTh('market','Market')}${invSortTh('gain','Gain')}<th>Allocated to</th>${invSortTh('age','Age')}<th></th></tr>${rows.map(i=>invRowHTML(i,admin)).join('')||`<tr><td colspan="8" style="color:var(--mut)">No items match these filters.</td></tr>`}</table></div><div class="lab" style="margin-top:8px">${rows.length} shown · reservations hard-lock units to a show (app-enforced). ${admin?'Admin: reassign owner, reserve beyond free, release anyone.':'You can release only your own reservations.'}</div>`;}
 function dInventory(){const admin=ROLE==='admin';const rl=invRollup();const sets=[...new Set(S.inventory.map(i=>i.set).filter(Boolean))].sort();
  let h=`<div class="card"><h3 style="font-size:15px">Add inventory</h3>
    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(128px,1fr));margin-top:10px">
@@ -578,9 +587,9 @@ function dInventory(){const admin=ROLE==='admin';const rl=invRollup();const sets
    <div class="metric"><div class="n">${money(rl.committed)}</div><div class="l">Committed to shows</div></div>
    <div class="metric"><div class="n">${money(rl.free)}</div><div class="l">Free to break</div></div>
    <div class="metric"><div class="n" style="color:${rl.aging>0?'var(--red)':'inherit'}">${money(rl.aging)}</div><div class="l">Aging &gt;30d idle</div></div></div>`;
- h+=`<div class="card" style="margin-top:16px"><div class="row" style="gap:8px;align-items:flex-end">
+ h+=`<div class="card" style="margin-top:16px"><div class="etool">
      <div style="flex:2;min-width:150px"><label>Search</label><input id="invSearchBox" value="${esc(invSearch)}" placeholder="item name…" oninput="invSearch=this.value;renderInvList()"></div>
-     <div><label>Owner</label><select onchange="invFilter=this.value;localStorage.setItem('e10_invfilter',invFilter);dInventory()"><option value="mine" ${invFilter==='mine'?'selected':''}>Mine</option><option value="all" ${invFilter==='all'?'selected':''}>Everyone</option></select></div>
+     <div><label>Owner</label><div class="eseg"><button class="${invFilter==='mine'?'on':''}" onclick="if(invFilter!=='mine'){invFilter='mine';localStorage.setItem('e10_invfilter',invFilter);dInventory();}">Mine</button><button class="${invFilter==='all'?'on':''}" onclick="if(invFilter!=='all'){invFilter='all';localStorage.setItem('e10_invfilter',invFilter);dInventory();}">Everyone</button></div></div>
      <div><label>Category</label><select onchange="invCatF=this.value;renderInvList()"><option value="">All</option>${INVCATS.map(c=>`<option ${invCatF===c?'selected':''}>${c}</option>`).join('')}</select></div>
      <div><label>Set</label><select onchange="invSetF=this.value;renderInvList()"><option value="">All</option>${sets.map(s=>`<option ${invSetF===s?'selected':''}>${esc(s)}</option>`).join('')}</select></div>
      <div><label>Status</label><select onchange="invStatusF=this.value;renderInvList()">${[['all','All'],['onhand','On hand'],['free','Has free'],['reserved','Reserved'],['sold','Sold']].map(([v,l])=>`<option value="${v}" ${invStatusF===v?'selected':''}>${l}</option>`).join('')}</select></div>
@@ -605,7 +614,7 @@ function buyListHTML(){
    return `<tr><td><b>${esc(set)}</b></td><td>${pills}</td><td class="mono">${d.qty}</td><td class="mono">${free}</td><td class="mono" style="color:${gap>0?'var(--red)':'#0a8a4a'}">${gap>0?('-'+gap):'covered'}</td><td class="mono">${gap>0?('~'+money(order)):'—'}</td></tr>`;}).join('');
  return `<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Buy list from the schedule</h3>
    <div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">What upcoming shows need (break-model allocations + manual needs) vs what’s free to break, by set.</div>
-   <div style="overflow:auto"><table><tr><th>Set / product</th><th>Needed by</th><th>Demand</th><th>Free</th><th>Gap</th><th>~Order</th></tr>${rows}</table></div>
+   <div class="egrid"><table><tr><th>Set / product</th><th>Needed by</th><th>Demand</th><th>Free</th><th>Gap</th><th>~Order</th></tr>${rows}</table></div>
    <div class="row" style="justify-content:flex-end;margin-top:8px"><b>Projected order: ~${money(projected)}</b></div></div>`;}
 function addInv(){const n=$('ivN').value.trim();if(!n)return;const owner=($('ivOwner')&&$('ivOwner').value!=='')?$('ivOwner').value:(ROLE==='admin'&&$('ivOwner')?null:ME);S.inventory.push({id:'i'+Date.now(),name:n,cat:$('ivC').value,set:$('ivS').value,qty:+$('ivQ').value||1,cost:+$('ivCo').value||0,value:+$('ivV').value||0,cond:$('ivG').value,img:$('ivImg').value,owner});save();dInventory();toast('Added');}
 function delInv(id){S.inventory=S.inventory.filter(x=>x.id!==id);save();dInventory();}
@@ -674,7 +683,7 @@ function importReport(title,msg,errors,onProceed){
  let h=`<h3 style="font-size:18px">${esc(title)} — check your file</h3>`;
  if(msg)h+=`<div style="color:var(--red);font-size:13px;margin:8px 0">${esc(msg)}</div>`;
  if(errors&&errors.length){h+=`<div style="color:var(--mut);font-size:12.5px;margin:6px 0">${errors.length} issue${errors.length>1?'s':''} found. Fix these rows in your file and re-upload${onProceed?', or import the rows that passed':''}.</div>
-   <div style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:10px;margin-top:8px"><table><tr><th>Row</th><th>Column</th><th>Issue</th></tr>${errors.slice(0,300).map(x=>`<tr><td class="mono">${x.row}</td><td>${esc(x.col)}</td><td>${esc(x.msg)}</td></tr>`).join('')}</table></div>`;}
+   <div class="egrid" style="max-height:280px;margin-top:8px"><table><tr><th>Row</th><th>Column</th><th>Issue</th></tr>${errors.slice(0,300).map(x=>`<tr><td class="mono">${x.row}</td><td>${esc(x.col)}</td><td>${esc(x.msg)}</td></tr>`).join('')}</table></div>`;}
  h+=`<div class="row" style="margin-top:16px">${onProceed?`<button class="btn v" onclick="_impProceed&&_impProceed()">Import valid rows</button>`:''}<button class="btn sm" onclick="closeM()">${onProceed?'Cancel':'OK'}</button></div>`;
  $('modal').innerHTML=h;$('ov').style.display='flex';
 }
@@ -705,10 +714,10 @@ function dChecklists(){const lm=[['characters','Chase characters'],['sets','Sets
  let h=`<div class="card"><h3 style="font-size:15px">Checklists (CSV)</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">Upload a product/set checklist. Populate a pick-list from any column, or load chases into the Break Calculator.</div>
    <div class="row" style="margin-bottom:8px"><button class="btn sm" onclick="downloadChecklistTemplate()">↓ CSV template</button><span class="lab" style="align-self:center">Required column: <b>Card Name</b> · optional: Card Number, Set, Rarity, Market Value</span></div>
    <div class="drop" onclick="$('clFile').click()">Click to upload a .csv checklist</div><input id="clFile" type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="uploadChecklist(this)">
-   <div style="margin-top:12px">${S.checklists.map((c,i)=>`<div class="filerow"><span class="nm">📄 ${esc(c.name)} <span class="lab">${c.rows.length} rows</span></span><select id="clcol_${i}" style="max-width:140px">${c.columns.map(col=>`<option>${esc(col)}</option>`).join('')}</select><select id="cltgt_${i}" style="max-width:120px">${lm.map(([k,label])=>`<option value="${k}">→ ${label}</option>`).join('')}</select><button class="btn sm" onclick="populateFromChecklist(${i})">Populate</button><button class="btn x" onclick="S.checklists.splice(${i},1);save();dChecklists()">✕</button></div>`).join('')||'<div style="color:var(--mut);font-size:13px">No checklists.</div>'}</div></div>`;
+   <div style="margin-top:12px">${S.checklists.length?`<div class="egrid"><table><tr><th>Checklist</th><th>Rows</th><th></th></tr>${S.checklists.map((c,i)=>`<tr><td>📄 ${esc(c.name)}</td><td class="mono">${c.rows.length}</td><td><div class="actions"><select id="clcol_${i}" style="max-width:140px">${c.columns.map(col=>`<option>${esc(col)}</option>`).join('')}</select><select id="cltgt_${i}" style="max-width:120px">${lm.map(([k,label])=>`<option value="${k}">→ ${label}</option>`).join('')}</select><button class="btn sm" onclick="populateFromChecklist(${i})">Populate</button><button class="btn x" onclick="S.checklists.splice(${i},1);save();dChecklists()">✕</button></div></td></tr>`).join('')}</table></div>`:'<div style="color:var(--mut);font-size:13px">No checklists.</div>'}</div></div>`;
  h+=`<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Attachments</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">Images, PDFs, docs. Small files stored in-browser; large ones referenced only (move to cloud when hosted).</div>
    <div class="drop" onclick="$('atFile').click()">Click to upload a file</div><input id="atFile" type="file" style="display:none" onchange="uploadAttach(this)">
-   <div style="margin-top:12px">${S.attachments.map((a,i)=>`<div class="filerow"><span class="nm">📎 ${esc(a.name)} <span class="lab">${(a.size/1024).toFixed(0)} KB${a.data?'':' · reference'}</span></span>${a.data?`<a class="btn sm" href="${a.data}" download="${esc(a.name)}">Download</a>`:''}<button class="btn x" onclick="S.attachments.splice(${i},1);save();dChecklists()">✕</button></div>`).join('')||'<div style="color:var(--mut);font-size:13px">No attachments.</div>'}</div></div>`;
+   <div style="margin-top:12px">${S.attachments.length?`<div class="egrid"><table><tr><th>Attachment</th><th>Size</th><th></th></tr>${S.attachments.map((a,i)=>`<tr><td>📎 ${esc(a.name)}</td><td class="lab" style="text-transform:none;letter-spacing:0">${(a.size/1024).toFixed(0)} KB${a.data?'':' · reference'}</td><td><div class="actions">${a.data?`<a class="btn sm" href="${a.data}" download="${esc(a.name)}">Download</a>`:''}<button class="btn x" onclick="S.attachments.splice(${i},1);save();dChecklists()">✕</button></div></td></tr>`).join('')}</table></div>`:'<div style="color:var(--mut);font-size:13px">No attachments.</div>'}</div></div>`;
  $('dtc').innerHTML=h;}
 function dReports(){const t=invTotals();const cat=Object.entries(t.byCat).sort((a,b)=>b[1]-a[1]);const top=invView().slice().sort((a,b)=>((+b.value||0)*(+b.qty||1))-((+a.value||0)*(+a.qty||1))).slice(0,10);
  let h=`<div class="card"><div class="row" style="justify-content:space-between"><h3 style="font-size:15px">Inventory report</h3><div class="row"><button class="btn sm" onclick="exportReport()">Download CSV</button><button class="btn sm" onclick="window.print()">Print</button></div></div>
@@ -717,8 +726,8 @@ function dReports(){const t=invTotals();const cat=Object.entries(t.byCat).sort((
    <div class="metric"><div class="n">${money(t.cost)}</div><div class="l">Total cost</div></div>
    <div class="metric"><div class="n" style="color:${t.gain>=0?'#0a8a4a':'var(--red)'}">${t.gain>=0?'+':''}${money(t.gain)}</div><div class="l">Unrealized</div></div>
    <div class="metric"><div class="n">${t.cost?((t.gain/t.cost)*100).toFixed(0):0}%</div><div class="l">ROI</div></div></div>
-  <h3 style="font-size:13px;margin:18px 0 8px">By category</h3><table><tr><th>Category</th><th>Value</th><th>Share</th></tr>${cat.map(([k,v])=>`<tr><td>${esc(k)}</td><td class="mono">${money(v)}</td><td class="mono">${t.val?(v/t.val*100).toFixed(0):0}%</td></tr>`).join('')||'<tr><td colspan=3 style="color:var(--mut)">No data</td></tr>'}</table>
-  <h3 style="font-size:13px;margin:18px 0 8px">Top items by value</h3><table><tr><th>Name</th><th>Cat</th><th>Qty</th><th>Value</th></tr>${top.map(i=>`<tr><td>${esc(i.name)}</td><td>${esc(i.cat)}</td><td class="mono">${+i.qty||1}</td><td class="mono">${money((+i.value||0)*(+i.qty||1))}</td></tr>`).join('')||'<tr><td colspan=4 style="color:var(--mut)">No data</td></tr>'}</table></div>`;
+  <h3 style="font-size:13px;margin:18px 0 8px">By category</h3><div class="egrid"><table><tr><th>Category</th><th>Value</th><th>Share</th></tr>${cat.map(([k,v])=>`<tr><td>${esc(k)}</td><td class="mono">${money(v)}</td><td class="mono">${t.val?(v/t.val*100).toFixed(0):0}%</td></tr>`).join('')||'<tr><td colspan=3 style="color:var(--mut)">No data</td></tr>'}</table></div>
+  <h3 style="font-size:13px;margin:18px 0 8px">Top items by value</h3><div class="egrid"><table><tr><th>Name</th><th>Cat</th><th>Qty</th><th>Value</th></tr>${top.map(i=>`<tr><td>${esc(i.name)}</td><td>${esc(i.cat)}</td><td class="mono">${+i.qty||1}</td><td class="mono">${money((+i.value||0)*(+i.qty||1))}</td></tr>`).join('')||'<tr><td colspan=4 style="color:var(--mut)">No data</td></tr>'}</table></div></div>`;
  $('dtc').innerHTML=h;}
 function csvDL(name,rows){const csv=rows.map(r=>r.map(c=>`"${(''+(c==null?'':c)).replace(/"/g,'""')}"`).join(',')).join('\n');const b=new Blob([csv],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name;a.click();}
 function exportReport(){const rows=[['Name','Category','Set','Qty','Unit cost','Unit value','Line value','Line gain','Condition']];invView().forEach(i=>{const q=+i.qty||1;rows.push([i.name,i.cat,i.set,q,i.cost,i.value,(+i.value||0)*q,((+i.value||0)-(+i.cost||0))*q,i.cond]);});csvDL('element10_inventory_report.csv',rows);toast('Report downloaded');}
@@ -756,7 +765,7 @@ function dTeam(){
    <div class="row" style="margin-top:8px"><input id="tmvEmail" type="email" placeholder="viewer@email.com (buyer / companion)" style="max-width:280px" onkeydown="if(event.key==='Enter')addTeamViewer()"><button class="btn sm" onclick="addTeamViewer()">+ Add viewer</button></div>
    <div id="tmMsg" class="lab" style="margin-top:8px"></div></div>`;
  h+=`<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Members (${MEMBERS.length})</h3>
-   <div style="overflow:auto;margin-top:10px"><table><tr><th>Name / email</th><th>Role</th><th></th></tr>
+   <div class="egrid" style="margin-top:10px"><table><tr><th>Name / email</th><th>Role</th><th></th></tr>
    ${rows.map(m=>`<tr><td>${esc(m.display_name||m.email||m.user_id)}${m.user_id===MEID?' <span class="lab">(you)</span>':''}</td><td><span class="pill ${m.role==='admin'?'v':''}" style="margin:0">${esc(m.role)}</span></td><td style="text-align:right">${m.user_id===MEID?'':(m.role==='admin'?`<button class="btn sm" onclick="setTeamRole('${m.user_id}','member')">Demote to member</button>`:`<button class="btn sm" onclick="setTeamRole('${m.user_id}','admin')">Promote to admin</button>`)}</td></tr>`).join('')||'<tr><td colspan="3" style="color:var(--mut)">No members yet.</td></tr>'}
    </table></div>
    <div class="lab" style="margin-top:8px">Members see shared &amp; universal; each member's personal space stays private (admin can view all). Viewers get no workspace access — only the break sessions they're linked to.</div></div>`;
@@ -817,7 +826,7 @@ function renderRepackEditor(){const p=rpCur();if(!p){REPEDIT=null;return renderR
    <div class="lab" style="margin-top:8px">${rnd?'Random: each open rolls this pool by weight to pick the cards.':'Preset: opening reveals exactly these cards, in order.'}</div></div>`;
  h+=`<div class="card" style="margin-top:14px"><div class="row" style="justify-content:space-between"><h3 style="font-size:15px">${rnd?'Card pool':'Cards in this pack'} (${list.length})</h3>
    <div class="row" style="gap:6px"><select id="rpInv" style="max-width:210px"><option value="">+ pull from inventory…</option>${S.inventory.map((it,ix)=>`<option value="${ix}">${esc(it.name)} · ${money(it.value)}</option>`).join('')}</select><button class="btn sm" onclick="rpAddFromInv()">Add</button></div></div>
-   <div style="overflow:auto;margin-top:10px"><table><tr><th>Name</th><th>Cat</th><th>Grade</th><th>Serial</th><th>Year</th><th>Value</th><th>Buyback</th><th>Tier</th>${rnd?'<th>Wt</th>':''}<th></th></tr>
+   <div class="egrid wide" style="margin-top:10px"><table><tr><th>Name</th><th>Cat</th><th>Grade</th><th>Serial</th><th>Year</th><th>Value</th><th>Buyback</th><th>Tier</th>${rnd?'<th>Wt</th>':''}<th></th></tr>
    ${list.map((c,i)=>`<tr>
      <td><input value="${esc(c.name||'')}" oninput="rpCard(${i},'name',this.value)" style="min-width:150px"></td>
      <td><input value="${esc(c.category||'')}" oninput="rpCard(${i},'category',this.value)" style="width:82px" placeholder="Pokémon"></td>
@@ -1075,7 +1084,7 @@ function liveActiveHTML(){const s=LIVE.session;const dir=liveDirUrl();const over
    <div class="lab" style="margin-top:6px">Add the overlay as an OBS <b>Browser</b> source (transparent). Viewers open the companion, sign in, and link their Whatnot handle once.</div></div>
  <div class="card"><div class="row" style="justify-content:space-between"><h3 style="font-size:15px">Spots (${LIVE.slots.length})</h3></div>
    <div class="row" style="margin-top:8px;gap:6px"><input id="slotLabel" placeholder="Team / character (e.g. Charizard, Team 3)" style="flex:2" onkeydown="if(event.key==='Enter')liveAddSlot()"><button class="btn sm" onclick="liveAddSlot()">+ Add spot</button></div>
-   <div style="overflow:auto;margin-top:10px"><table><tr><th>#</th><th>Team / label</th><th>Buyer (Whatnot)</th><th>State</th><th>Case</th><th></th></tr>
+   <div class="egrid wide" style="margin-top:10px"><table><tr><th>#</th><th>Team / label</th><th>Buyer (Whatnot)</th><th>State</th><th>Case</th><th></th></tr>
    ${LIVE.slots.map((sl,i)=>liveSlotRow(sl,i)).join('')||`<tr><td colspan="6" style="color:var(--mut)">No spots yet — add one above.</td></tr>`}</table></div></div>`;
 }
 function liveSlotRow(sl,i){const st=sl.state;
