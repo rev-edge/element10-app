@@ -152,9 +152,9 @@ function showModal(ex,k){ex=ex||{name:'',fmt:L('formats')[0],dur:90,host:S.strea
   <div class="row" style="margin-top:18px"><button class="btn v" onclick="saveShow(${ex.k!=null?`'${ex.k}',${ex.i}`:'null,null'})">Save</button><button class="btn sm" onclick="closeM()">Cancel</button>${ex.k!=null?`<button class="btn x" style="margin-left:auto" onclick="delShow('${ex.k}',${ex.i})">Delete</button>`:''}</div>`;
  $('ov').style.display='flex';}
 function saveShow(ok,oi){if(!canEditScoped())return roGuard();
- const s={id:'sh'+Date.now(),name:$('mname').value.trim()||'Untitled show',fmt:$('mfmt').value,dur:+$('mdur').value||60,host:$('mhost').value,notes:'',titleSet:null,titleSetId:null,breakModel:null,breakModelId:null,inventoryAlloc:[],repackRef:null};
+ const s={id:'sh'+Date.now(),name:$('mname').value.trim()||'Untitled show',fmt:$('mfmt').value,dur:+$('mdur').value||60,host:$('mhost').value,notes:'',titleSet:null,titleSetId:null,breakModel:null,breakModelId:null,inventoryAlloc:[],repackRef:null,needs:[]};
  const k=$('mday').value+'|'+$('mdp').value;
- if(ok!=null&&S.shows[ok]&&S.shows[ok][oi]){const old=S.shows[ok][oi];s.id=old.id||s.id;s.notes=old.notes||'';s.titleSet=old.titleSet||null;s.titleSetId=old.titleSetId||null;s.breakModel=old.breakModel||null;s.breakModelId=old.breakModelId||null;s.inventoryAlloc=old.inventoryAlloc||[];s.repackRef=old.repackRef||null;S.shows[ok].splice(oi,1);if(!S.shows[ok].length)delete S.shows[ok];}
+ if(ok!=null&&S.shows[ok]&&S.shows[ok][oi]){const old=S.shows[ok][oi];s.id=old.id||s.id;s.notes=old.notes||'';s.titleSet=old.titleSet||null;s.titleSetId=old.titleSetId||null;s.breakModel=old.breakModel||null;s.breakModelId=old.breakModelId||null;s.inventoryAlloc=old.inventoryAlloc||[];s.repackRef=old.repackRef||null;s.needs=old.needs||[];S.shows[ok].splice(oi,1);if(!S.shows[ok].length)delete S.shows[ok];}
  (S.shows[k]=S.shows[k]||[]).push(s);save();closeM();rerenderSchedule();}
 /* ---------- SHOW DETAIL (the hub panel) ---------- */
 function showById(id){let res=null;Object.keys(S.shows||{}).forEach(k=>{(S.shows[k]||[]).forEach((s,i)=>{if(s.id===id)res={k,i,s};});});return res;}
@@ -167,6 +167,9 @@ function showDetail(id){const r=showById(id);if(!r){closeM();return;}const s=r.s
    :`<div class="lab">No break model attached.</div>${ro?'':`<div class="row" style="margin-top:6px"><select onchange="showPickBreak('${id}',this.value)" style="flex:2"><option value="">— attach a saved break model —</option>${(S.breaks||[]).map(b=>`<option value="${b.id}">${esc(b.name)} · ${b.slots} slots</option>`).join('')}</select><button class="btn sm" onclick="closeM();go('break')">Build ↗</button></div><div class="row" style="margin-top:6px"><button class="btn sm" onclick="showStartLive('${id}')">▶ Start Live Break (no model)</button></div>`}`;
  const repackBox=s.repackRef?`<div class="out"><div class="row" style="justify-content:space-between"><span>🎁 ${esc(s.repackRef.name)}</span>${ro?'':`<button class="btn x" onclick="showDetach('${id}','repackRef')">detach</button>`}</div></div>`
    :`<div class="lab">No repack attached.</div>${ro?'':`<div class="row" style="margin-top:6px"><select onchange="showPickRepack('${id}',this.value)" style="flex:2"><option value="">— attach a repack —</option>${(S.repacks||[]).map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select><button class="btn sm" onclick="closeM();go('repack')">Studio ↗</button></div>`}`;
+ const reslist=[];S.inventory.forEach(it=>{(it.reservations||[]).forEach(x=>{if(x.showId===s.id)reslist.push({itemId:it.id,name:it.name,qty:x.qty,streamerUid:x.streamerUid});});});
+ const resBox=`${reslist.length?reslist.map(o=>`<div style="font-size:12.5px;padding:2px 0">📦 ${esc(o.name)} ×${o.qty}${ro?'':((ROLE==='admin'||o.streamerUid===MEID)?` <a onclick="releaseReservation('${o.itemId}','${s.id}','${o.streamerUid}').then(()=>showDetail('${id}'))" style="color:var(--red)">release</a>`:'')}</div>`).join(''):'<div class="lab">No inventory reserved to this show.</div>'}${ro?'':`<div class="row" style="margin-top:6px"><select id="srInv" style="flex:2"><option value="">— reserve an available item —</option>${S.inventory.filter(i=>invAvailable(i)>0).map(i=>`<option value="${i.id}">${esc(i.name)} (${invAvailable(i)} free)</option>`).join('')}</select><input id="srQty" type="number" value="1" min="1" style="width:64px"><button class="btn sm" onclick="showAddReserve('${id}')">Reserve</button></div>`}`;
+ const needsBox=`${(s.needs||[]).length?s.needs.map((n,ni)=>`<div style="font-size:12.5px;padding:2px 0">🛒 ${esc(n.set||'?')} ×${n.qty}${n.approxCost?(' · ~'+money(n.approxCost)+'/ea'):''}${ro?'':` <a onclick="showDelNeed('${id}',${ni})" style="color:var(--red)">✕</a>`}</div>`).join(''):'<div class="lab">No manual needs.</div>'}${ro?'':`<div class="row" style="margin-top:6px"><select id="ndSet" style="flex:2"><option value="">— set —</option>${L('sets').map(x=>`<option>${esc(x)}</option>`).join('')}</select><input id="ndQty" type="number" value="1" min="1" style="width:56px"><input id="ndCost" type="number" placeholder="$/ea" style="width:76px"><button class="btn sm" onclick="showAddNeed('${id}')">+ Need</button></div>`}`;
  $('modal').innerHTML=`<h3 style="font-size:18px">${esc(s.name||'Show')}</h3><div class="lab" style="margin-top:2px">${day} · ${dp}</div>
   <div class="row" style="margin-top:12px"><div style="flex:2"><label>Show name</label><input id="mname" value="${esc(s.name)}" ${ro?'disabled':''}></div></div>
   <div class="row" style="margin-top:8px"><div style="flex:1"><label>Day</label><select id="mday" ${ro?'disabled':''}>${DAYS.map(d=>`<option ${d===day?'selected':''}>${d}</option>`).join('')}</select></div>
@@ -178,6 +181,8 @@ function showDetail(id){const r=showById(id);if(!r){closeM();return;}const s=r.s
   <div style="margin-top:16px"><span class="lab">Title / description copy</span>${copyBox}</div>
   <div style="margin-top:14px"><span class="lab">Break / format model</span>${breakBox}</div>
   <div style="margin-top:14px"><span class="lab">Repack</span>${repackBox}</div>
+  <div style="margin-top:14px"><span class="lab">Reserved inventory</span>${resBox}</div>
+  <div style="margin-top:14px"><span class="lab">Needs — feeds the buy list</span>${needsBox}</div>
   <div style="margin-top:14px"><label>Notes</label><textarea ${ro?'disabled':''} placeholder="Prep notes for this show…" oninput="showSetNotes('${id}',this.value)">${esc(s.notes||'')}</textarea></div>
   <div class="row" style="margin-top:16px"><button class="btn sm" onclick="closeM()">Close</button></div>`;
  $('ov').style.display='flex';}
@@ -188,10 +193,35 @@ function saveShowDetail(id){if(!canEditScoped())return roGuard();const r=showByI
  save();closeM();rerenderSchedule();toast('Show saved');}
 function delShowById(id){if(!canEditScoped())return roGuard();const r=showById(id);if(!r)return;S.shows[r.k].splice(r.i,1);if(!S.shows[r.k].length)delete S.shows[r.k];save();closeM();rerenderSchedule();}
 function showPickCopy(id,setId){if(!setId)return;if(!canEditScoped())return roGuard();const cs=(S.copySets||[]).find(x=>x.id===setId);const r=showById(id);if(!cs||!r)return;r.s.titleSet=JSON.parse(JSON.stringify(cs));r.s.titleSetId=cs.id;save();showDetail(id);toast('Copy attached');}
-function showPickBreak(id,bid){if(!bid)return;if(!canEditScoped())return roGuard();const b=(S.breaks||[]).find(x=>x.id===bid);const r=showById(id);if(!b||!r)return;r.s.breakModel=JSON.parse(JSON.stringify(b));r.s.breakModelId=b.id;r.s.inventoryAlloc=(b.invItems||[]).map(x=>({itemId:x.itemId,name:x.name,qty:x.qty,cost:x.cost,value:x.value}));save();showDetail(id);toast('Break model attached');}
+async function showPickBreak(id,bid){if(!bid)return;if(!canEditScoped())return roGuard();const b=(S.breaks||[]).find(x=>x.id===bid);const r=showById(id);if(!b||!r)return;r.s.breakModel=JSON.parse(JSON.stringify(b));r.s.breakModelId=b.id;r.s.inventoryAlloc=(b.invItems||[]).map(x=>({itemId:x.itemId,name:x.name,qty:x.qty,cost:x.cost,value:x.value,set:x.set}));save();const res=await reserveModelToShow(r.s,b);showDetail(id);toast((res&&res.msg)||'Break model attached');}
+/* Attaching a model to a show converts its inventory pulls into hard reservations (and detach releases them). */
+async function reserveModelToShow(show,model){
+ if(!model||!Array.isArray(model.invItems)||!model.invItems.length)return{ok:true,msg:'Break model attached'};
+ const showId=show.id,showLabel=(show.name||'Untitled'),streamer=MEID,admin=ROLE==='admin';
+ return await cloudCommitShared(base=>{const capped=[];
+  model.invItems.forEach(iv=>{const it=base.inventory.find(x=>x.id===iv.itemId);if(!it)return;if(!Array.isArray(it.reservations))it.reservations=[];
+   const ex=it.reservations.find(x=>x.showId===showId&&x.streamerUid===streamer);
+   const totalRes=it.reservations.reduce((s,x)=>s+(+x.qty||0),0);const freeForThis=(+it.qty||0)-(totalRes-(ex?ex.qty:0));
+   const want=+iv.qty||1,grant=admin?want:Math.min(want,Math.max(0,freeForThis));
+   if(grant<want)capped.push(it.name);
+   if(grant<=0)return;
+   if(ex)ex.qty=grant;else it.reservations.push({showId,showLabel,streamerUid:streamer,qty:grant});});
+  return{ok:true,msg:capped.length?('Attached · reservations capped by free stock: '+[...new Set(capped)].join(', ')):'Attached · inventory reserved to show'};});
+}
+async function releaseShowReservations(show,model){const showId=show.id,ids=(model&&model.invItems)?model.invItems.map(x=>x.itemId):null,admin=ROLE==='admin';
+ return await cloudCommitShared(base=>{base.inventory.forEach(it=>{if(!Array.isArray(it.reservations))return;
+   it.reservations=it.reservations.filter(rz=>{const match=rz.showId===showId&&(!ids||ids.includes(it.id));if(!match)return true;return !(admin||rz.streamerUid===MEID);});});
+  return{ok:true,msg:'Released reservations'};});
+}
 function showPickRepack(id,rid){if(!rid)return;if(!canEditScoped())return roGuard();const p=(S.repacks||[]).find(x=>x.id===rid);const r=showById(id);if(!p||!r)return;r.s.repackRef={id:p.id,name:p.name};save();showDetail(id);}
-function showDetach(id,field){if(!canEditScoped())return roGuard();const r=showById(id);if(!r)return;if(field==='titleSet'){r.s.titleSet=null;r.s.titleSetId=null;}if(field==='breakModel'){r.s.breakModel=null;r.s.breakModelId=null;r.s.inventoryAlloc=[];}if(field==='repackRef')r.s.repackRef=null;save();showDetail(id);}
+async function showDetach(id,field){if(!canEditScoped())return roGuard();const r=showById(id);if(!r)return;
+ if(field==='titleSet'){r.s.titleSet=null;r.s.titleSetId=null;save();showDetail(id);return;}
+ if(field==='breakModel'){const m=r.s.breakModel;r.s.breakModel=null;r.s.breakModelId=null;r.s.inventoryAlloc=[];save();if(m)await releaseShowReservations(r.s,m);showDetail(id);toast('Detached · reservations released');return;}
+ if(field==='repackRef'){r.s.repackRef=null;save();showDetail(id);return;}}
 function showSetNotes(id,v){const r=showById(id);if(r){r.s.notes=v;save();}}
+async function showAddReserve(id){const r=showById(id);if(!r)return;const sel=$('srInv');if(!sel||!sel.value){toast('Pick an item');return;}const qty=$('srQty')?+$('srQty').value:1;const res=await reserveUnits(sel.value,r.k+'|||'+r.i,qty);if(res&&res.ok)showDetail(id);}
+function showAddNeed(id){if(!canEditScoped())return roGuard();const r=showById(id);if(!r)return;const set=$('ndSet')?$('ndSet').value:'';if(!set){toast('Pick a set');return;}const qty=Math.max(1,$('ndQty')?+$('ndQty').value:1);const cost=$('ndCost')?+$('ndCost').value:0;(r.s.needs=r.s.needs||[]).push({id:'nd'+Date.now(),set,qty,approxCost:cost||0});save();showDetail(id);toast('Need added');}
+function showDelNeed(id,ni){if(!canEditScoped())return roGuard();const r=showById(id);if(!r||!r.s.needs)return;r.s.needs.splice(ni,1);save();showDetail(id);}
 function showStartLive(id){const r=showById(id);if(!r)return;LIVE_SEED={show:r.s.name,model:r.s.breakModel||null};closeM();go('live');}
 function delShow(k,i){if(!canEditScoped())return roGuard();S.shows[k].splice(i,1);if(!S.shows[k].length)delete S.shows[k];save();closeM();rerenderSchedule();}
 function closeM(){$('ov').style.display='none';}
@@ -356,11 +386,13 @@ function renderBKlists(){
  const il=$('invList');if(il)il.innerHTML=BK.invItems.map((it,i)=>`<div class="row" style="justify-content:space-between;font-size:13px;padding:3px 0"><span>📦 ${esc(it.name)} · cost ${money(it.cost)} · val ${money(it.value)}</span><button class="btn x" onclick="bkDelInv(${i})">✕</button></div>`).join('');
 }
 function bkAddFromInv(){const el=$('bkInv');if(!el||el.value==='')return;const it=S.inventory[+el.value];if(!it)return;
+ const already=BK.invItems.filter(x=>x.itemId===it.id).reduce((s,x)=>s+(+x.qty||0),0);
+ if(already+1>invAvailable(it)){toast('No free units of '+it.name+' left ('+invAvailable(it)+' available)');return;}
  const val=+it.value||0,cost=+it.cost||0,qty=1;const slab=/slab|raw|card/i.test(it.cat||'');
  if(slab)BK.chases.push({name:it.name,val,invId:it.id});else BK.products.push({name:it.name,spots:1,val,invId:it.id});
- BK.invItems.push({itemId:it.id,name:it.name,qty,cost,value:val,cat:it.cat});
+ BK.invItems.push({itemId:it.id,name:it.name,qty,cost,value:val,cat:it.cat,set:it.set});
  BK.cost=(+BK.cost||0)+cost*qty;const bc=$('bCost');if(bc)bc.value=BK.cost;
- renderBKlists();calcBreak();toast('Pulled '+it.name+' from inventory');}
+ renderBKlists();calcBreak();toast('Pulled '+it.name+' ('+(invAvailable(it)-already-1)+' free left) — reserves on attach to a show');}
 function bkDelInv(i){const it=BK.invItems[i];if(!it)return;BK.invItems.splice(i,1);
  BK.products=BK.products.filter(p=>p.invId!==it.itemId);BK.chases=BK.chases.filter(c=>c.invId!==it.itemId);
  BK.cost=Math.max(0,(+BK.cost||0)-(+it.cost||0)*(+it.qty||1));const bc=$('bCost');if(bc)bc.value=BK.cost;
@@ -425,10 +457,10 @@ function reopenBreak(id){const b=(S.breaks||[]).find(x=>x.id===id);if(!b)return;
 function dupBreak(id){if(!canEditScoped())return roGuard();const b=(S.breaks||[]).find(x=>x.id===id);if(!b)return;const c=JSON.parse(JSON.stringify(b));c.id='bk'+Date.now();c.name=b.name+' (copy)';c.ts=Date.now();S.breaks.unshift(c);save();renderBreakHist();}
 function renameBreak(id){if(!canEditScoped())return roGuard();const b=(S.breaks||[]).find(x=>x.id===id);if(!b)return;const v=prompt('Rename break model',b.name);if(v==null)return;b.name=v.trim()||b.name;save();renderBreakHist();}
 function delBreakById(id){if(!canEditScoped())return roGuard();S.breaks=(S.breaks||[]).filter(x=>x.id!==id);save();renderBreakHist();}
-function attachBreakToShow(id,ref){if(!ref)return;if(!canEditScoped())return roGuard();const b=(S.breaks||[]).find(x=>x.id===id);const r=showByRef(ref);if(!b||!r)return;
+async function attachBreakToShow(id,ref){if(!ref)return;if(!canEditScoped())return roGuard();const b=(S.breaks||[]).find(x=>x.id===id);const r=showByRef(ref);if(!b||!r)return;
  r.s.breakModel=JSON.parse(JSON.stringify(b));r.s.breakModelId=b.id;
- r.s.inventoryAlloc=(b.invItems||[]).map(x=>({itemId:x.itemId,name:x.name,qty:x.qty,cost:x.cost,value:x.value}));
- save();toast('Attached “'+b.name+'” to '+(r.s.name||'show'));}
+ r.s.inventoryAlloc=(b.invItems||[]).map(x=>({itemId:x.itemId,name:x.name,qty:x.qty,cost:x.cost,value:x.value,set:x.set}));
+ save();const res=await reserveModelToShow(r.s,b);toast((res&&res.msg)?('“'+b.name+'” → '+(r.s.name||'show')+' · '+res.msg):('Attached “'+b.name+'” to '+(r.s.name||'show')));}
 
 /* ---------- DATA & LISTS ---------- */
 function renderData(){dataHub();}
@@ -469,6 +501,7 @@ function uploadAttach(inp){const f=inp.files[0];if(!f)return;const big=f.size>12
 const INVCATS=['Box','Case','ETB / Sealed','Pack','Raw card','Slab','Other'];
 let dataTab='overview';
 let exCopyRef=''; // Whatnot Export: which show's attached copy to prefill
+let invSearch='',invCatF='',invSetF='',invStatusF='all',invSort={col:'name',dir:1}; // Inventory list controls
 function dataHub(){
  const tabs=[['overview','Overview'],['inventory','Inventory'],['checklists','Checklists'],['reports','Reports'],['export','Whatnot Export'],['lists','Lists & Settings']];
  if(ROLE==='admin')tabs.push(['team','Team']);
@@ -499,8 +532,35 @@ function dOverview(){const t=invTotals();const cat=Object.entries(t.byCat).map((
  h+=`<div class="card"><h3 style="font-size:15px">Configure dashboard</h3><div class="row" style="margin-top:10px;gap:18px">${[['catValue','Value by category'],['costMarket','Cost vs market'],['movement','Market movement']].map(([k,l])=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink);margin:0"><input type="checkbox" style="width:auto" ${S.dashCfg[k]?'checked':''} onchange="toggleDash('${k}',this.checked)"> ${l}</label>`).join('')}</div><div class="lab" style="margin-top:10px">Charts recalc from your inventory. Live market prices update these in the background via API once connected.</div></div>`;
  $('dtc').innerHTML=h;}
 function ownerOpts(sel){let opts=`<option value="">Universal / unassigned</option>`;const emails=MEMBERS.map(m=>m.email);if(sel&&!emails.includes(sel))opts+=`<option value="${esc(sel)}" selected>${esc(sel)}</option>`;opts+=MEMBERS.map(m=>`<option value="${esc(m.email)}" ${m.email===sel?'selected':''}>${esc(m.display_name||m.email)}</option>`).join('');return opts;}
-function dInventory(){const t=invTotals();const admin=ROLE==='admin';
- let h=`<div class="card"><div class="row" style="justify-content:space-between"><h3 style="font-size:15px">Add inventory</h3><div class="row" style="gap:6px"><span class="lab" style="align-self:center">Show</span><select style="max-width:150px" onchange="invFilter=this.value;localStorage.setItem('e10_invfilter',invFilter);dInventory()"><option value="mine" ${invFilter==='mine'?'selected':''}>Mine</option><option value="all" ${invFilter==='all'?'selected':''}>Everyone (universal)</option></select></div></div>
+function invRollup(){let cost=0,market=0,committed=0,free=0,aging=0;invView().forEach(i=>{const q=+i.qty||0,v=+i.value||0,c=+i.cost||0;cost+=c*q;market+=v*q;committed+=v*invReserved(i);free+=v*invAvailable(i);if(invAge(i)>30&&invAvailable(i)>0)aging+=v*q;});return{cost,market,gain:market-cost,committed,free,aging};}
+function invRows(){let rows=invView();const q=invSearch.trim().toLowerCase();
+ if(q)rows=rows.filter(i=>(i.name||'').toLowerCase().includes(q));
+ if(invCatF)rows=rows.filter(i=>i.cat===invCatF);
+ if(invSetF)rows=rows.filter(i=>(i.set||'')===invSetF);
+ if(invStatusF==='onhand')rows=rows.filter(i=>(+i.qty||0)>0);
+ else if(invStatusF==='sold')rows=rows.filter(i=>(+i.soldQty||0)>0);
+ else if(invStatusF==='free')rows=rows.filter(i=>invAvailable(i)>0);
+ else if(invStatusF==='reserved')rows=rows.filter(i=>invReserved(i)>0);
+ const c=invSort.col,d=invSort.dir,key=i=>c==='name'?(i.name||'').toLowerCase():c==='onhand'?invAvailable(i):c==='cost'?(+i.cost||0):c==='market'?(+i.value||0):c==='gain'?((+i.value||0)-(+i.cost||0))*(+i.qty||1):c==='age'?invAge(i):0;
+ return rows.slice().sort((a,b)=>{const ka=key(a),kb=key(b);return (ka<kb?-1:ka>kb?1:0)*d;});}
+function invSortTh(col,label){const on=invSort.col===col;return `<th style="cursor:pointer;white-space:nowrap" onclick="invSortSet('${col}')">${label}${on?(invSort.dir>0?' ▲':' ▼'):''}</th>`;}
+function invSortSet(col){if(invSort.col===col)invSort.dir*=-1;else{invSort.col=col;invSort.dir=1;}renderInvList();}
+function invRowHTML(i,admin){const q=+i.qty||0,av=invAvailable(i),rsv=invReserved(i),g=((+i.value||0)-(+i.cost||0))*q,age=invAge(i);
+ const pills=(i.reservations||[]).map(r=>`<span class="pill" style="margin:2px">${esc(r.showLabel||'show')} ×${r.qty}${(admin||r.streamerUid===MEID)?` <a onclick="releaseReservation('${i.id}','${r.showId}','${r.streamerUid}')" style="color:var(--red)">✕</a>`:''}</span>`).join('')||'<span class="lab">—</span>';
+ const sold=(+i.soldQty||0)>0?`<div class="lab" style="text-transform:none;letter-spacing:0;color:var(--mut2)">sold ${i.soldQty} · ${money(i.soldProceeds||0)}</div>`:'';
+ return `<tr>
+  <td><b>${esc(i.name)}</b> <span class="pill" style="margin:0">${esc(i.cat)}</span>${i.set?`<div class="lab" style="text-transform:none;letter-spacing:0">${esc(i.set)}${i.cond?' · '+esc(i.cond):''}</div>`:''}${sold}</td>
+  <td class="mono">${q} / <b style="color:${av>0?'#0a8a4a':'var(--mut2)'}">${av}</b>${rsv?` <span class="lab">(${rsv} res)</span>`:''}</td>
+  <td class="mono">${money(+i.cost||0)}</td>
+  <td class="mono">${money(+i.value||0)}</td>
+  <td class="mono" style="color:${g>=0?'#0a8a4a':'var(--red)'}">${g>=0?'+':''}${money(g)}</td>
+  <td>${pills}</td>
+  <td class="mono" style="${age>30?'color:var(--red)':''}">${age}d${age>30?' ⚠':''}</td>
+  <td style="white-space:nowrap"><button class="btn sm" onclick="reserveModal('${i.id}')">Reserve</button> <button class="btn sm" onclick="sellModal('${i.id}')">Sold</button>${admin?` <select style="max-width:110px;font-size:11px" onchange="reassignInv('${i.id}',this.value)">${ownerOpts(i.owner)}</select>`:''} <button class="btn x" onclick="delInv('${i.id}')">✕</button></td></tr>`;}
+function renderInvList(){const box=$('invListBox');if(!box)return;const admin=ROLE==='admin';const rows=invRows();
+ box.innerHTML=`<div style="overflow:auto;margin-top:12px"><table><tr>${invSortTh('name','Item')}${invSortTh('onhand','On hand / free')}${invSortTh('cost','Unit cost')}${invSortTh('market','Market')}${invSortTh('gain','Gain')}<th>Allocated to</th>${invSortTh('age','Age')}<th></th></tr>${rows.map(i=>invRowHTML(i,admin)).join('')||`<tr><td colspan="8" style="color:var(--mut)">No items match these filters.</td></tr>`}</table></div><div class="lab" style="margin-top:8px">${rows.length} shown · reservations hard-lock units to a show (app-enforced). ${admin?'Admin: reassign owner, reserve beyond free, release anyone.':'You can release only your own reservations.'}</div>`;}
+function dInventory(){const admin=ROLE==='admin';const rl=invRollup();const sets=[...new Set(S.inventory.map(i=>i.set).filter(Boolean))].sort();
+ let h=`<div class="card"><h3 style="font-size:15px">Add inventory</h3>
    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(128px,1fr));margin-top:10px">
    <div><label>Name</label><input id="ivN" placeholder="e.g. Ascended Heroes Box"></div>
    <div><label>Category</label><select id="ivC">${INVCATS.map(c=>`<option>${c}</option>`).join('')}</select></div>
@@ -511,15 +571,97 @@ function dInventory(){const t=invTotals();const admin=ROLE==='admin';
    <div><label>Condition/grade</label><input id="ivG" placeholder="PSA 10 / NM / Sealed"></div>
    <div><label>Image</label><div class="row" style="gap:6px"><input id="ivImg" placeholder="URL or upload" style="min-width:0"><button class="btn sm" onclick="invUploadImg()">⬆</button></div><img id="ivImgPv" style="display:none;height:40px;border-radius:5px;margin-top:4px;border:1px solid var(--line)"></div>
    <div><label>Owner</label><select id="ivOwner">${ownerOpts(ME)}</select></div></div>
-   <div class="row" style="margin-top:12px"><button class="btn v" onclick="addInv()">+ Add item</button><button class="btn sm" onclick="downloadInvTemplate()">↓ CSV template</button><button class="btn sm" onclick="$('ivCSV').click()">Import CSV</button><input id="ivCSV" type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="importInv(this)"></div>
-   <div class="lab" style="margin-top:8px">One physical pool. “Mine” shows items assigned to you; switch to Everyone for the full universal inventory.${admin?' As admin you can reassign any item.':''}</div></div>`;
- h+=`<div class="card" style="margin-top:16px"><div class="row" style="justify-content:space-between"><h3 style="font-size:15px">Inventory · ${invFilter==='mine'?'Mine':'Everyone'} (${t.cnt})</h3><span class="lab">value ${money(t.val)} · cost ${money(t.cost)}</span></div>
-  <div style="overflow:auto;margin-top:10px"><table><tr><th>Name</th><th>Cat</th><th>Set</th><th>Qty</th><th>Cost</th><th>Value</th><th>Gain</th><th>Owner</th><th></th></tr>
-  ${invView().map(i=>{const q=+i.qty||1,g=((+i.value||0)-(+i.cost||0))*q;const own=admin?`<select style="max-width:120px;font-size:12px" onchange="reassignInv('${i.id}',this.value)">${ownerOpts(i.owner)}</select>`:esc(ownerName(i.owner));return `<tr><td>${esc(i.name)}</td><td><span class="pill" style="margin:0">${esc(i.cat)}</span></td><td>${esc(i.set||'')}</td><td class="mono">${q}</td><td class="mono">${money((+i.cost||0)*q)}</td><td class="mono">${money((+i.value||0)*q)}</td><td class="mono" style="color:${g>=0?'#0a8a4a':'var(--red)'}">${g>=0?'+':''}${money(g)}</td><td>${own}</td><td><button class="btn x" onclick="delInv('${i.id}')">✕</button></td></tr>`;}).join('')||`<tr><td colspan="9" style="color:var(--mut)">${invFilter==='mine'?'No items assigned to you yet. Add one, or switch to Everyone.':'No inventory yet. Add items or import a CSV.'}</td></tr>`}</table></div></div>`;
- $('dtc').innerHTML=h;}
+   <div class="row" style="margin-top:12px"><button class="btn v" onclick="addInv()">+ Add item</button><button class="btn sm" onclick="downloadInvTemplate()">↓ CSV template</button><button class="btn sm" onclick="$('ivCSV').click()">Import CSV</button><input id="ivCSV" type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="importInv(this)"></div></div>`;
+ h+=`<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:16px">
+   <div class="metric"><div class="n">${money(rl.cost)}</div><div class="l">Capital deployed</div></div>
+   <div class="metric"><div class="n">${money(rl.market)}</div><div class="l">Market value · <span style="color:${rl.gain>=0?'#0a8a4a':'var(--red)'}">${rl.gain>=0?'+':''}${money(rl.gain)}</span></div></div>
+   <div class="metric"><div class="n">${money(rl.committed)}</div><div class="l">Committed to shows</div></div>
+   <div class="metric"><div class="n">${money(rl.free)}</div><div class="l">Free to break</div></div>
+   <div class="metric"><div class="n" style="color:${rl.aging>0?'var(--red)':'inherit'}">${money(rl.aging)}</div><div class="l">Aging &gt;30d idle</div></div></div>`;
+ h+=`<div class="card" style="margin-top:16px"><div class="row" style="gap:8px;align-items:flex-end">
+     <div style="flex:2;min-width:150px"><label>Search</label><input id="invSearchBox" value="${esc(invSearch)}" placeholder="item name…" oninput="invSearch=this.value;renderInvList()"></div>
+     <div><label>Owner</label><select onchange="invFilter=this.value;localStorage.setItem('e10_invfilter',invFilter);dInventory()"><option value="mine" ${invFilter==='mine'?'selected':''}>Mine</option><option value="all" ${invFilter==='all'?'selected':''}>Everyone</option></select></div>
+     <div><label>Category</label><select onchange="invCatF=this.value;renderInvList()"><option value="">All</option>${INVCATS.map(c=>`<option ${invCatF===c?'selected':''}>${c}</option>`).join('')}</select></div>
+     <div><label>Set</label><select onchange="invSetF=this.value;renderInvList()"><option value="">All</option>${sets.map(s=>`<option ${invSetF===s?'selected':''}>${esc(s)}</option>`).join('')}</select></div>
+     <div><label>Status</label><select onchange="invStatusF=this.value;renderInvList()">${[['all','All'],['onhand','On hand'],['free','Has free'],['reserved','Reserved'],['sold','Sold']].map(([v,l])=>`<option value="${v}" ${invStatusF===v?'selected':''}>${l}</option>`).join('')}</select></div>
+   </div><div id="invListBox"></div></div>`;
+ h+=buyListHTML();
+ $('dtc').innerHTML=h;renderInvList();}
+/* Buy list: aggregate demand BY SET across scheduled shows (break-model allocations + manual
+   needs) vs free-to-break supply. Driven by real shows + real inventory, not a placeholder. */
+function buyListHTML(){
+ const demand={};const bump=(set,qty,showLabel,unitCost)=>{set=set||'(unspecified)';const d=demand[set]||(demand[set]={qty:0,shows:new Set(),cost:0,costN:0});d.qty+=qty;if(showLabel)d.shows.add(showLabel);if(unitCost>0){d.cost+=unitCost*qty;d.costN+=qty;}};
+ const setOfItem=id=>{const it=S.inventory.find(x=>x.id===id);return it?it.set:null;};
+ allShows().forEach(x=>{const r=showByRef(x.k+'|||'+x.i);if(!r)return;const s=r.s,label=(s.name||'Untitled');
+   (s.inventoryAlloc||[]).forEach(a=>bump(setOfItem(a.itemId)||a.set,+a.qty||1,label,+a.cost||0));
+   (s.needs||[]).forEach(n=>bump(n.set,+n.qty||1,label,+n.approxCost||0));});
+ const names=Object.keys(demand);
+ if(!names.length)return `<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Buy list from the schedule</h3><div class="lab" style="margin-top:8px;text-transform:none;letter-spacing:0">No demand yet. Attach a break model to a show (Break Calculator → attach to show) or add a “needs” line in a show’s detail, and this fills with exactly what to buy.</div></div>`;
+ const freeOf=set=>S.inventory.filter(i=>(i.set||'(unspecified)')===set).reduce((a,i)=>a+invAvailable(i),0);
+ const avgCostOf=set=>{const arr=S.inventory.filter(i=>(i.set||'(unspecified)')===set&&(+i.cost||0)>0);return arr.length?arr.reduce((a,i)=>a+(+i.cost||0),0)/arr.length:0;};
+ let projected=0;
+ const rows=names.sort().map(set=>{const d=demand[set],free=freeOf(set),gap=d.qty-free,unit=d.costN?(d.cost/d.costN):avgCostOf(set),order=gap>0?Math.round(gap*unit):0;projected+=order;
+   const pills=[...d.shows].map(l=>`<span class="pill" style="margin:1px">${esc(l)}</span>`).join('');
+   return `<tr><td><b>${esc(set)}</b></td><td>${pills}</td><td class="mono">${d.qty}</td><td class="mono">${free}</td><td class="mono" style="color:${gap>0?'var(--red)':'#0a8a4a'}">${gap>0?('-'+gap):'covered'}</td><td class="mono">${gap>0?('~'+money(order)):'—'}</td></tr>`;}).join('');
+ return `<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Buy list from the schedule</h3>
+   <div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">What upcoming shows need (break-model allocations + manual needs) vs what’s free to break, by set.</div>
+   <div style="overflow:auto"><table><tr><th>Set / product</th><th>Needed by</th><th>Demand</th><th>Free</th><th>Gap</th><th>~Order</th></tr>${rows}</table></div>
+   <div class="row" style="justify-content:flex-end;margin-top:8px"><b>Projected order: ~${money(projected)}</b></div></div>`;}
 function addInv(){const n=$('ivN').value.trim();if(!n)return;const owner=($('ivOwner')&&$('ivOwner').value!=='')?$('ivOwner').value:(ROLE==='admin'&&$('ivOwner')?null:ME);S.inventory.push({id:'i'+Date.now(),name:n,cat:$('ivC').value,set:$('ivS').value,qty:+$('ivQ').value||1,cost:+$('ivCo').value||0,value:+$('ivV').value||0,cond:$('ivG').value,img:$('ivImg').value,owner});save();dInventory();toast('Added');}
 function delInv(id){S.inventory=S.inventory.filter(x=>x.id!==id);save();dInventory();}
 function reassignInv(id,val){const it=S.inventory.find(x=>x.id===id);if(!it)return;it.owner=val||null;save();dInventory();toast('Reassigned to '+ownerName(it.owner));}
+/* ---- Reservations & sold — app-enforced hard lock via cloudCommitShared ---- */
+async function reserveUnits(itemId,showRef,qty){
+ qty=Math.max(1,+qty||1);const r=showByRef(showRef);if(!r)return{ok:false,msg:'Pick a show'};
+ const showId=r.s.id,showLabel=(r.s.name||'Untitled')+' · '+r.k.replace('|',' '),streamer=MEID,admin=ROLE==='admin';
+ const res=await cloudCommitShared(base=>{
+  const it=base.inventory.find(x=>x.id===itemId);if(!it)return{ok:false,msg:'Item not found'};
+  const avail=Math.max(0,(+it.qty||0)-(it.reservations||[]).reduce((s,x)=>s+(+x.qty||0),0));
+  if(!admin&&qty>avail)return{ok:false,msg:'Only '+avail+' free right now — reservation blocked'};
+  if(!Array.isArray(it.reservations))it.reservations=[];
+  const ex=it.reservations.find(x=>x.showId===showId&&x.streamerUid===streamer);
+  if(ex)ex.qty+=qty;else it.reservations.push({showId,showLabel,streamerUid:streamer,qty});
+  return{ok:true,msg:'Reserved '+qty+' → '+showLabel};});
+ toast(res.ok?res.msg:('Reserve failed: '+res.msg));return res;
+}
+async function releaseReservation(itemId,showId,streamerUid){
+ const admin=ROLE==='admin';
+ const res=await cloudCommitShared(base=>{
+  const it=base.inventory.find(x=>x.id===itemId);if(!it)return{ok:false,msg:'Item not found'};
+  const arr=it.reservations||[];const j=arr.findIndex(x=>x.showId===showId&&x.streamerUid===streamerUid);
+  if(j<0)return{ok:false,msg:'Reservation already gone'};
+  if(!admin&&arr[j].streamerUid!==MEID)return{ok:false,msg:'Only the streamer who reserved it (or an admin) can release it'};
+  arr.splice(j,1);return{ok:true,msg:'Released'};});
+ toast(res.ok?res.msg:('Release failed: '+res.msg));return res;
+}
+async function markSold(itemId,sellQty,proceeds){
+ sellQty=Math.max(1,+sellQty||1);proceeds=Math.max(0,+proceeds||0);const admin=ROLE==='admin';
+ const res=await cloudCommitShared(base=>{
+  const it=base.inventory.find(x=>x.id===itemId);if(!it)return{ok:false,msg:'Item not found'};
+  const reserved=(it.reservations||[]).reduce((s,x)=>s+(+x.qty||0),0);const avail=Math.max(0,(+it.qty||0)-reserved);
+  if(!admin&&sellQty>avail)return{ok:false,msg:'Only '+avail+' free to sell (rest reserved)'};
+  const n=admin?Math.min(sellQty,+it.qty||0):Math.min(sellQty,avail);
+  if(n<=0)return{ok:false,msg:'Nothing available to sell'};
+  it.qty=(+it.qty||0)-n;it.soldQty=(+it.soldQty||0)+n;it.soldProceeds=(+it.soldProceeds||0)+proceeds;it.soldAt=Date.now();
+  return{ok:true,msg:'Sold '+n+' · +'+money(proceeds)};});
+ toast(res.ok?res.msg:('Sell failed: '+res.msg));return res;
+}
+function reserveModal(itemId){const it=S.inventory.find(x=>x.id===itemId);if(!it)return;
+ $('modal').innerHTML=`<h3 style="font-size:18px">Reserve — ${esc(it.name)}</h3>
+  <div class="lab" style="margin-top:4px">${invAvailable(it)} of ${(+it.qty||0)} free</div>
+  <div style="margin-top:12px"><label>Reserve to show</label><select id="rvShow">${showPickerOptions('')}</select></div>
+  <div style="margin-top:10px"><label>Units</label><input id="rvQty" type="number" value="1" min="1"></div>
+  <div class="row" style="margin-top:16px"><button class="btn v" onclick="doReserve('${itemId}')">Reserve</button><button class="btn sm" onclick="closeM()">Cancel</button></div>
+  ${ROLE==='admin'?'<div class="lab" style="margin-top:8px">Admin: you may reserve beyond what is free.</div>':''}`;
+ $('ov').style.display='flex';setTimeout(()=>{const e=$('rvShow');if(e)e.focus();},50);}
+async function doReserve(itemId){const ref=$('rvShow')?$('rvShow').value:'';const qty=$('rvQty')?+$('rvQty').value:1;if(!ref){toast('Pick a show');return;}const res=await reserveUnits(itemId,ref,qty);if(res&&res.ok)closeM();}
+function sellModal(itemId){const it=S.inventory.find(x=>x.id===itemId);if(!it)return;
+ $('modal').innerHTML=`<h3 style="font-size:18px">Mark sold — ${esc(it.name)}</h3>
+  <div class="lab" style="margin-top:4px">${invAvailable(it)} free · ${(+it.qty||0)} on hand</div>
+  <div class="row" style="margin-top:12px"><div style="flex:1"><label>Units sold</label><input id="slQty" type="number" value="1" min="1"></div><div style="flex:1"><label>Proceeds $</label><input id="slAmt" type="number" value="${+it.value||0}"></div></div>
+  <div class="row" style="margin-top:16px"><button class="btn v" onclick="doSell('${itemId}')">Mark sold</button><button class="btn sm" onclick="closeM()">Cancel</button></div>`;
+ $('ov').style.display='flex';}
+async function doSell(itemId){const q=$('slQty')?+$('slQty').value:1;const p=$('slAmt')?+$('slAmt').value:0;const res=await markSold(itemId,q,p);if(res&&res.ok)closeM();}
 function downloadInvTemplate(){const rows=[
  ['Name','Category','Set','Qty','Unit Cost','Market Value','Condition','Image URL','Owner'],
  ['Ascended Heroes Booster Box','Box','Ascended Heroes','1','89','140','Sealed','',''],
@@ -716,9 +858,9 @@ const SHARED_KEYS=['comments','todos','streamers','lists','attachments','checkli
 
 function blankShared(){return{comments:[],todos:[],streamers:['Trent'],lists:JSON.parse(JSON.stringify(DEF_LISTS)),attachments:[],checklists:[],inventory:[],repacks:[]};}
 function blankScoped(){return{shows:{},breaks:[],copySets:[],dashCfg:{catValue:true,costMarket:true,movement:true},sales:null};}
-function normShared(o){o=o||{};if(!o.comments)o.comments=[];if(!o.todos)o.todos=[];o.todos.forEach(t=>{if(t.desc==null)t.desc='';if(!t.comments)t.comments=[];});if(!o.streamers)o.streamers=['Trent'];if(!o.lists)o.lists=JSON.parse(JSON.stringify(DEF_LISTS));['characters','sets','formats','diff'].forEach(k=>{if(!o.lists[k])o.lists[k]=(DEF_LISTS[k]||[]).slice();});['attachments','checklists','inventory','repacks'].forEach(k=>{if(!o[k])o[k]=[];});o.inventory.forEach(it=>{if(!it.id)it.id='i'+Math.random().toString(36).slice(2);if(!('owner'in it))it.owner=null;});o.repacks.forEach(p=>{if(!p.cards)p.cards=[];if(!p.pool)p.pool=[];});return o;}
+function normShared(o){o=o||{};if(!o.comments)o.comments=[];if(!o.todos)o.todos=[];o.todos.forEach(t=>{if(t.desc==null)t.desc='';if(!t.comments)t.comments=[];});if(!o.streamers)o.streamers=['Trent'];if(!o.lists)o.lists=JSON.parse(JSON.stringify(DEF_LISTS));['characters','sets','formats','diff'].forEach(k=>{if(!o.lists[k])o.lists[k]=(DEF_LISTS[k]||[]).slice();});['attachments','checklists','inventory','repacks'].forEach(k=>{if(!o[k])o[k]=[];});o.inventory.forEach(it=>{if(!it.id)it.id='i'+Math.random().toString(36).slice(2);if(!('owner'in it))it.owner=null;if(!(+it.qty>=0))it.qty=(+it.qty||1);if(!Array.isArray(it.reservations))it.reservations=[];it.reservations.forEach(r=>{r.qty=+r.qty||0;});if(!it.addedAt)it.addedAt=Date.now();});o.repacks.forEach(p=>{if(!p.cards)p.cards=[];if(!p.pool)p.pool=[];});return o;}
 function normScoped(o){o=o||{};if(!o.shows)o.shows={};if(!o.breaks)o.breaks=[];if(!o.copySets)o.copySets=[];if(!o.dashCfg)o.dashCfg={catValue:true,costMarket:true,movement:true};if(!('sales'in o))o.sales=null;
- Object.keys(o.shows).forEach(k=>{(o.shows[k]||[]).forEach(s=>{if(!s.id)s.id='sh'+Math.random().toString(36).slice(2);if(s.notes==null)s.notes='';if(!('titleSet'in s))s.titleSet=null;if(!('breakModel'in s))s.breakModel=null;if(!Array.isArray(s.inventoryAlloc))s.inventoryAlloc=[];if(!('repackRef'in s))s.repackRef=null;});});
+ Object.keys(o.shows).forEach(k=>{(o.shows[k]||[]).forEach(s=>{if(!s.id)s.id='sh'+Math.random().toString(36).slice(2);if(s.notes==null)s.notes='';if(!('titleSet'in s))s.titleSet=null;if(!('breakModel'in s))s.breakModel=null;if(!Array.isArray(s.inventoryAlloc))s.inventoryAlloc=[];if(!('repackRef'in s))s.repackRef=null;if(!Array.isArray(s.needs))s.needs=[];});});
  o.breaks.forEach(b=>{if(!b.id)b.id='bk'+Math.random().toString(36).slice(2);if(!('ts'in b))b.ts=null;});
  o.copySets.forEach(c=>{if(!c.id)c.id='cs'+Math.random().toString(36).slice(2);});
  return o;}
@@ -728,6 +870,10 @@ function canEditScoped(){return SCOPE==='mine'||ROLE==='admin';}
 function scopeLabel(){if(SCOPE==='mine')return 'My space';if(SCOPE==='universal')return 'Universal';const m=MEMBERS.find(x=>x.user_id===SCOPE);return (m?(m.display_name||m.email):'Member')+"’s space";}
 function ownerName(o){if(!o)return '—';const m=MEMBERS.find(x=>x.email===o);return m?(m.display_name||m.email):o;}
 function invView(){return invFilter==='mine'?S.inventory.filter(i=>i.owner===ME):S.inventory;}
+/* Reservations: derived, never stored. available = onHand - sum(reservations). */
+function invReserved(it){return (it.reservations||[]).reduce((s,r)=>s+(+r.qty||0),0);}
+function invAvailable(it){return Math.max(0,(+it.qty||0)-invReserved(it));}
+function invAge(it){return Math.floor((Date.now()-(+it.addedAt||Date.now()))/86400000);}
 function roGuard(){toast('Read-only — switch to “My space” to edit');return false;}
 
 function rebuildS(){normShared(SHARED);normScoped(SCOPED);
@@ -753,6 +899,30 @@ async function doCloudWrite(){_st=null;
  const sj=JSON.stringify(shared);if(sj!==_lastShared){_lastShared=sj;await writeRow('shared',null,shared);}
  if(canEditScoped()){const scoped={shows:S.shows,breaks:S.breaks,copySets:S.copySets,dashCfg:S.dashCfg,sales:S.sales};const cj=JSON.stringify(scoped);
   if(cj!==_lastScoped){_lastScoped=cj;const owner=(SCOPE==='mine')?MEID:(SCOPE==='universal'?null:SCOPE);await writeRow(SCOPED_ID,owner,scoped);}}
+}
+/* Reservation-critical writes go through a read-modify-write on the shared row: re-read the latest
+   'shared' JSONB, recompute availability against it, apply the mutation, then upsert with rev+1 —
+   merging so concurrent edits to other shared fields/items aren't clobbered. This lock is
+   APPLICATION-ENFORCED, NOT database-guaranteed: any member can write the shared blob, so a truly
+   simultaneous write could still race in the gap between read and write. Acceptable at this team
+   size; real enforcement is the future per-entity table migration (out of scope). mutate(base)
+   mutates base.inventory and returns {ok,msg}. */
+async function cloudCommitShared(mutate){
+ if(!sb)return{ok:false,msg:'Not connected'};
+ /* Flush any pending debounced write first, so the fresh read includes local edits that haven't
+    been persisted yet (e.g. an item just added) — otherwise the read-modify-write can't see them
+    and adopting the cloud base would drop them. */
+ if(_st){clearTimeout(_st);_st=null;try{await doCloudWrite();}catch(e){}}
+ let fresh=null;try{fresh=await fetchRow('shared');}catch(e){return{ok:false,msg:'Network error'};}
+ const base=(fresh&&fresh.data&&Object.keys(fresh.data).length)?splitLegacy(fresh.data).sh:blankShared();normShared(base);
+ let res;try{res=mutate(base);}catch(e){return{ok:false,msg:e.message||'error'};}
+ if(!res||!res.ok)return res||{ok:false,msg:'Rejected'};
+ const payload={comments:base.comments,todos:base.todos,streamers:base.streamers,lists:base.lists,attachments:base.attachments,checklists:base.checklists,inventory:base.inventory,repacks:base.repacks};
+ const rev=((fresh&&fresh.rev)||REVS['shared']||0)+1;REVS['shared']=rev;
+ const{error}=await sb.from('e10_workspace').upsert({id:'shared',data:payload,rev,owner:null,updated_by:ME,updated_at:new Date().toISOString()});
+ if(error)return{ok:false,msg:error.message};
+ _applyingRemote=true;SHARED=base;_lastShared=JSON.stringify(payload);rebuildS();_applyingRemote=false;safeRender();
+ return{ok:true,msg:res.msg};
 }
 /* Flush pending debounced saves before the tab is hidden/closed so the last edits aren't lost. */
 function flushSaves(){if(_lsTimer){clearTimeout(_lsTimer);_lsTimer=null;try{_origSave();}catch(e){}}if(_st){clearTimeout(_st);_st=null;if(sb&&!_applyingRemote)doCloudWrite();}}

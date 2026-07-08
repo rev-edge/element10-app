@@ -109,6 +109,43 @@ async function signIn(email) {
     }
   }
 
+  // ── SHARED reservation round-trip (member read-modify-write) ─────────
+  // Reservations live in the shared inventory blob (no new table/RLS). This mirrors the app's
+  // cloudCommitShared path: a MEMBER reads the shared row, appends a reservation, upserts with
+  // .select() (INSERT...RETURNING on the shared row), and reads it back. Uses a uniquely-id'd
+  // THROWAWAY item added and then removed, so real inventory is never mutated.
+  console.log('\n[shared reservation round-trip]');
+  {
+    const tmpId = 'itest_' + B.slice(0, 8);
+    const g0 = await cb.from('e10_workspace').select('data,rev').eq('id', 'shared').maybeSingle();
+    ok('member can READ shared row', !g0.error && g0.data, g0.error && g0.error.message);
+    if (g0.data) {
+      const data = g0.data.data || {};
+      const inv = Array.isArray(data.inventory) ? data.inventory : (data.inventory = []);
+      const origLen = inv.filter(x => x.id !== tmpId).length;
+      inv.push({ id: tmpId, name: 'RLS TEST TEMP', qty: 1, cost: 0, value: 0, owner: B,
+        reservations: [{ showId: 'stest', showLabel: 'RLS test show', streamerUid: B, qty: 1 }], addedAt: Date.now() });
+      const w = await cb.from('e10_workspace')
+        .upsert({ id: 'shared', data, rev: (g0.data.rev || 0) + 1, owner: null, updated_by: 'rlsB' })
+        .select().maybeSingle();
+      ok('member .upsert().select() shared RETURNS row (INSERT...RETURNING on shared)', !w.error && w.data && w.data.id === 'shared', w.error && w.error.message);
+      const g1 = await cb.from('e10_workspace').select('data').eq('id', 'shared').maybeSingle();
+      const back = (g1.data && g1.data.data.inventory || []).find(x => x.id === tmpId);
+      ok('reservation round-trips through shared JSONB', !!(back && back.reservations && back.reservations[0].qty === 1 && back.reservations[0].streamerUid === B), 'temp item/res not found on read-back');
+      // cleanup: re-fetch fresh, remove ONLY our temp item by id, write back (real items untouched)
+      const gc = await cb.from('e10_workspace').select('data,rev').eq('id', 'shared').maybeSingle();
+      const cdata = gc.data.data; cdata.inventory = (cdata.inventory || []).filter(x => x.id !== tmpId);
+      await cb.from('e10_workspace').upsert({ id: 'shared', data: cdata, rev: (gc.data.rev || 0) + 1, owner: null, updated_by: 'rlsB' });
+      const g2 = await cb.from('e10_workspace').select('data').eq('id', 'shared').maybeSingle();
+      const finalLen = (g2.data.data.inventory || []).filter(x => x.id !== tmpId).length;
+      ok('cleanup restored inventory (temp removed, real items intact)', (g2.data.data.inventory || []).every(x => x.id !== tmpId) && finalLen === origLen, 'temp leftover or count drift');
+    }
+    {
+      const { data } = await cc.from('e10_workspace').select('id').eq('id', 'shared').maybeSingle();
+      ok('viewer STILL cannot read shared row', data === null, 'got: ' + JSON.stringify(data));
+    }
+  }
+
   // ── ONBOARDING RPC gating ────────────────────────────────────────────
   console.log('\n[onboarding rpc gating]');
   {
