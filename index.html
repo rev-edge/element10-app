@@ -108,7 +108,7 @@ if(!S){S={lists:JSON.parse(JSON.stringify(DEF_LISTS)),streamers:['Trent','Guest 
 if(!('user' in S))S.user=null;
 if(!S.inventory)S.inventory=[];if(!S.dashCfg)S.dashCfg={catValue:true,costMarket:true,movement:true};
 if(!S.lists)S.lists=JSON.parse(JSON.stringify(DEF_LISTS));
-['attachments','checklists','breaks'].forEach(k=>{if(!S[k])S[k]=[];});
+['attachments','checklists','breaks','copySets'].forEach(k=>{if(!S[k])S[k]=[];});
 S.todos.forEach(t=>{if(t.desc==null)t.desc='';if(!t.comments)t.comments=[];});
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){toast('Storage full — large attachment not saved');}}
 const $=id=>document.getElementById(id);
@@ -134,13 +134,13 @@ function scheduleGridHTML(){
  let h=`<div style="overflow:auto"><div class="sgrid"><div></div>${DAYS.map(d=>`<div class="hd">${d}</div>`).join('')}`;
  DAYPARTS.forEach(dp=>{h+=`<div class="dp">${dp[0]}<span style="color:var(--mut2)">${dp[2]}</span></div>`;
   DAYS.forEach(day=>{const k=day+'|'+dp[0];const peak=dp[1]>=0.7?'peak':'';const arr=S.shows[k]||[];
-   h+=`<div class="cell ${peak}" ondragover="event.preventDefault()" ondragenter="this.classList.add('dover')" ondragleave="this.classList.remove('dover')" ondrop="this.classList.remove('dover');dropShow('${k}')">${arr.map((s,i)=>`<div class="show" draggable="true" ondragstart="dragShow('${k}',${i})" onclick="event.stopPropagation();editShow('${k}',${i})"><div class="nm">${esc(s.name)}</div><div class="mt">${esc(s.fmt||'')} · ${esc(s.dur||'')}m · ${esc(s.host||'')}</div></div>`).join('')}<div class="addc" onclick="newShow('${k}')">+ add</div></div>`;});});
+   h+=`<div class="cell ${peak}" ondragover="event.preventDefault()" ondragenter="this.classList.add('dover')" ondragleave="this.classList.remove('dover')" ondrop="this.classList.remove('dover');dropShow('${k}')">${arr.map((s,i)=>`<div class="show" draggable="true" ondragstart="dragShow('${k}',${i})" onclick="event.stopPropagation();editShow('${k}',${i})"><div class="nm">${esc(s.name)}</div><div class="mt">${esc(s.fmt||'')} · ${esc(s.dur||'')}m · ${esc(s.host||'')}</div>${(s.titleSet||s.breakModel||s.repackRef)?`<div class="mt">${s.titleSet?'📝 ':''}${s.breakModel?'📊 ':''}${s.repackRef?'🎁':''}</div>`:''}</div>`).join('')}<div class="addc" onclick="newShow('${k}')">+ add</div></div>`;});});
  h+=`</div></div>`;return h;}
 let DRAGS=null;function dragShow(k,i){DRAGS={k,i};}
 function dropShow(k){if(!DRAGS)return;if(!canEditScoped()){DRAGS=null;return roGuard();}const s=S.shows[DRAGS.k].splice(DRAGS.i,1)[0];if(!S.shows[DRAGS.k].length)delete S.shows[DRAGS.k];(S.shows[k]=S.shows[k]||[]).push(s);DRAGS=null;save();rerenderSchedule();}
 function rerenderSchedule(){if($('sec-schedule').classList.contains('on'))renderSchedule();if($('sec-home').classList.contains('on'))renderHome();}
 function newShow(k){if(!canEditScoped())return roGuard();showModal(null,k||(DAYS[0]+'|Evening'));}
-function editShow(k,i){showModal({k,i,...S.shows[k][i]},k);}
+function editShow(k,i){const s=S.shows[k]&&S.shows[k][i];if(!s)return;showDetail(s.id);}
 function showModal(ex,k){ex=ex||{name:'',fmt:L('formats')[0],dur:90,host:S.streamers[0]||''};const[day,dp]=k.split('|');
  $('modal').innerHTML=`<h3 style="font-size:18px">${ex.k!=null?'Edit':'New'} show</h3>
   <div style="margin-top:12px"><label>Show name</label><input id="mname" value="${esc(ex.name)}" placeholder="e.g. Ascended Heroes Ceiling Ladder"></div>
@@ -151,8 +151,48 @@ function showModal(ex,k){ex=ex||{name:'',fmt:L('formats')[0],dur:90,host:S.strea
   <div style="margin-top:10px"><label>Streamer</label><select id="mhost">${S.streamers.map(s=>`<option ${s===ex.host?'selected':''}>${esc(s)}</option>`).join('')}</select></div>
   <div class="row" style="margin-top:18px"><button class="btn v" onclick="saveShow(${ex.k!=null?`'${ex.k}',${ex.i}`:'null,null'})">Save</button><button class="btn sm" onclick="closeM()">Cancel</button>${ex.k!=null?`<button class="btn x" style="margin-left:auto" onclick="delShow('${ex.k}',${ex.i})">Delete</button>`:''}</div>`;
  $('ov').style.display='flex';}
-function saveShow(ok,oi){if(!canEditScoped())return roGuard();const s={name:$('mname').value.trim()||'Untitled show',fmt:$('mfmt').value,dur:+$('mdur').value||60,host:$('mhost').value};const k=$('mday').value+'|'+$('mdp').value;
- if(ok!=null){S.shows[ok].splice(oi,1);if(!S.shows[ok].length)delete S.shows[ok];}(S.shows[k]=S.shows[k]||[]).push(s);save();closeM();rerenderSchedule();}
+function saveShow(ok,oi){if(!canEditScoped())return roGuard();
+ const s={id:'sh'+Date.now(),name:$('mname').value.trim()||'Untitled show',fmt:$('mfmt').value,dur:+$('mdur').value||60,host:$('mhost').value,notes:'',titleSet:null,titleSetId:null,breakModel:null,breakModelId:null,inventoryAlloc:[],repackRef:null};
+ const k=$('mday').value+'|'+$('mdp').value;
+ if(ok!=null&&S.shows[ok]&&S.shows[ok][oi]){const old=S.shows[ok][oi];s.id=old.id||s.id;s.notes=old.notes||'';s.titleSet=old.titleSet||null;s.titleSetId=old.titleSetId||null;s.breakModel=old.breakModel||null;s.breakModelId=old.breakModelId||null;s.inventoryAlloc=old.inventoryAlloc||[];s.repackRef=old.repackRef||null;S.shows[ok].splice(oi,1);if(!S.shows[ok].length)delete S.shows[ok];}
+ (S.shows[k]=S.shows[k]||[]).push(s);save();closeM();rerenderSchedule();}
+/* ---------- SHOW DETAIL (the hub panel) ---------- */
+function showById(id){let res=null;Object.keys(S.shows||{}).forEach(k=>{(S.shows[k]||[]).forEach((s,i)=>{if(s.id===id)res={k,i,s};});});return res;}
+function showDetail(id){const r=showById(id);if(!r){closeM();return;}const s=r.s;const[day,dp]=r.k.split('|');
+ const ro=!canEditScoped();
+ const copyBox=s.titleSet?`<div class="out"><div class="row" style="justify-content:space-between"><span class="lab">${esc(s.titleSet.name)} · ${esc(s.titleSet.type)}</span>${ro?'':`<button class="btn x" onclick="showDetach('${id}','titleSet')">detach</button>`}</div><div style="margin-top:6px">${(s.titleSet.items||[]).map(it=>`<div style="font-size:12.5px;padding:2px 0"><span class="lab">${esc(it[0])}</span> ${esc(it[1])}</div>`).join('')}</div></div>`
+   :`<div class="lab">No copy attached.</div>${ro?'':`<div class="row" style="margin-top:6px"><select onchange="showPickCopy('${id}',this.value)" style="flex:2"><option value="">— attach a saved copy set —</option>${(S.copySets||[]).map(c=>`<option value="${c.id}">${esc(c.name)} · ${esc(c.type)}</option>`).join('')}</select><button class="btn sm" onclick="closeM();go('copy')">Generate ↗</button></div>`}`;
+ const eco=s.breakModel&&s.breakModel.economics;
+ const breakBox=s.breakModel?`<div class="out"><div class="row" style="justify-content:space-between"><span class="lab">${esc(s.breakModel.name)} · ${s.breakModel.slots} slots · ${s.breakModel.tiers} tiers</span>${ro?'':`<button class="btn x" onclick="showDetach('${id}','breakModel')">detach</button>`}</div>${eco?`<div style="font-size:12.5px;margin-top:6px">Exp. gross ${money(eco.grossAvg)} · proj. profit ${money(eco.profit)} · cost ${money(eco.cost)} · card value ${money(eco.totVal)}</div>`:''}${(s.inventoryAlloc&&s.inventoryAlloc.length)?`<div style="margin-top:6px"><span class="lab">Inventory allocation</span>${s.inventoryAlloc.map(a=>`<div style="font-size:12.5px;padding:1px 0">📦 ${esc(a.name)} · cost ${money(a.cost)} · val ${money(a.value)}</div>`).join('')}</div>`:''}${ro?'':`<div class="row" style="margin-top:8px"><button class="btn v sm" onclick="showStartLive('${id}')">▶ Start Live Break for this show</button></div>`}</div>`
+   :`<div class="lab">No break model attached.</div>${ro?'':`<div class="row" style="margin-top:6px"><select onchange="showPickBreak('${id}',this.value)" style="flex:2"><option value="">— attach a saved break model —</option>${(S.breaks||[]).map(b=>`<option value="${b.id}">${esc(b.name)} · ${b.slots} slots</option>`).join('')}</select><button class="btn sm" onclick="closeM();go('break')">Build ↗</button></div><div class="row" style="margin-top:6px"><button class="btn sm" onclick="showStartLive('${id}')">▶ Start Live Break (no model)</button></div>`}`;
+ const repackBox=s.repackRef?`<div class="out"><div class="row" style="justify-content:space-between"><span>🎁 ${esc(s.repackRef.name)}</span>${ro?'':`<button class="btn x" onclick="showDetach('${id}','repackRef')">detach</button>`}</div></div>`
+   :`<div class="lab">No repack attached.</div>${ro?'':`<div class="row" style="margin-top:6px"><select onchange="showPickRepack('${id}',this.value)" style="flex:2"><option value="">— attach a repack —</option>${(S.repacks||[]).map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select><button class="btn sm" onclick="closeM();go('repack')">Studio ↗</button></div>`}`;
+ $('modal').innerHTML=`<h3 style="font-size:18px">${esc(s.name||'Show')}</h3><div class="lab" style="margin-top:2px">${day} · ${dp}</div>
+  <div class="row" style="margin-top:12px"><div style="flex:2"><label>Show name</label><input id="mname" value="${esc(s.name)}" ${ro?'disabled':''}></div></div>
+  <div class="row" style="margin-top:8px"><div style="flex:1"><label>Day</label><select id="mday" ${ro?'disabled':''}>${DAYS.map(d=>`<option ${d===day?'selected':''}>${d}</option>`).join('')}</select></div>
+   <div style="flex:1"><label>Daypart</label><select id="mdp" ${ro?'disabled':''}>${DAYPARTS.map(d=>`<option ${d[0]===dp?'selected':''}>${d[0]}</option>`).join('')}</select></div></div>
+  <div class="row" style="margin-top:8px"><div style="flex:1"><label>Format</label><select id="mfmt" ${ro?'disabled':''}>${L('formats').map(f=>`<option ${f===s.fmt?'selected':''}>${esc(f)}</option>`).join('')}</select></div>
+   <div style="flex:1"><label>Duration (min)</label><input id="mdur" type="number" value="${s.dur}" ${ro?'disabled':''}></div>
+   <div style="flex:1"><label>Streamer</label><select id="mhost" ${ro?'disabled':''}>${S.streamers.map(x=>`<option ${x===s.host?'selected':''}>${esc(x)}</option>`).join('')}</select></div></div>
+  ${ro?'':`<div class="row" style="margin-top:10px"><button class="btn v sm" onclick="saveShowDetail('${id}')">Save details</button><button class="btn x" style="margin-left:auto" onclick="delShowById('${id}')">Delete show</button></div>`}
+  <div style="margin-top:16px"><span class="lab">Title / description copy</span>${copyBox}</div>
+  <div style="margin-top:14px"><span class="lab">Break / format model</span>${breakBox}</div>
+  <div style="margin-top:14px"><span class="lab">Repack</span>${repackBox}</div>
+  <div style="margin-top:14px"><label>Notes</label><textarea ${ro?'disabled':''} placeholder="Prep notes for this show…" oninput="showSetNotes('${id}',this.value)">${esc(s.notes||'')}</textarea></div>
+  <div class="row" style="margin-top:16px"><button class="btn sm" onclick="closeM()">Close</button></div>`;
+ $('ov').style.display='flex';}
+function saveShowDetail(id){if(!canEditScoped())return roGuard();const r=showById(id);if(!r)return;const s=r.s;
+ s.name=$('mname').value.trim()||'Untitled show';s.fmt=$('mfmt').value;s.dur=+$('mdur').value||60;s.host=$('mhost').value;
+ const nk=$('mday').value+'|'+$('mdp').value;
+ if(nk!==r.k){S.shows[r.k].splice(r.i,1);if(!S.shows[r.k].length)delete S.shows[r.k];(S.shows[nk]=S.shows[nk]||[]).push(s);}
+ save();closeM();rerenderSchedule();toast('Show saved');}
+function delShowById(id){if(!canEditScoped())return roGuard();const r=showById(id);if(!r)return;S.shows[r.k].splice(r.i,1);if(!S.shows[r.k].length)delete S.shows[r.k];save();closeM();rerenderSchedule();}
+function showPickCopy(id,setId){if(!setId)return;if(!canEditScoped())return roGuard();const cs=(S.copySets||[]).find(x=>x.id===setId);const r=showById(id);if(!cs||!r)return;r.s.titleSet=JSON.parse(JSON.stringify(cs));r.s.titleSetId=cs.id;save();showDetail(id);toast('Copy attached');}
+function showPickBreak(id,bid){if(!bid)return;if(!canEditScoped())return roGuard();const b=(S.breaks||[]).find(x=>x.id===bid);const r=showById(id);if(!b||!r)return;r.s.breakModel=JSON.parse(JSON.stringify(b));r.s.breakModelId=b.id;r.s.inventoryAlloc=(b.invItems||[]).map(x=>({itemId:x.itemId,name:x.name,qty:x.qty,cost:x.cost,value:x.value}));save();showDetail(id);toast('Break model attached');}
+function showPickRepack(id,rid){if(!rid)return;if(!canEditScoped())return roGuard();const p=(S.repacks||[]).find(x=>x.id===rid);const r=showById(id);if(!p||!r)return;r.s.repackRef={id:p.id,name:p.name};save();showDetail(id);}
+function showDetach(id,field){if(!canEditScoped())return roGuard();const r=showById(id);if(!r)return;if(field==='titleSet'){r.s.titleSet=null;r.s.titleSetId=null;}if(field==='breakModel'){r.s.breakModel=null;r.s.breakModelId=null;r.s.inventoryAlloc=[];}if(field==='repackRef')r.s.repackRef=null;save();showDetail(id);}
+function showSetNotes(id,v){const r=showById(id);if(r){r.s.notes=v;save();}}
+function showStartLive(id){const r=showById(id);if(!r)return;LIVE_SEED={show:r.s.name,model:r.s.breakModel||null};closeM();go('live');}
 function delShow(k,i){if(!canEditScoped())return roGuard();S.shows[k].splice(i,1);if(!S.shows[k].length)delete S.shows[k];save();closeM();rerenderSchedule();}
 function closeM(){$('ov').style.display='none';}
 
@@ -205,6 +245,15 @@ function renderSchedule(){
  $('sec-schedule').innerHTML=`<div class="hero"><div><h1>Schedule</h1><div class="sub">Drag shows across the week. Peak windows (evening/late) are shaded.</div></div><div class="row" style="gap:6px">${ROLE==='admin'?`<button class="btn sm" onclick="copyWeekToUniversal()" title="Publish this week to the team baseline everyone sees">Copy week → Universal</button>`:''}<button class="btn v" onclick="newShow()">+ New show</button></div></div>${scheduleGridHTML()}`;
 }
 
+/* ---------- SHOW HUB — cross-module attach helpers ---------- */
+let CS_LAST=null;      // last generated copy set in Copy Studio {type,items}
+let LIVE_SEED=null;    // pending break-model seed when Live Break is started from a show
+function allShows(){const out=[];Object.keys(S.shows||{}).forEach(k=>{(S.shows[k]||[]).forEach((s,i)=>{const p=k.split('|');out.push({k,i,id:s.id,label:(s.name||'Untitled')+' · '+p[0]+' '+p[1]});});});return out;}
+function showByRef(ref){if(!ref)return null;const p=ref.split('|||');const arr=S.shows[p[0]];if(!arr||!arr[+p[1]])return null;return{k:p[0],i:+p[1],s:arr[+p[1]]};}
+function showPickerOptions(sel){return `<option value="">— attach to show —</option>`+allShows().map(x=>`<option value="${x.k}|||${x.i}" ${sel===(x.k+'|||'+x.i)?'selected':''}>${esc(x.label)}</option>`).join('');}
+function copyTitleOf(cs){return (cs&&cs.items&&cs.items[0])?(cs.items[0][1]||''):'';}
+function copyDescOf(cs){if(!cs||!cs.items)return '';const d=cs.items.find(it=>/option|descr/i.test(it[0]));return d?d[1]:'';}
+
 /* ---------- COPY STUDIO ---------- */
 function renderCopy(){
  $('sec-copy').innerHTML=`<div class="hero"><div><h1>Copy Studio</h1><div class="sub">Self-contained — draws on your editable lists (Data &amp; Lists) and the OS title formulas.</div></div></div>
@@ -216,7 +265,10 @@ function renderCopy(){
    <div><label>Price anchor</label><select id="cPrice"><option>1</option><option>2</option></select></div>
    <div><label>Streamer</label><select id="cHost"><option value="">—</option>${S.streamers.map(x=>`<option>${esc(x)}</option>`).join('')}</select></div>
    </div><div class="row" style="margin-top:14px"><button class="btn v" onclick="genCopy()">Generate</button><span class="lab" style="align-self:center">3 angles: curiosity · search · drama</span></div>
-   <div id="cout"></div></div>`;
+   <div id="cout"></div>
+   <div class="row" style="margin-top:12px"><input id="csName" placeholder="Name this set to save it…" style="flex:2"><button class="btn d sm" onclick="saveCopySet()">Save set</button><span class="lab" style="align-self:center">Saved sets persist &amp; can attach to a show</span></div></div>
+  <div class="card" style="margin-top:16px"><h3 style="font-size:15px">Saved copy — history</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">Reopen, duplicate, rename, delete, or attach a set to a show (the show then carries the copy into Whatnot Export).</div><div id="csHist" style="margin-top:8px"></div></div>`;
+ renderCopyHist();
 }
 function pickData(){return{set:$('cSet').value||rand(L('sets')),char:$('cChar').value||rand(L('characters')),fmt:$('cFmt').value||rand(L('formats')),price:$('cPrice').value,host:$('cHost').value,diff:rand(L('diff')),time:rand(['8:00','8:30','7:00','9:00']),low:rand(['3','5','7']),x:rand(['400','850','1000'])};}
 function genCopy(){const type=$('cType').value,d=pickData();let items=[];
@@ -224,8 +276,25 @@ function genCopy(){const type=$('cType').value,d=pickData();let items=[];
  else if(type==='Short/TikTok hook'){items=[['hook',fill(rand(SHORT_TPL),d)],['hook',fill(rand(SHORT_TPL),d)],['hook',fill(rand(SHORT_TPL),d)]];}
  else if(type==='Description'){items=[['option',fill(rand(DESC_TPL),d)],['option',fill(rand(DESC_TPL),d)]];}
  else{items=[['tags',['Pokémon',d.set,d.char,'$'+d.price+' Starts',d.fmt,'Sudden Death','Graded Cards'].filter(Boolean).join(', ')]];}
- $('cout').innerHTML=items.map(([k,v])=>`<div class="out" data-v="${esc(v)}"><span class="lab">${esc(k)}</span><button class="btn sm cp" onclick="copy(this.parentElement.dataset.v)">copy</button><div style="margin-top:4px">${esc(v)}</div></div>`).join('');
+ CS_LAST={type,items};
+ $('cout').innerHTML=copyOutHTML(items);
 }
+function copyOutHTML(items){return items.map(([k,v])=>`<div class="out" data-v="${esc(v)}"><span class="lab">${esc(k)}</span><button class="btn sm cp" onclick="copy(this.parentElement.dataset.v)">copy</button><div style="margin-top:4px">${esc(v)}</div></div>`).join('');}
+function saveCopySet(){if(!CS_LAST||!CS_LAST.items.length){toast('Generate copy first');return;}if(!canEditScoped())return roGuard();
+ const name=($('csName')&&$('csName').value.trim())||(CS_LAST.type+' set');
+ S.copySets.unshift({id:'cs'+Date.now(),name,ts:Date.now(),type:CS_LAST.type,items:CS_LAST.items});save();renderCopyHist();const nm=$('csName');if(nm)nm.value='';toast('Saved copy set');}
+function renderCopyHist(){const el=$('csHist');if(!el)return;
+ el.innerHTML=(S.copySets||[]).length?S.copySets.map(cs=>`<div class="filerow"><span class="nm">📝 ${esc(cs.name)} <span class="lab">${esc(cs.type)} · ${cs.items.length} · ${cs.ts?new Date(cs.ts).toLocaleDateString():''}</span></span>
+   <button class="btn sm" onclick="reopenCopy('${cs.id}')">Reopen</button>
+   <button class="btn sm" onclick="dupCopy('${cs.id}')">Duplicate</button>
+   <button class="btn sm" onclick="renameCopy('${cs.id}')">Rename</button>
+   <select onchange="attachCopyToShow('${cs.id}',this.value);this.value=''" style="max-width:150px;font-size:12px">${showPickerOptions('')}</select>
+   <button class="btn x" onclick="delCopy('${cs.id}')">✕</button></div>`).join(''):'<div style="color:var(--mut);font-size:13px">No saved copy sets yet. Generate, name it, then Save set.</div>';}
+function reopenCopy(id){const cs=(S.copySets||[]).find(x=>x.id===id);if(!cs)return;CS_LAST={type:cs.type,items:cs.items};const o=$('cout');if(o)o.innerHTML=copyOutHTML(cs.items);const nm=$('csName');if(nm)nm.value=cs.name;toast('Reopened '+cs.name);}
+function dupCopy(id){if(!canEditScoped())return roGuard();const cs=(S.copySets||[]).find(x=>x.id===id);if(!cs)return;S.copySets.unshift({id:'cs'+Date.now(),name:cs.name+' (copy)',ts:Date.now(),type:cs.type,items:cs.items.slice()});save();renderCopyHist();}
+function renameCopy(id){if(!canEditScoped())return roGuard();const cs=(S.copySets||[]).find(x=>x.id===id);if(!cs)return;const v=prompt('Rename copy set',cs.name);if(v==null)return;cs.name=v.trim()||cs.name;save();renderCopyHist();}
+function delCopy(id){if(!canEditScoped())return roGuard();S.copySets=(S.copySets||[]).filter(x=>x.id!==id);save();renderCopyHist();}
+function attachCopyToShow(id,ref){if(!ref)return;if(!canEditScoped())return roGuard();const cs=(S.copySets||[]).find(x=>x.id===id);const r=showByRef(ref);if(!cs||!r)return;r.s.titleSet=JSON.parse(JSON.stringify(cs));r.s.titleSetId=cs.id;save();toast('Attached “'+cs.name+'” to '+(r.s.name||'show'));}
 
 /* ---------- SCHEDULE GEN ---------- */
 function renderGen(){
@@ -255,7 +324,7 @@ function genSchedule(){if(!canEditScoped())return roGuard();if(Object.values(S.s
 }
 
 /* ---------- BREAK CALCULATOR ---------- */
-let BK={products:[],chases:[],auctions:[],cost:0,_last:null};
+let BK={products:[],chases:[],auctions:[],invItems:[],cost:0,_last:null};
 function renderBreak(){
  $('sec-break').innerHTML=`<div class="hero"><div><h1>Break Calculator</h1><div class="sub">Model tiered break slots across products, chase slabs &amp; auctions — with expected bids and projected profit.</div></div></div>
  <div class="split"><div class="card"><h3 style="font-size:15px">Inputs</h3>
@@ -266,6 +335,8 @@ function renderBreak(){
   ${S.checklists.length?`<div class="row" style="margin-top:8px"><select id="clSel" style="flex:2"><option value="">— load chases from checklist —</option>${S.checklists.map((c,i)=>`<option value="${i}">${esc(c.name)} (${c.rows.length})</option>`).join('')}</select><button class="btn sm" onclick="loadChecklistToBreak()">Load</button></div>`:`<div class="lab" style="margin-top:8px">Upload a checklist in <a onclick="go('data')">Data &amp; Lists</a> to load chases automatically.</div>`}
   <div class="lab" style="margin-top:16px">Solo auctions (each its own slot)</div><div id="aucList"></div>
   <div class="row" style="margin-top:6px"><input id="aName" placeholder="Auction item" style="flex:2"><input id="aVal" type="number" placeholder="$" style="flex:1"><button class="btn sm" onclick="addAuc()">+</button></div>
+  <div class="lab" style="margin-top:16px">Pull from inventory (uses real cost &amp; market value)</div><div id="invList"></div>
+  ${S.inventory.length?`<div class="row" style="margin-top:6px"><select id="bkInv" style="flex:2"><option value="">— choose an inventory item —</option>${S.inventory.map((it,ix)=>`<option value="${ix}">${esc(it.name)} · ${esc(it.cat||'')} · ${money(+it.value||0)}</option>`).join('')}</select><button class="btn sm" onclick="bkAddFromInv()">+ Pull</button></div>`:`<div class="lab" style="margin-top:6px">No inventory yet — add items in <a onclick="go('data')">Data &amp; Lists</a> to factor real cost/value into the model.</div>`}
   <div style="margin-top:16px"><label>Total product cost (what you paid)</label><input id="bCost" type="number" value="${BK.cost}" oninput="BK.cost=+this.value||0;calcBreak()"></div></div>
  <div class="card"><h3 style="font-size:15px">Tuners</h3>
   <div style="margin-top:12px"><label>Chase slots: <span id="lSlots" class="mono"></span></label><input id="tSlots" type="range" min="1" max="12" value="5" oninput="lSlots.textContent=this.value;calcBreak()"></div>
@@ -273,15 +344,27 @@ function renderBreak(){
   <div style="margin-top:10px"><label>Evenness ↔ disparity: <span id="lEven" class="mono"></span></label><input id="tEven" type="range" min="0" max="100" value="30" oninput="lEven.textContent=this.value+'% disparity';calcBreak()"></div>
   <div style="margin-top:10px"><label>Markup on value: <span id="lMk" class="mono"></span></label><input id="tMk" type="range" min="0" max="60" value="25" oninput="lMk.textContent=this.value+'%';calcBreak()"></div>
   <div id="bout" style="margin-top:16px"></div>
-  <div class="row" style="margin-top:14px"><input id="bName" placeholder="Name this model" style="flex:2"><button class="btn d sm" onclick="saveBreak()">Save model</button></div></div></div>`;
+  <div class="row" style="margin-top:14px"><input id="bName" placeholder="Name this model" style="flex:2"><button class="btn d sm" onclick="saveBreak()">Save model</button></div></div></div>
+ <div class="card" style="margin-top:16px"><h3 style="font-size:15px">Saved break models — history</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">Reopen to edit, duplicate, rename, delete, or attach to a show (pre-populates a Live Break from the model).</div><div id="bkHist" style="margin-top:8px"></div></div>`;
  $('lSlots').textContent='5';$('lTiers').textContent='3';$('lEven').textContent='30% disparity';$('lMk').textContent='25%';
- renderBKlists();calcBreak();
+ renderBKlists();calcBreak();renderBreakHist();
 }
 function renderBKlists(){
  $('prodList').innerHTML=BK.products.map((p,i)=>`<div class="row" style="justify-content:space-between;font-size:13px;padding:3px 0"><span>${esc(p.name)} · ${p.spots} spots · ${money(p.val)}</span><button class="btn x" onclick="BK.products.splice(${i},1);renderBKlists();calcBreak()">✕</button></div>`).join('');
  $('chaseList').innerHTML=BK.chases.map((c,i)=>`<div class="row" style="justify-content:space-between;font-size:13px;padding:3px 0"><span>${esc(c.name)} · ${money(c.val)}</span><button class="btn x" onclick="BK.chases.splice(${i},1);renderBKlists();calcBreak()">✕</button></div>`).join('');
  $('aucList').innerHTML=BK.auctions.map((c,i)=>`<div class="row" style="justify-content:space-between;font-size:13px;padding:3px 0"><span>${esc(c.name)} · ${money(c.val)}</span><button class="btn x" onclick="BK.auctions.splice(${i},1);renderBKlists();calcBreak()">✕</button></div>`).join('');
+ const il=$('invList');if(il)il.innerHTML=BK.invItems.map((it,i)=>`<div class="row" style="justify-content:space-between;font-size:13px;padding:3px 0"><span>📦 ${esc(it.name)} · cost ${money(it.cost)} · val ${money(it.value)}</span><button class="btn x" onclick="bkDelInv(${i})">✕</button></div>`).join('');
 }
+function bkAddFromInv(){const el=$('bkInv');if(!el||el.value==='')return;const it=S.inventory[+el.value];if(!it)return;
+ const val=+it.value||0,cost=+it.cost||0,qty=1;const slab=/slab|raw|card/i.test(it.cat||'');
+ if(slab)BK.chases.push({name:it.name,val,invId:it.id});else BK.products.push({name:it.name,spots:1,val,invId:it.id});
+ BK.invItems.push({itemId:it.id,name:it.name,qty,cost,value:val,cat:it.cat});
+ BK.cost=(+BK.cost||0)+cost*qty;const bc=$('bCost');if(bc)bc.value=BK.cost;
+ renderBKlists();calcBreak();toast('Pulled '+it.name+' from inventory');}
+function bkDelInv(i){const it=BK.invItems[i];if(!it)return;BK.invItems.splice(i,1);
+ BK.products=BK.products.filter(p=>p.invId!==it.itemId);BK.chases=BK.chases.filter(c=>c.invId!==it.itemId);
+ BK.cost=Math.max(0,(+BK.cost||0)-(+it.cost||0)*(+it.qty||1));const bc=$('bCost');if(bc)bc.value=BK.cost;
+ renderBKlists();calcBreak();}
 function addProd(){const n=$('pName').value.trim(),s=+$('pSpots').value,v=+$('pVal').value;if(!n||!s)return;BK.products.push({name:n,spots:s,val:v||0});$('pName').value=$('pSpots').value=$('pVal').value='';renderBKlists();calcBreak();}
 function addChase(){const n=$('cbName').value.trim(),v=+$('cbVal').value;if(!n||!v)return;BK.chases.push({name:n,val:v});$('cbName').value=$('cbVal').value='';renderBKlists();calcBreak();}
 function addAuc(){const n=$('aName').value.trim(),v=+$('aVal').value;if(!n||!v)return;BK.auctions.push({name:n,val:v});$('aName').value=$('aVal').value='';renderBKlists();calcBreak();}
@@ -315,11 +398,37 @@ function calcBreak(){
    <div class="metric"><div class="n" style="font-size:22px">${sorted.length}</div><div class="l">Total slots</div></div></div>
   <div style="font-size:12px;color:var(--mut);margin:10px 0">Room range — cold ${money(gCold)} → hot ${money(gHot)} · card value ${money(totVal)} · gross vs card value ${totVal?(gAvg/totVal*100).toFixed(0):0}% · minus cost ${money(cost)} &amp; ~9% fees</div>
   <div style="overflow:auto;max-height:300px;border:1px solid var(--line);border-radius:10px"><table><tr><th>Tier</th><th>Slot contents</th><th>Value</th><th>Exp. bid</th></tr>${rows}</table></div>`;
- BK._last={slots:sorted.length,tiers:T,gross:gAvg};
+ BK._last={slots:sorted.length,tiers:T,gross:gAvg,
+   rows:sorted.map(s=>({label:s.items.map(i=>i.name).join(' + '),tier:s.tier,val:s.val,exp:s.avg})),
+   economics:{grossAvg:gAvg,profit:net(gAvg),cost:cost,totVal:totVal,cold:gCold,hot:gHot}};
 }
 function clearSchedule(){if(!canEditScoped())return roGuard();if(confirm('Replace current schedule?')){S.shows={};save();renderGen();}}
 function toggleDash(k,v){if(!canEditScoped()){roGuard();dOverview();return;}S.dashCfg[k]=v;save();dOverview();}
-function saveBreak(){if(!BK._last)return;if(!canEditScoped())return roGuard();S.breaks.push({name:$('bName').value.trim()||'Break model',slots:BK._last.slots,tiers:BK._last.tiers,gross:BK._last.gross});save();toast('Saved to Home');}
+function saveBreak(){if(!BK._last)return;if(!canEditScoped())return roGuard();
+ S.breaks.unshift({id:'bk'+Date.now(),name:($('bName').value.trim()||'Break model'),ts:Date.now(),
+   slots:BK._last.slots,tiers:BK._last.tiers,gross:BK._last.gross,
+   economics:BK._last.economics,rows:BK._last.rows,
+   inputs:{products:BK.products.slice(),chases:BK.chases.slice(),auctions:BK.auctions.slice(),cost:BK.cost},
+   invItems:BK.invItems.slice()});
+ save();renderBreakHist();const nm=$('bName');if(nm)nm.value='';toast('Saved break model');}
+function renderBreakHist(){const el=$('bkHist');if(!el)return;
+ el.innerHTML=(S.breaks||[]).length?S.breaks.map(b=>`<div class="filerow"><span class="nm">📊 ${esc(b.name)} <span class="lab">${b.slots} slots · ${b.tiers} tiers · exp ${money(b.gross)}${b.economics?' · profit '+money(b.economics.profit):''}${(b.invItems&&b.invItems.length)?' · '+b.invItems.length+' inv':''}</span></span>
+   <button class="btn sm" onclick="reopenBreak('${b.id}')">Reopen</button>
+   <button class="btn sm" onclick="dupBreak('${b.id}')">Duplicate</button>
+   <button class="btn sm" onclick="renameBreak('${b.id}')">Rename</button>
+   <select onchange="attachBreakToShow('${b.id}',this.value);this.value=''" style="max-width:150px;font-size:12px">${showPickerOptions('')}</select>
+   <button class="btn x" onclick="delBreakById('${b.id}')">✕</button></div>`).join(''):'<div style="color:var(--mut);font-size:13px">No saved models yet. Build one above, name it, then Save model.</div>';}
+function reopenBreak(id){const b=(S.breaks||[]).find(x=>x.id===id);if(!b)return;
+ if(b.inputs){BK.products=(b.inputs.products||[]).slice();BK.chases=(b.inputs.chases||[]).slice();BK.auctions=(b.inputs.auctions||[]).slice();BK.cost=+b.inputs.cost||0;}
+ else{BK.products=[];BK.chases=[];BK.auctions=[];BK.cost=0;}
+ BK.invItems=(b.invItems||[]).slice();renderBreak();toast('Reopened '+b.name);}
+function dupBreak(id){if(!canEditScoped())return roGuard();const b=(S.breaks||[]).find(x=>x.id===id);if(!b)return;const c=JSON.parse(JSON.stringify(b));c.id='bk'+Date.now();c.name=b.name+' (copy)';c.ts=Date.now();S.breaks.unshift(c);save();renderBreakHist();}
+function renameBreak(id){if(!canEditScoped())return roGuard();const b=(S.breaks||[]).find(x=>x.id===id);if(!b)return;const v=prompt('Rename break model',b.name);if(v==null)return;b.name=v.trim()||b.name;save();renderBreakHist();}
+function delBreakById(id){if(!canEditScoped())return roGuard();S.breaks=(S.breaks||[]).filter(x=>x.id!==id);save();renderBreakHist();}
+function attachBreakToShow(id,ref){if(!ref)return;if(!canEditScoped())return roGuard();const b=(S.breaks||[]).find(x=>x.id===id);const r=showByRef(ref);if(!b||!r)return;
+ r.s.breakModel=JSON.parse(JSON.stringify(b));r.s.breakModelId=b.id;
+ r.s.inventoryAlloc=(b.invItems||[]).map(x=>({itemId:x.itemId,name:x.name,qty:x.qty,cost:x.cost,value:x.value}));
+ save();toast('Attached “'+b.name+'” to '+(r.s.name||'show'));}
 
 /* ---------- DATA & LISTS ---------- */
 function renderData(){dataHub();}
@@ -359,12 +468,15 @@ function uploadAttach(inp){const f=inp.files[0];if(!f)return;const big=f.size>12
 /* ---------- INVENTORY & DATA HUB ---------- */
 const INVCATS=['Box','Case','ETB / Sealed','Pack','Raw card','Slab','Other'];
 let dataTab='overview';
+let exCopyRef=''; // Whatnot Export: which show's attached copy to prefill
 function dataHub(){
  const tabs=[['overview','Overview'],['inventory','Inventory'],['checklists','Checklists'],['reports','Reports'],['export','Whatnot Export'],['lists','Lists & Settings']];
+ if(ROLE==='admin')tabs.push(['team','Team']);
+ if(dataTab==='team'&&ROLE!=='admin')dataTab='overview';
  let h=`<div class="hero"><div><h1>Inventory &amp; Data</h1><div class="sub">Track boxes, cases, raw &amp; slabs · value dashboards · reports · export to Whatnot.</div></div></div>`;
  h+=`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">${tabs.map(t=>`<button class="tab ${t[0]===dataTab?'on':''}" onclick="dataTab='${t[0]}';dataHub()">${t[1]}</button>`).join('')}</div><div id="dtc"></div>`;
  $('sec-data').innerHTML=h;
- ({overview:dOverview,inventory:dInventory,checklists:dChecklists,reports:dReports,export:dExport,lists:dLists}[dataTab])();
+ ({overview:dOverview,inventory:dInventory,checklists:dChecklists,reports:dReports,export:dExport,lists:dLists,team:dTeam}[dataTab])();
 }
 function invTotals(){let cost=0,val=0,byCat={},qty=0;const view=invView();view.forEach(i=>{const q=+i.qty||1,c=(+i.cost||0)*q,v=(+i.value||0)*q;cost+=c;val+=v;qty+=q;byCat[i.cat]=(byCat[i.cat]||0)+v;});return{cost,val,byCat,qty,cnt:view.length,gain:val-cost};}
 function svgBars(entries){if(!entries.length)return '<div style="color:var(--mut);font-size:13px">No inventory yet.</div>';
@@ -473,14 +585,17 @@ function dExport(){let h=`<div class="card"><h3 style="font-size:15px">Export to
    <div><label>Include categories</label><select id="exCat" onchange="updateExCount()"><option value="all">All</option><option value="Raw card">Raw cards</option><option value="Slab">Slabs</option><option value="ETB / Sealed">Sealed</option><option value="Box">Boxes</option></select></div>
    <div><label>Listing type</label><select id="exType"><option>Auction</option><option>Buy It Now</option><option>Giveaway</option></select></div>
    <div><label>Price source</label><select id="exPrice"><option value="1">$1 start</option><option value="value">Market value</option><option value="costx">Cost × 1.3</option></select></div>
-   <div><label>Sub category</label><select id="exSub"><option>Pokémon</option><option>One Piece</option><option>Other</option></select></div></div>
+   <div><label>Sub category</label><select id="exSub"><option>Pokémon</option><option>One Piece</option><option>Other</option></select></div>
+   <div><label>Prefill copy from a show</label><select id="exCopy" onchange="exCopyRef=this.value;updateExCount()"><option value="">— none —</option>${showsWithCopy().map(x=>`<option value="${x.ref}" ${exCopyRef===x.ref?'selected':''}>${esc(x.label)}</option>`).join('')}</select></div></div>
   <div class="row" style="margin-top:12px"><button class="btn v" onclick="exportWhatnot()">Download Whatnot CSV</button><span class="lab" id="exCount" style="align-self:center"></span></div>
-  <div class="lab" style="margin-top:10px">Columns: Category · Sub Category · Title · Description · Quantity · Type · Price · Shipping Profile · Offerable · Condition · Image URL 1–8.</div></div>`;
+  <div class="lab" style="margin-top:10px">Columns: Category · Sub Category · Title · Description · Quantity · Type · Price · Shipping Profile · Offerable · Condition · Image URL 1–8. Attach copy to a show in the Schedule, then pick it here to prefix titles and set the description.</div></div>`;
  $('dtc').innerHTML=h;updateExCount();}
+function showsWithCopy(){const out=[];Object.keys(S.shows||{}).forEach(k=>{(S.shows[k]||[]).forEach((s,i)=>{if(s.titleSet){const p=k.split('|');out.push({ref:k+'|||'+i,label:(s.name||'Untitled')+' · '+p[0]+' '+p[1]});}});});return out;}
 function exRows(){const cat=$('exCat').value,type=$('exType').value,ps=$('exPrice').value,sub=$('exSub').value;
+ const cr=showByRef(exCopyRef);const ct=(cr&&cr.s.titleSet)?copyTitleOf(cr.s.titleSet):'';const cd=(cr&&cr.s.titleSet)?copyDescOf(cr.s.titleSet):'';
  const items=invView().filter(i=>cat==='all'||i.cat===cat);const price=i=>ps==='1'?1:ps==='value'?(+i.value||0):Math.round((+i.cost||0)*1.3);
  const head=['Category','Sub Category','Title','Description','Quantity','Type','Price','Shipping Profile','Offerable','Condition','Image URL 1','Image URL 2','Image URL 3','Image URL 4','Image URL 5','Image URL 6','Image URL 7','Image URL 8'];
- const rows=[head];items.forEach(i=>{rows.push(['Trading Card Games',sub,i.name,(i.cond?i.cond+' · ':'')+'ships fast, packaged to protect',(+i.qty||1),type,price(i),'',type==='Buy It Now'?'TRUE':'',i.cond||'',i.img||'','','','','','','','']);});return{rows,count:items.length};}
+ const rows=[head];items.forEach(i=>{const title=ct?(ct+' — '+i.name):i.name;const desc=cd||((i.cond?i.cond+' · ':'')+'ships fast, packaged to protect');rows.push(['Trading Card Games',sub,title,desc,(+i.qty||1),type,price(i),'',type==='Buy It Now'?'TRUE':'',i.cond||'',i.img||'','','','','','','','']);});return{rows,count:items.length};}
 function updateExCount(){const el=$('exCount');if(el)el.textContent=exRows().count+' items ready';}
 function exportWhatnot(){const {rows,count}=exRows();if(!count){toast('No matching inventory');return;}csvDL('element10_whatnot_inventory.csv',rows);toast(count+' rows exported');}
 function dLists(){const lm=[['characters','Chase characters'],['sets','Sets / products'],['formats','Show formats'],['diff','Trust / hooks']];
@@ -488,6 +603,45 @@ function dLists(){const lm=[['characters','Chase characters'],['sets','Sets / pr
  lm.forEach(([k,label])=>{h+=`<div style="margin-bottom:14px"><div class="lab">${label}</div><div class="chipwrap">${L(k).map(v=>`<span class="pill">${esc(v)} <a onclick="rmList('${k}','${esc(v)}')" style="color:var(--red)">✕</a></span>`).join('')}</div><div class="row"><input id="add_${k}" placeholder="Add…" style="max-width:260px" onkeydown="if(event.key==='Enter')addList('${k}')"><button class="btn sm" onclick="addList('${k}')">+</button></div></div>`;});
  h+=`<div><div class="lab">Streamers</div><div class="chipwrap">${S.streamers.map(v=>`<span class="pill">${esc(v)} <a onclick="rmStreamer('${esc(v)}')" style="color:var(--red)">✕</a></span>`).join('')}</div><div class="row"><input id="add_str" placeholder="Add streamer…" style="max-width:260px" onkeydown="if(event.key==='Enter')addStreamer()"><button class="btn sm" onclick="addStreamer()">+</button></div></div></div>`;
  $('dtc').innerHTML=h;}
+
+/* ---------- TEAM (admin onboarding) ---------- */
+function dTeam(){
+ if(ROLE!=='admin'){$('dtc').innerHTML='<div class="card" style="color:var(--mut)">Admin only.</div>';return;}
+ const rows=MEMBERS.slice().sort((a,b)=>(a.role===b.role?0:(a.role==='admin'?-1:1)));
+ let h=`<div class="card"><h3 style="font-size:15px">Add a teammate</h3>
+   <div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">Enter the email they signed up with. They must create an account first (Sign in → Create account); then add them here to grant team access — no more hand-run SQL.</div>
+   <div class="row"><input id="tmEmail" type="email" placeholder="teammate@email.com" style="max-width:280px" onkeydown="if(event.key==='Enter')addTeamMember()"><button class="btn v" onclick="addTeamMember()">+ Add member</button></div>
+   <div class="row" style="margin-top:8px"><input id="tmvEmail" type="email" placeholder="viewer@email.com (buyer / companion)" style="max-width:280px" onkeydown="if(event.key==='Enter')addTeamViewer()"><button class="btn sm" onclick="addTeamViewer()">+ Add viewer</button></div>
+   <div id="tmMsg" class="lab" style="margin-top:8px"></div></div>`;
+ h+=`<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Members (${MEMBERS.length})</h3>
+   <div style="overflow:auto;margin-top:10px"><table><tr><th>Name / email</th><th>Role</th><th></th></tr>
+   ${rows.map(m=>`<tr><td>${esc(m.display_name||m.email||m.user_id)}${m.user_id===MEID?' <span class="lab">(you)</span>':''}</td><td><span class="pill ${m.role==='admin'?'v':''}" style="margin:0">${esc(m.role)}</span></td><td style="text-align:right">${m.user_id===MEID?'':(m.role==='admin'?`<button class="btn sm" onclick="setTeamRole('${m.user_id}','member')">Demote to member</button>`:`<button class="btn sm" onclick="setTeamRole('${m.user_id}','admin')">Promote to admin</button>`)}</td></tr>`).join('')||'<tr><td colspan="3" style="color:var(--mut)">No members yet.</td></tr>'}
+   </table></div>
+   <div class="lab" style="margin-top:8px">Members see shared &amp; universal; each member's personal space stays private (admin can view all). Viewers get no workspace access — only the break sessions they're linked to.</div></div>`;
+ $('dtc').innerHTML=h;
+}
+function tmMsg(t,warn){const el=$('tmMsg');if(el){el.textContent=t;el.style.color=warn?'var(--red)':'var(--mut2)';}}
+async function refreshMembers(){try{const mem=await sb.from('e10_members').select('user_id,email,display_name,role');if(mem.data)MEMBERS=mem.data;}catch(e){}}
+async function addTeamMember(){const email=($('tmEmail')&&$('tmEmail').value.trim())||'';if(!email)return;tmMsg('Adding…');
+ try{const{data,error}=await sb.rpc('e10_add_member',{p_email:email});
+  if(error){tmMsg(error.message,true);return;}
+  if(data==='no_auth_user'){tmMsg('No account for '+email+' yet — have them Create account first, then add them.',true);return;}
+  if(data==='already_member'){await refreshMembers();dTeam();tmMsg(email+' is already on the team.');return;}
+  await refreshMembers();dTeam();toast('Member added');
+ }catch(e){tmMsg(e.message||'Failed',true);}
+}
+async function addTeamViewer(){const email=($('tmvEmail')&&$('tmvEmail').value.trim())||'';if(!email)return;tmMsg('Adding viewer…');
+ try{const{data,error}=await sb.rpc('e10_add_viewer',{p_email:email});
+  if(error){tmMsg(error.message,true);return;}
+  if(data==='no_auth_user'){tmMsg('No account for '+email+' yet — have them sign in once first.',true);return;}
+  const el=$('tmvEmail');if(el)el.value='';tmMsg('Viewer added — '+email);toast('Viewer added');
+ }catch(e){tmMsg(e.message||'Failed',true);}
+}
+async function setTeamRole(uid,role){if(!confirm('Set this member’s role to '+role+'?'))return;
+ try{const{error}=await sb.rpc('e10_set_role',{p_user:uid,p_role:role});if(error){toast(error.message);return;}
+  await refreshMembers();dTeam();renderScopebar();toast('Role updated');
+ }catch(e){toast(e.message||'Failed');}
+}
 
 /* ---------- REPACK STUDIO ---------- */
 let REPEDIT=null;
@@ -557,13 +711,17 @@ let sb=null,ME=null,MEID=null,ROLE='member',_st=null,_applyingRemote=false;
 let SHARED={},SCOPED={},SCOPED_ID='',REVS={},MEMBERS=[];
 let SCOPE=localStorage.getItem('e10_scope')||'mine';         // 'mine' | 'universal' | '<uid>'
 let invFilter=localStorage.getItem('e10_invfilter')||'mine'; // 'mine' | 'all'
-const SCOPED_KEYS=['shows','breaks','dashCfg','sales'];
+const SCOPED_KEYS=['shows','breaks','copySets','dashCfg','sales'];
 const SHARED_KEYS=['comments','todos','streamers','lists','attachments','checklists','inventory','repacks'];
 
 function blankShared(){return{comments:[],todos:[],streamers:['Trent'],lists:JSON.parse(JSON.stringify(DEF_LISTS)),attachments:[],checklists:[],inventory:[],repacks:[]};}
-function blankScoped(){return{shows:{},breaks:[],dashCfg:{catValue:true,costMarket:true,movement:true},sales:null};}
+function blankScoped(){return{shows:{},breaks:[],copySets:[],dashCfg:{catValue:true,costMarket:true,movement:true},sales:null};}
 function normShared(o){o=o||{};if(!o.comments)o.comments=[];if(!o.todos)o.todos=[];o.todos.forEach(t=>{if(t.desc==null)t.desc='';if(!t.comments)t.comments=[];});if(!o.streamers)o.streamers=['Trent'];if(!o.lists)o.lists=JSON.parse(JSON.stringify(DEF_LISTS));['characters','sets','formats','diff'].forEach(k=>{if(!o.lists[k])o.lists[k]=(DEF_LISTS[k]||[]).slice();});['attachments','checklists','inventory','repacks'].forEach(k=>{if(!o[k])o[k]=[];});o.inventory.forEach(it=>{if(!it.id)it.id='i'+Math.random().toString(36).slice(2);if(!('owner'in it))it.owner=null;});o.repacks.forEach(p=>{if(!p.cards)p.cards=[];if(!p.pool)p.pool=[];});return o;}
-function normScoped(o){o=o||{};if(!o.shows)o.shows={};if(!o.breaks)o.breaks=[];if(!o.dashCfg)o.dashCfg={catValue:true,costMarket:true,movement:true};if(!('sales'in o))o.sales=null;return o;}
+function normScoped(o){o=o||{};if(!o.shows)o.shows={};if(!o.breaks)o.breaks=[];if(!o.copySets)o.copySets=[];if(!o.dashCfg)o.dashCfg={catValue:true,costMarket:true,movement:true};if(!('sales'in o))o.sales=null;
+ Object.keys(o.shows).forEach(k=>{(o.shows[k]||[]).forEach(s=>{if(!s.id)s.id='sh'+Math.random().toString(36).slice(2);if(s.notes==null)s.notes='';if(!('titleSet'in s))s.titleSet=null;if(!('breakModel'in s))s.breakModel=null;if(!Array.isArray(s.inventoryAlloc))s.inventoryAlloc=[];if(!('repackRef'in s))s.repackRef=null;});});
+ o.breaks.forEach(b=>{if(!b.id)b.id='bk'+Math.random().toString(36).slice(2);if(!('ts'in b))b.ts=null;});
+ o.copySets.forEach(c=>{if(!c.id)c.id='cs'+Math.random().toString(36).slice(2);});
+ return o;}
 function splitLegacy(d){const sh=blankShared(),sc=blankScoped();if(d&&typeof d==='object'){SHARED_KEYS.forEach(k=>{if(d[k]!=null)sh[k]=d[k];});SCOPED_KEYS.forEach(k=>{if(d[k]!=null)sc[k]=d[k];});}return{sh:normShared(sh),sc:normScoped(sc)};}
 
 function canEditScoped(){return SCOPE==='mine'||ROLE==='admin';}
@@ -574,9 +732,9 @@ function roGuard(){toast('Read-only — switch to “My space” to edit');retur
 
 function rebuildS(){normShared(SHARED);normScoped(SCOPED);
  S={comments:SHARED.comments,todos:SHARED.todos,streamers:SHARED.streamers,lists:SHARED.lists,attachments:SHARED.attachments,checklists:SHARED.checklists,inventory:SHARED.inventory,repacks:SHARED.repacks,
-    shows:SCOPED.shows,breaks:SCOPED.breaks,dashCfg:SCOPED.dashCfg,sales:SCOPED.sales,user:ME};}
+    shows:SCOPED.shows,breaks:SCOPED.breaks,copySets:SCOPED.copySets,dashCfg:SCOPED.dashCfg,sales:SCOPED.sales,user:ME};}
 function pushFromS(){SHARED.comments=S.comments;SHARED.todos=S.todos;SHARED.streamers=S.streamers;SHARED.lists=S.lists;SHARED.attachments=S.attachments;SHARED.checklists=S.checklists;SHARED.inventory=S.inventory;SHARED.repacks=S.repacks;
- SCOPED.shows=S.shows;SCOPED.breaks=S.breaks;SCOPED.dashCfg=S.dashCfg;SCOPED.sales=S.sales;}
+ SCOPED.shows=S.shows;SCOPED.breaks=S.breaks;SCOPED.copySets=S.copySets;SCOPED.dashCfg=S.dashCfg;SCOPED.sales=S.sales;}
 function currentRender(){const on=document.querySelector('.tab.on');if(on){({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData,repack:renderRepack,live:renderLive}[on.dataset.s])();}else renderHome();}
 /* Preserve typing across realtime updates: defer a section re-render while an input is focused. */
 let _pendingRender=false;
@@ -593,7 +751,7 @@ function cloudSave(){if(!sb||_applyingRemote)return;pushFromS();clearTimeout(_st
 async function doCloudWrite(){_st=null;
  const shared={comments:S.comments,todos:S.todos,streamers:S.streamers,lists:S.lists,attachments:S.attachments,checklists:S.checklists,inventory:S.inventory,repacks:S.repacks};
  const sj=JSON.stringify(shared);if(sj!==_lastShared){_lastShared=sj;await writeRow('shared',null,shared);}
- if(canEditScoped()){const scoped={shows:S.shows,breaks:S.breaks,dashCfg:S.dashCfg,sales:S.sales};const cj=JSON.stringify(scoped);
+ if(canEditScoped()){const scoped={shows:S.shows,breaks:S.breaks,copySets:S.copySets,dashCfg:S.dashCfg,sales:S.sales};const cj=JSON.stringify(scoped);
   if(cj!==_lastScoped){_lastScoped=cj;const owner=(SCOPE==='mine')?MEID:(SCOPE==='universal'?null:SCOPE);await writeRow(SCOPED_ID,owner,scoped);}}
 }
 /* Flush pending debounced saves before the tab is hidden/closed so the last edits aren't lost. */
@@ -680,11 +838,15 @@ function liveSubscribe(){if(!LIVE.session)return;if(LIVE.chan)sb.removeChannel(L
 async function liveRefresh(){if(!LIVE.session)return;await liveLoadSlots();liveRefreshRender();}
 function liveRefreshRender(){if($('sec-live').classList.contains('on')&&!isEditing())renderLive();}
 async function liveStart(){const name=($('liveName')&&$('liveName').value.trim())||'Live Break';const mi=$('liveModel')?$('liveModel').value:'';
+ const seedModel=(LIVE_SEED&&LIVE_SEED.model)||((mi!==''&&S.breaks[+mi])?S.breaks[+mi]:null);
  const{data,error}=await sb.from('e10_break_sessions').insert({streamer_uid:MEID,name}).select().maybeSingle();
  if(error){toast('Could not start: '+error.message);return;}
  LIVE.session=data;LIVE.slots=[];await liveEvent('session_started',null,{name});
- if(mi!==''&&S.breaks[+mi]){const n=Math.max(1,+S.breaks[+mi].slots||1);for(let i=0;i<n;i++){try{const{data:sl}=await sb.from('e10_break_slots').insert({session_id:LIVE.session.id,label:'Spot '+(i+1),position:i}).select().maybeSingle();if(sl)LIVE.slots.push(sl);}catch(e){}}}
- liveSubscribe();renderLive();toast('Live break started');
+ if(seedModel){const rows=(seedModel.rows&&seedModel.rows.length)?seedModel.rows:null;
+   const n=rows?rows.length:Math.max(1,+seedModel.slots||1);
+   for(let i=0;i<n;i++){const label=rows?(rows[i].label||('Spot '+(i+1))):('Spot '+(i+1));
+     try{const{data:sl}=await sb.from('e10_break_slots').insert({session_id:LIVE.session.id,label,position:i}).select().maybeSingle();if(sl)LIVE.slots.push(sl);}catch(e){}}}
+ LIVE_SEED=null;liveSubscribe();renderLive();toast('Live break started'+(seedModel?' — seeded '+LIVE.slots.length+' spots':''));
 }
 async function liveEnd(){if(!LIVE.session||!confirm('End this live break session?'))return;
  try{await sb.from('e10_break_sessions').update({status:'ended',ended_at:new Date().toISOString()}).eq('id',LIVE.session.id);await liveEvent('session_ended',null,{});}catch(e){}
@@ -717,10 +879,11 @@ async function liveCaseHit(){if(!LIVE.session)return;const v=!LIVE.session.case_
  LIVE.session.case_hit=v;await liveEvent('case_hit',null,{case_hit:v,scope:'session'});renderLive();
 }
 function liveDirUrl(){return location.href.replace(/[?#].*$/,'').replace(/\/[^\/]*$/,'/');}
-function liveStartHTML(){const models=(S.breaks||[]);
+function liveStartHTML(){const models=(S.breaks||[]);const seed=LIVE_SEED;const defName=(seed&&seed.show)?(seed.show+' — live break'):'';
  return `<div class="hero"><div><h1>Live Break</h1><div class="sub">Run a live break — spots, stash-or-pass &amp; case hits push straight to your OBS overlay and viewers' companion.</div></div></div>
  <div class="card" style="max-width:560px"><h3 style="font-size:15px">Start a session</h3>
-  <div style="margin-top:12px"><label>Session name</label><input id="liveName" placeholder="e.g. Friday Ascended Heroes Case Break"></div>
+  ${seed?`<div class="out" style="margin-top:10px">Seeding from show <b>${esc(seed.show||'')}</b>${seed.model?` · model <b>${esc(seed.model.name)}</b> (${seed.model.slots} slots)`:' · no model attached — add spots manually'}</div>`:''}
+  <div style="margin-top:12px"><label>Session name</label><input id="liveName" value="${esc(defName)}" placeholder="e.g. Friday Ascended Heroes Case Break"></div>
   ${models.length?`<div style="margin-top:10px"><label>Seed spots from a saved break model (optional)</label><select id="liveModel"><option value="">— none (add spots manually) —</option>${models.map((m,i)=>`<option value="${i}">${esc(m.name)} · ${m.slots} spots</option>`).join('')}</select></div>`:''}
   <div class="row" style="margin-top:16px"><button class="btn v" onclick="liveStart()">▶ Start live break</button></div>
   <div class="lab" style="margin-top:10px">Only you (and admin) can control your sessions. Viewers see only the spots they're in.</div></div>`;
