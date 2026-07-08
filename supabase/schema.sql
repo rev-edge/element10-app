@@ -79,3 +79,36 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --     ws_sel/ws_ins/ws_upd  — the shared/universal branches now require e10_is_member()
 --     m_ins                 — e10_members self-insert is now admin-only (members provisioned by admin;
 --                             this closes viewer->member self-escalation). Default role stays 'member'.
+
+-- ─────────────────────────────────────────────────────────────
+-- APPLIED (migrations e10_admin_onboarding_rpcs + e10_onboarding_rpcs_revoke_anon):
+-- Admin-gated onboarding so teammates are added from the UI, not hand-run SQL. Each fn is
+-- SECURITY DEFINER, checks public.e10_is_admin() internally (auth.uid() from JWT resolves
+-- inside a definer fn), pins search_path=public, and has EXECUTE revoked from anon (the
+-- internal admin check is the real gate; the revoke is defense-in-depth + advisor hygiene).
+-- NOTE: Supabase's ALTER DEFAULT PRIVILEGES grants EXECUTE to anon directly, so `revoke from
+-- public` does NOT remove anon — you must `revoke ... from anon` explicitly.
+--   e10_add_member(p_email text) returns text   -- 'added' | 'already_member' | 'no_auth_user'
+--   e10_set_role(p_user uuid, p_role text)       -- member|admin; refuses to demote the last admin
+--   e10_add_viewer(p_email text) returns text    -- 'added' | 'no_auth_user'
+-- The client calls these via sb.rpc(...) from the admin-only Team tab in Data & Lists.
+--
+-- create or replace function public.e10_add_member(p_email text)
+--   returns text language plpgsql security definer set search_path=public as $$
+--   declare v_uid uuid; v_email text;
+--   begin
+--     if not public.e10_is_admin() then raise exception 'Admin only' using errcode='42501'; end if;
+--     select id, email into v_uid, v_email from auth.users where lower(email)=lower(btrim(p_email)) limit 1;
+--     if v_uid is null then return 'no_auth_user'; end if;
+--     if exists(select 1 from public.e10_members where user_id=v_uid) then return 'already_member'; end if;
+--     insert into public.e10_members(user_id, email, role) values (v_uid, v_email, 'member');
+--     return 'added';
+--   end; $$;
+-- (e10_set_role / e10_add_viewer follow the same guard pattern; see the two migrations.)
+-- revoke execute on function public.e10_add_member(text)/e10_set_role(uuid,text)/e10_add_viewer(text) from public, anon;
+-- grant  execute on function ... to authenticated;
+--
+-- Verified by tests/rls_test.js against the LIVE project with real member+viewer accounts:
+-- functionality (owner .insert().select() = INSERT ... RETURNING returns the row), isolation
+-- (member cannot read another member's user:<uid> row; viewer gets zero e10_workspace rows and
+-- cannot read unlinked sessions/slots/events), and RPC gating (non-admin calls are rejected).
