@@ -762,7 +762,7 @@ const SC_COLS=[
  {key:'value',label:'Value',sortable:true,sortVal:c=>+c.value||0,cell:c=>`<td class="mono"><input type="number" value="${c.value==null?'':esc(''+c.value)}" style="width:74px" onchange="scEdit('${c.id}','value',this.value)"></td>`},
  {key:'rookie',label:'RC',sortable:true,sortVal:c=>c.rookie?1:0,cell:c=>`<td style="text-align:center"><input type="checkbox" style="width:auto" ${c.rookie?'checked':''} onchange="scEdit('${c.id}','rookie',this.checked)"></td>`},
  {key:'chase',label:'Chase',sortable:true,sortVal:c=>c.chase?1:0,cell:c=>`<td style="text-align:center"><input type="checkbox" style="width:auto" ${c.chase?'checked':''} onchange="scEdit('${c.id}','chase',this.checked)"></td>`},
- {key:'actions',label:'',core:true,sortable:false,cell:c=>`<td><button class="btn x" onclick="scDel('${c.id}')">✕</button></td>`},
+ {key:'actions',label:'',core:true,sortable:false,cell:c=>`<td style="white-space:nowrap"><button class="btn sm" title="Add this card to inventory" onclick="invFromCard('${c.id}')">＋ Inv</button> <button class="btn x" onclick="scDel('${c.id}')">✕</button></td>`},
 ];
 const SC_DEFAULT=['num','name','player','set','parallel','card_type','value','chase','actions'];
 let SRV=null,_scT=null;
@@ -986,6 +986,12 @@ const invGridCfg={sk:'e10_inv',cols:INV_COLS,defaultCols:INV_DEFAULT_COLS,defaul
 const INVG=makeGrid('inv',invGridCfg);
 function dInventory(){const admin=ROLE==='admin';const rl=invRollup();const sets=[...new Set(S.inventory.map(i=>i.set).filter(Boolean))].sort();const years=[...new Set(S.inventory.map(i=>i.year).filter(Boolean))].sort();
  let h=`<div class="card"><h3 style="font-size:15px">Add inventory</h3>
+   <div style="margin-top:10px;position:relative">
+     <label>🔎 Find a card in your library <span class="lab" style="text-transform:none;letter-spacing:0">— autofills &amp; links this item to the card</span></label>
+     <input id="ivCardSearch" placeholder="type a player, card, or set… e.g. Messi, Prizm Silver, Charizard" autocomplete="off" oninput="invCardSearch(this.value)" onfocus="invCardSearch(this.value)">
+     <div id="ivCardResults" style="position:absolute;left:0;right:0;z-index:30"></div>
+   </div>
+   <div id="ivLinkChip" style="margin-top:8px"></div>
    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(128px,1fr));margin-top:10px">
    <div><label>Name</label><input id="ivN" placeholder="e.g. Ascended Heroes Box"></div>
    <div><label>Category</label><select id="ivC">${INVCATS.map(c=>`<option>${c}</option>`).join('')}</select></div>
@@ -1022,7 +1028,8 @@ function dInventory(){const admin=ROLE==='admin';const rl=invRollup();const sets
    <div class="etool" style="margin-top:8px;align-items:center">${gColsBtn(INVG)}${gViewsHTML(INVG)}</div>
    <div id="invListBox"></div></div>`;
  h+=buyListHTML();
- $('dtc').innerHTML=h;gRenderCols(INVG);gRenderList(INVG);}
+ $('dtc').innerHTML=h;gRenderCols(INVG);gRenderList(INVG);
+ if(window._invPrefillCard){const c=window._invPrefillCard;window._invPrefillCard=null;invAutofillFromCard(c);}else if(ivLinked)invRenderChip();}
 /* Buy list: aggregate demand BY SET across scheduled shows (break-model allocations + manual
    needs) vs free-to-break supply. Driven by real shows + real inventory, not a placeholder. */
 function buyListHTML(){
@@ -1044,8 +1051,39 @@ function buyListHTML(){
    <div class="row" style="justify-content:flex-end;margin-top:8px"><b>Projected order: ~${money(projected)}</b></div></div>`;}
 function addInv(){const n=$('ivN').value.trim();if(!n)return;const owner=($('ivOwner')&&$('ivOwner').value!=='')?$('ivOwner').value:(ROLE==='admin'&&$('ivOwner')?null:ME);
  const gv=id=>{const el=$(id);return el?el.value.trim():'';};
- S.inventory.push({id:'i'+Date.now(),name:n,cat:$('ivC').value,set:$('ivS').value,qty:+$('ivQ').value||1,cost:+$('ivCo').value||0,value:+$('ivV').value||0,gradingCompany:gv('ivGC'),grade:gv('ivGrade'),cardNumber:gv('ivNum'),year:gv('ivYear'),cond:gv('ivG'),img:$('ivImg').value,owner});save();dInventory();toast('Added');}
+ const L2=ivLinked||{};
+ S.inventory.push({id:'i'+Date.now(),name:n,cat:$('ivC').value,set:$('ivS').value,qty:+$('ivQ').value||1,cost:+$('ivCo').value||0,value:+$('ivV').value||0,gradingCompany:gv('ivGC'),grade:gv('ivGrade'),cardNumber:gv('ivNum'),year:gv('ivYear'),cond:gv('ivG'),img:$('ivImg').value,owner,
+   cardId:L2.cardId||null,playerId:L2.playerId||null,parallel:L2.parallel||'',rarity:L2.rarity||''});
+ ivLinked=null;save();dInventory();toast('Added'+(L2.cardId?' · linked to card':''));}
 function delInv(id){S.inventory=S.inventory.filter(x=>x.id!==id);save();dInventory();}
+/* ===== Quick-add inventory from the card library (search e10_cards → autofill + link) ===== */
+let ivLinked=null,_ivResults=[],_ivT=null;
+function ivYearFromSet(s){const m=(s||'').match(/\b(19|20)\d{2}\b/);return m?m[0]:'';}
+async function dbCardLibrarySearch(q){q=(q||'').trim().toLowerCase();if(q.length<2)return[];const toks=q.split(/\s+/).filter(Boolean).slice(0,4);
+ try{let query=sb.from('e10_cards').select('id,name,num,set_name,parallel,rarity,value,serial,player_id,set:set_id(year)');toks.forEach(t=>{query=query.like('search','%'+t+'%');});const{data,error}=await query.limit(20);if(error)throw error;return data||[];}catch(e){return[];}}
+function invCardSearch(q){clearTimeout(_ivT);const el=$('ivCardResults');if((q||'').trim().length<2){if(el)el.innerHTML='';return;}
+ _ivT=setTimeout(async()=>{const list=await dbCardLibrarySearch(q);_ivResults=list;renderIvResults(list);},220);}
+function renderIvResults(list){const el=$('ivCardResults');if(!el)return;
+ if(!list.length){el.innerHTML=`<div style="background:var(--card,#fff);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.14);padding:9px 11px"><span class="lab" style="text-transform:none;letter-spacing:0">No matches in the library.</span></div>`;return;}
+ el.innerHTML=`<div style="background:var(--card,#fff);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.14);max-height:320px;overflow:auto">${list.map(c=>{const bits=[c.set_name,(c.parallel&&!/^base$/i.test(c.parallel))?c.parallel:null,c.serial,c.num?'#'+c.num:null,c.value!=null?money(c.value):null].filter(Boolean).join(' · ');return `<div onclick="invPickCard('${c.id}')" style="padding:7px 10px;cursor:pointer;border-bottom:1px solid var(--line)" onmouseover="this.style.background='rgba(0,0,0,.05)'" onmouseout="this.style.background=''"><b>${esc(c.name||'—')}</b> <span class="lab" style="text-transform:none;letter-spacing:0">${esc(bits)}</span></div>`;}).join('')}</div>`;}
+function invPickCard(id){const c=(_ivResults||[]).find(x=>x.id===id);if(!c)return;const el=$('ivCardResults');if(el)el.innerHTML='';const s=$('ivCardSearch');if(s)s.value='';invAutofillFromCard(c);}
+function invAutofillFromCard(card){const base=/^base$/i.test(card.parallel||'');const par=(card.parallel&&!base)?card.parallel:'';
+ const setName=card.set_name||'';const year=(card.set&&card.set.year)||ivYearFromSet(setName)||'';
+ const name=(card.name||'')+(setName?(' — '+setName):'')+(par?(' ('+par+')'):'');
+ const nEl=$('ivN');if(nEl)nEl.value=name;
+ const sel=$('ivS');if(sel&&setName){if(![...sel.options].some(o=>o.value===setName)){const o=document.createElement('option');o.value=setName;o.textContent=setName;sel.appendChild(o);}sel.value=setName;}
+ const numEl=$('ivNum');if(numEl)numEl.value=card.num||'';
+ const yrEl=$('ivYear');if(yrEl)yrEl.value=year?(''+year):'';
+ const vEl=$('ivV');if(vEl&&(!vEl.value||+vEl.value===0)&&card.value!=null)vEl.value=card.value; /* prefill Market from card (raw) — never overwrite a typed value */
+ const cEl=$('ivC');if(cEl&&(cEl.value==='Box'||!cEl.value))cEl.value='Raw card';
+ ivLinked={cardId:card.id,playerId:card.player_id||null,parallel:par,rarity:card.rarity||'',name:card.name,set:setName};
+ invRenderChip();if(nEl)nEl.scrollIntoView({block:'nearest'});
+ toast('Autofilled from '+(card.name||'card')+' — set cost/grade, then Add item');}
+function invRenderChip(){const el=$('ivLinkChip');if(!el)return;if(!ivLinked){el.innerHTML='';return;}
+ el.innerHTML=`<span class="pill" style="margin:0;background:rgba(58,209,58,.14);border-color:#0a8a4a;color:#0a8a4a">🔗 Linked to ${esc(ivLinked.name||'card')}${ivLinked.parallel?' · '+esc(ivLinked.parallel):''}</span> <button class="btn x sm" onclick="invClearLink()">unlink</button> <span class="lab" style="text-transform:none;letter-spacing:0">Market prefilled from the card (raw value) — edit it for graded copies.</span>`;}
+function invClearLink(){ivLinked=null;invRenderChip();toast('Unlinked — this item will be added without a card link');}
+function invFromCard(id){const card=((SRV&&SRV.rows)||[]).find(x=>x.id===id);if(!card){toast('Card not found — reopen the grid and try again');return;}
+ window._invPrefillCard=card;dataTab='inventory';SRV=null;clOpenId=null;go('data');window.scrollTo(0,0);}
 function reassignInv(id,val){const it=S.inventory.find(x=>x.id===id);if(!it)return;it.owner=val||null;save();dInventory();toast('Reassigned to '+ownerName(it.owner));}
 /* ---- Reservations & sold — app-enforced hard lock via cloudCommitShared ---- */
 async function reserveUnits(itemId,showRef,qty){
@@ -1364,6 +1402,7 @@ const SHARED_KEYS=['comments','todos','streamers','lists','attachments','checkli
 function blankShared(){return{comments:[],todos:[],streamers:['Trent'],lists:JSON.parse(JSON.stringify(DEF_LISTS)),attachments:[],checklists:[],inventory:[],repacks:[]};}
 function blankScoped(){return{shows:{},breaks:[],copySets:[],dashCfg:{catValue:true,costMarket:true,movement:true},sales:null};}
 function normShared(o){o=o||{};if(!o.comments)o.comments=[];if(!o.todos)o.todos=[];o.todos.forEach(t=>{if(t.desc==null)t.desc='';if(!t.comments)t.comments=[];});if(!o.streamers)o.streamers=['Trent'];if(!o.lists)o.lists=JSON.parse(JSON.stringify(DEF_LISTS));['characters','sets','formats','diff'].forEach(k=>{if(!o.lists[k])o.lists[k]=(DEF_LISTS[k]||[]).slice();});['attachments','checklists','inventory','repacks'].forEach(k=>{if(!o[k])o[k]=[];});o.inventory.forEach(it=>{if(!it.id)it.id='i'+Math.random().toString(36).slice(2);if(!('owner'in it))it.owner=null;if(!(+it.qty>=0))it.qty=(+it.qty||1);if(!Array.isArray(it.reservations))it.reservations=[];it.reservations.forEach(r=>{r.qty=+r.qty||0;});if(!it.addedAt)it.addedAt=Date.now();
+  if(!('cardId'in it))it.cardId=null;if(!('playerId'in it))it.playerId=null;if(!('parallel'in it))it.parallel='';/* links to e10_cards / e10_players when added from the library */
   /* structured grade fields — backfill once, losslessly, from the free-text cond */
   if(!('gradingCompany'in it)){it.gradingCompany='';it.grade=('grade'in it)?it.grade:'';const g=parseGrade(it.cond);if(g){it.gradingCompany=g.gradingCompany;it.grade=g.grade;it.cond='';}}
   if(!('grade'in it))it.grade='';if(!('cardNumber'in it))it.cardNumber='';if(!('year'in it))it.year='';});o.repacks.forEach(p=>{if(!p.cards)p.cards=[];if(!p.pool)p.pool=[];});o.checklists.forEach(clNormalize);return o;}
