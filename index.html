@@ -94,7 +94,7 @@ details.gcfg>summary{list-style:none;cursor:pointer}details.gcfg>summary::-webki
 .drop:hover{border-color:var(--ink);color:var(--ink)}
 .filerow{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;font-size:13px;background:var(--surface)}
 .filerow .nm{flex:1}.chipwrap{margin:8px 0}
-</style><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+</style><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head><body>
 <header><div class="logo">ELEMENT<b>10</b></div><nav id="nav"></nav><div id="who" style="margin-left:auto"></div></header>
 <div class="wrap">
@@ -607,7 +607,122 @@ function rmStreamer(v){S.streamers=S.streamers.filter(x=>x!==v);save();renderDat
 function parseCSV(text){const lines=text.replace(/\r/g,'').split('\n').filter(l=>l.trim().length);
  const pl=l=>{const out=[];let cur='',q=false;for(let i=0;i<l.length;i++){const c=l[i];if(q){if(c=='"'){if(l[i+1]=='"'){cur+='"';i++;}else q=false;}else cur+=c;}else{if(c=='"')q=true;else if(c==','||c=='\t'){out.push(cur);cur='';}else cur+=c;}}out.push(cur);return out.map(x=>x.trim());};
  const rows=lines.map(pl);const columns=rows.shift()||[];return{columns,rows};}
-function downloadChecklistTemplate(){csvDL('element10_checklist_template.csv',[['Card Name','Card Number','Set','Rarity','Market Value','Chase'],['Charizard ex','006/197','Ascended Heroes','Special Illustration Rare','260','yes'],['Pikachu','025/165','Pokémon 151','Common','2','']]);toast('Template downloaded — keep the header row, then upload');}
+const CL_TEMPLATE=[['Card Name','Card Number','Set','Rarity','Market Value','Parallel','Card Type','Chase'],
+ ['Charizard ex','006/197','Ascended Heroes','Special Illustration Rare','260','Base','base','yes'],
+ ['Charizard ex','006/197','Ascended Heroes','Gold','520','Gold','parallel','yes'],
+ ['Pikachu','025/165','Pokémon 151','Common','2','Base','base','']];
+function downloadChecklistTemplate(fmt){
+ if(fmt==='xlsx'){if(!window.XLSX){toast('Spreadsheet library still loading — try again in a moment.');return;}
+   const ws=XLSX.utils.aoa_to_sheet(CL_TEMPLATE);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Checklist');XLSX.writeFile(wb,'element10_checklist_template.xlsx');toast('XLSX template downloaded — keep the header row, then Direct import');return;}
+ csvDL('element10_checklist_template.csv',CL_TEMPLATE);toast('CSV template downloaded — keep the header row, then Direct import');}
+/* ===== Smart / Direct checklist import (xlsx + csv → review → approve) ===== */
+function clImportPick(mode){const inp=$('clFile');if(!inp)return;inp.dataset.mode=mode;inp.value='';inp.click();}
+function clImportFile(inp){const f=inp.files[0];if(!f)return;const mode=inp.dataset.mode||'smart',name=f.name;const isX=/\.xls[xm]?$/i.test(name)||/spreadsheet|excel/i.test(f.type||'');
+ const r=new FileReader();
+ r.onload=e=>{try{
+   if(isX){if(!window.XLSX){toast('Spreadsheet library not loaded — export as .csv instead.');return;}
+     const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
+     const sheets=wb.SheetNames.map(sn=>({name:sn,aoa:XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:false,defval:''})})).filter(s=>s.aoa.some(row=>row.some(c=>(''+(c==null?'':c)).trim())));
+     if(!sheets.length){toast('No data found in the workbook.');return;}
+     if(sheets.length>1){clPendingSheets={sheets,mode,name};clRenderSheetPicker();return;}
+     clFromAOA(sheets[0].aoa,mode,name);
+   }else{const p=parseCSV(e.target.result);clFromAOA([p.columns,...p.rows],mode,name);}
+ }catch(err){toast('Could not read the file: '+err.message);}};
+ if(isX)r.readAsArrayBuffer(f);else r.readAsText(f);inp.value='';}
+function clRenderSheetPicker(){const P=clPendingSheets;if(!P)return;
+ $('modal').innerHTML=`<h3 style="font-size:16px">Pick a sheet — ${esc(P.name)}</h3><div class="lab" style="text-transform:none;letter-spacing:0;margin:6px 0 10px">This workbook has ${P.sheets.length} sheets. Choose the checklist sheet:</div>${P.sheets.map((s,i)=>`<div class="row" style="margin-bottom:6px"><button class="btn" style="flex:1;text-align:left" onclick="clPickSheet(${i})">📄 ${esc(s.name)} · ${Math.max(0,s.aoa.length-1)} rows</button></div>`).join('')}<div class="row" style="margin-top:8px"><button class="btn sm" onclick="closeM()">Cancel</button></div>`;
+ $('ov').style.display='flex';}
+function clPickSheet(i){const P=clPendingSheets;if(!P)return;const sh=P.sheets[i];closeM();clPendingSheets=null;clFromAOA(sh.aoa,P.mode,P.name);}
+function clFromAOA(aoa,mode,name){const headers=(aoa[0]||[]).map(h=>(''+(h==null?'':h)).trim());const rows=aoa.slice(1).filter(r=>r&&r.some(c=>(''+(c==null?'':c)).trim()));
+ if(!headers.length||!rows.length){toast('No header row + data rows found.');return;}
+ clProcess(headers,rows,mode,name.replace(/\.(csv|tsv|txt|xlsx?|xlsm)$/i,''));}
+async function clProcess(headers,rows,mode,name){
+ if(mode==='direct'){clStageDirect(headers,rows,name);return;}
+ toast('Smart import — analyzing columns…');
+ try{
+   const sample=rows.slice(0,25).map(r=>headers.map((_,i)=>(''+(r[i]==null?'':r[i])).slice(0,200)));
+   const{data,error}=await sb.functions.invoke('normalize-checklist',{body:{headers,sampleRows:sample,filename:name}});
+   if(error){clSmartFallback(headers,rows,name,'Smart import unavailable ('+(error.message||'network error')+'). Using Direct import.');return;}
+   if(!data||!data.ok){clSmartFallback(headers,rows,name,(data&&data.message)||'Smart import failed. Using Direct import.');return;}
+   const applied=clApplyMapping(headers,rows,data.mapping,name);
+   if(!applied.cards.length){clSmartFallback(headers,rows,name,'No rows could be mapped. Using Direct import.');return;}
+   clStage(applied.cards,{name:applied.setName||name,set:applied.setName,summary:applied.summary,flags:applied.flags,unmapped:applied.unmapped,confidence:data.mapping.confidence,notes:data.mapping.notes,mode:'smart'});
+ }catch(err){clSmartFallback(headers,rows,name,'Smart import error: '+err.message);}}
+function clSmartFallback(headers,rows,name,msg){toast(msg);clStageDirect(headers,rows,name);}
+function clApplyMapping(headers,rows,mapping,name){
+ const cm=(mapping&&mapping.columnMapping)||{};
+ const idxOf=field=>{for(let i=0;i<headers.length;i++){if((cm[headers[i]]||'')===field)return i;}return -1;};
+ const iNum=idxOf('num'),iName=idxOf('name'),iSet=idxOf('set'),iRar=idxOf('rarity'),iVal=idxOf('value'),iType=idxOf('cardType');
+ let iPar=idxOf('parallel');if(iPar<0&&mapping&&mapping.parallelColumn){const p=headers.indexOf(mapping.parallelColumn);if(p>=0)iPar=p;}
+ const ctVals=(mapping&&mapping.cardTypeValues)||{};
+ const insKw=((mapping&&mapping.insertKeywords)||[]).map(s=>(''+s).toLowerCase()).filter(Boolean);
+ const parKw=((mapping&&mapping.parallelKeywords)||[]).map(s=>(''+s).toLowerCase()).filter(Boolean);
+ const used=new Set([iNum,iName,iSet,iRar,iVal,iPar,iType].filter(i=>i>=0));
+ const setName=(mapping&&mapping.setName)||'';
+ const guess=raw=>{const s=(''+raw).toLowerCase();if(/insert/.test(s))return'insert';if(/parallel|refractor|prizm|holo|foil|variation|numbered|\/\d/.test(s))return'parallel';if(/base/.test(s))return'base';return'';};
+ const g=(r,i)=>i>=0?(''+(r[i]==null?'':r[i])).trim():'';const flags=[],cards=[];
+ rows.forEach((r,ri)=>{if(!r||!r.some(c=>(''+(c==null?'':c)).trim()))return;
+   const nm=g(r,iName),rarity=g(r,iRar),valRaw=g(r,iVal);let parallel=g(r,iPar);if(/^base$/i.test(parallel))parallel='';
+   const vv=valRaw.replace(/[^0-9.\-]/g,''),value=vv===''?'':(+vv||0);let cardType;
+   if(iType>=0){const raw=g(r,iType);cardType=ctVals[raw]||ctVals[raw.toLowerCase()]||guess(raw)||'base';}
+   else{const lc=(nm+' '+rarity+' '+parallel).toLowerCase();cardType=insKw.some(k=>lc.includes(k))?'insert':((parallel||parKw.some(k=>lc.includes(k)))?'parallel':'base');}
+   if(parallel&&cardType==='base')cardType='parallel';
+   const extra={};headers.forEach((h,ci)=>{if(!used.has(ci)){const v=g(r,ci);if(v)extra[h]=v;}});
+   const card={id:'cc'+Math.random().toString(36).slice(2),num:g(r,iNum),name:nm,set:g(r,iSet)||setName,rarity,value,parallel,cardType,chase:false};
+   if(Object.keys(extra).length)card.extra=extra;
+   if(!nm)flags.push({row:ri+2,msg:'no card name'});else if(valRaw&&value==='')flags.push({row:ri+2,msg:'value "'+valRaw+'" is not a number'});
+   cards.push(card);});
+ const f2h={};headers.forEach((h,i)=>{const f=cm[h];if(f&&f!=='ignore'&&!(f in f2h))f2h[f]=h;});if(iPar>=0&&!f2h.parallel)f2h.parallel=headers[iPar];
+ const lbl={num:'number',name:'name',set:'set',rarity:'rarity',value:'value',parallel:'parallel',cardType:'card type'};
+ const summary=Object.keys(lbl).filter(f=>f2h[f]).map(f=>`'${f2h[f]}' → ${lbl[f]}`).join(', ');
+ return {cards,setName,summary,flags,unmapped:((mapping&&mapping.unmapped)||[]).slice()};}
+function clStageDirect(headers,rows,name){
+ const m=clColMap(headers);const cm={};headers.forEach((h,i)=>{let f='ignore';if(i===m.name)f='name';else if(i===m.num)f='num';else if(i===m.set)f='set';else if(i===m.rarity)f='rarity';else if(i===m.value)f='value';else if(i===m.parallel)f='parallel';else if(i===m.cardType)f='cardType';cm[h]=f;});
+ const mapping={columnMapping:cm,cardTypeValues:{},parallelColumn:m.parallel>=0?headers[m.parallel]:null,insertKeywords:[],parallelKeywords:[],setName:'',unmapped:headers.filter(h=>cm[h]==='ignore')};
+ const applied=clApplyMapping(headers,rows,mapping,name);
+ if(m.chase>=0){const chH=headers[m.chase];const kept=rows.filter(r=>r&&r.some(c=>(''+(c==null?'':c)).trim()));kept.forEach((r,i)=>{const cd=applied.cards[i];if(cd){const cv=(''+(r[m.chase]==null?'':r[m.chase])).trim();cd.chase=/^(1|true|yes|y|chase|x|✓)$/i.test(cv);if(cd.extra){delete cd.extra[chH];if(!Object.keys(cd.extra).length)delete cd.extra;}}});}
+ if(!applied.cards.length){toast('No rows found to import.');return;}
+ clStage(applied.cards,{name:name,set:applied.setName||clDeriveSet(applied.cards),summary:applied.summary,flags:applied.flags,unmapped:applied.unmapped,confidence:'high',notes:'Direct import — matched template headers.',mode:'direct'});}
+function clStage(cards,meta){
+ cards.forEach(c=>{c.value=(c.value===''||c.value==null)?'':(+c.value||0);c.chase=!!c.chase;c.cardType=c.cardType||'base';c.parallel=c.parallel||'';});
+ PENDING_CL={id:'__pending__',name:meta.name||'Imported checklist',set:meta.set||clDeriveSet(cards),cards,columns:[],_pending:true,_meta:meta};
+ clReviewMode=true;clOpenId=null;if(GRIDS['cl:__review__'])delete GRIDS['cl:__review__'];makeGrid('cl:__review__',clReviewGridCfg());renderChecklistReview();}
+function clReviewGridCfg(){return {sk:'e10_clrev',cols:CL_COLS,defaultCols:['num','name','parallel','cardType','rarity','value','chase','actions'],defaultSort:{col:'name',dir:1},
+ defaultFilters:{search:'',rarity:'',cardType:'',valueMin:''},listBoxId:'clRevListBox',colsMenuId:'clRevColsMenu',viewPrompt:'Name this view',
+ base:()=>PENDING_CL?(PENDING_CL.cards||[]):[],
+ searchFn:(c,q)=>((c.name||'')+' '+(c.num||'')+' '+(c.parallel||'')).toLowerCase().includes(q),
+ filter:(c,f)=>{if(f.rarity&&(c.rarity||'')!==f.rarity)return false;if(f.cardType&&(c.cardType||'base')!==f.cardType)return false;if(f.valueMin!==''&&f.valueMin!=null&&!((+c.value||0)>=(+f.valueMin)))return false;return true;},
+ footer:(rows)=>`<div class="lab" style="margin-top:8px">${rows.length} shown · staged — not committed until you Approve</div>`,
+ render:()=>renderChecklistReview()};}
+function clRevSet(field,val){const G=GRIDS['cl:__review__'];if(!G)return;G.state.filters[field]=val;gRenderList(G);}
+function renderChecklistReview(){const cl=PENDING_CL;if(!cl){clReviewMode=false;dChecklists();return;}
+ const G=GRIDS['cl:__review__']||makeGrid('cl:__review__',clReviewGridCfg());const F=G.state.filters;const cds=cl.cards||[];
+ const nBase=cds.filter(c=>(c.cardType||'base')==='base').length,nPar=cds.filter(c=>c.cardType==='parallel').length,nIns=cds.filter(c=>c.cardType==='insert').length;
+ const m=cl._meta||{};const rarities=[...new Set(cds.map(c=>c.rarity).filter(Boolean))].sort();
+ const existing=(S.checklists||[]).map(c=>`<option value="${c.id}">Merge into “${esc(c.name)}”</option>`).join('');
+ let h=`<div class="card"><div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+   <div class="row" style="gap:8px;align-items:center"><button class="btn sm" onclick="clCancelReview()">← Cancel</button><h3 style="font-size:15px">Review import</h3><span class="pill" style="margin:0">${m.mode==='smart'?'✨ Smart':'⬇ Direct'}</span>${m.confidence?`<span class="lab">confidence ${esc(m.confidence)}</span>`:''}</div>
+   <button class="btn v sm" onclick="clApproveReview()">✓ Approve &amp; commit</button></div>
+   <div class="lab" style="text-transform:none;letter-spacing:0;margin-top:8px;font-size:12.5px"><b>${cds.length}</b> cards · ${nBase} base · ${nPar} parallel · ${nIns} insert.${m.summary?` <b>Mapped:</b> ${esc(m.summary)}.`:''}${m.notes?` <span style="color:var(--mut)">${esc(m.notes)}</span>`:''}</div>
+   ${(m.unmapped&&m.unmapped.length)?`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:4px;color:var(--mut)">Unmapped columns kept in “extra”: ${m.unmapped.map(esc).join(', ')}.</div>`:''}
+   ${(m.flags&&m.flags.length)?`<div class="out" style="margin-top:8px">⚠ ${m.flags.length} row(s) to check: ${m.flags.slice(0,6).map(f=>'row '+f.row+' — '+esc(f.msg)).join('; ')}${m.flags.length>6?' …':''}</div>`:''}
+   <div class="row" style="margin-top:12px;gap:8px;align-items:center;flex-wrap:wrap"><span class="lab">Name</span><input value="${esc(cl.name||'')}" style="max-width:240px" oninput="PENDING_CL.name=this.value"><span class="lab">Set</span><input value="${esc(cl.set||'')}" style="max-width:180px" oninput="PENDING_CL.set=this.value"><span class="lab">Commit as</span><select id="clCommitAs" style="max-width:220px"><option value="">New checklist</option>${existing}</select></div>
+   <div class="etool" style="margin-top:12px">
+     <div style="flex:2;min-width:140px"><label>Search</label><input value="${esc(F.search||'')}" placeholder="name / # / parallel…" oninput="clRevSet('search',this.value)"></div>
+     <div><label>Rarity</label><select onchange="clRevSet('rarity',this.value)"><option value="">All</option>${rarities.map(r=>`<option ${F.rarity===r?'selected':''}>${esc(r)}</option>`).join('')}</select></div>
+     <div><label>Type</label><select onchange="clRevSet('cardType',this.value)">${[['','All'],['base','Base'],['parallel','Parallel'],['insert','Insert']].map(([v,l])=>`<option value="${v}" ${F.cardType===v?'selected':''}>${l}</option>`).join('')}</select></div>
+     <div><label>Value ≥</label><input type="number" value="${esc(F.valueMin||'')}" placeholder="any" style="max-width:80px" oninput="clRevSet('valueMin',this.value)"></div>
+     <div style="align-self:flex-end"><button class="btn sm" onclick="clAddCard()">+ Add card</button></div>
+   </div>
+   <div class="etool" style="margin-top:8px;align-items:center">${gColsBtn(G)}${gViewsHTML(G)}</div>
+   <div id="clRevListBox"></div></div>`;
+ $('dtc').innerHTML=h;gRenderCols(G);gRenderList(G);}
+function clApproveReview(){if(!canEditScoped())return roGuard();const cl=PENDING_CL;if(!cl)return;const tgt=$('clCommitAs')?$('clCommitAs').value:'';
+ cl.cards.forEach(c=>{if(!c.id)c.id='cc'+Math.random().toString(36).slice(2);c.chase=!!c.chase;c.cardType=c.cardType||'base';c.parallel=c.parallel||'';if(c.value!==''&&c.value!=null)c.value=+c.value||0;});
+ if(tgt){const ex=(S.checklists||[]).find(c=>c.id===tgt);if(ex){ex.cards=(ex.cards||[]).concat(cl.cards);save();toast('Merged '+cl.cards.length+' cards into '+ex.name);}}
+ else{S.checklists.push({id:'cl'+Date.now(),name:cl.name||'Imported checklist',set:cl.set||clDeriveSet(cl.cards),cards:cl.cards,columns:[]});save();toast('Checklist added ('+cl.cards.length+' cards)');}
+ clReviewMode=false;PENDING_CL=null;delete GRIDS['cl:__review__'];dChecklists();}
+function clCancelReview(){clReviewMode=false;PENDING_CL=null;delete GRIDS['cl:__review__'];toast('Import discarded');dChecklists();}
 function validateChecklist(p){const idx=rx=>p.columns.findIndex(c=>new RegExp(rx,'i').test(c));
  const ni=idx('card ?name|^name$|name|title|card'),vi=idx('value|market|price');
  const missing=[];if(ni<0)missing.push('Card Name');
@@ -909,26 +1024,31 @@ function importInv(inp){const f=inp.files[0];if(!f)return;const r=new FileReader
  res.valid.forEach(it=>S.inventory.push(it));save();dInventory();toast(res.valid.length+' items imported');
 };r.readAsText(f);inp.value='';}
 /* ===== Checklists as structured, configurable card grids (reuses the grid engine) ===== */
-function clColMap(cols){const idx=rx=>cols.findIndex(c=>new RegExp(rx,'i').test(c));return {num:idx('number|card ?#|^#$|^no\\.?$'),name:idx('card ?name|^name$|name|title'),set:idx('^set$|^set |product'),rarity:idx('rarity|rare'),value:idx('value|market|price|\\$'),chase:idx('chase')};}
-function clBuildCards(cl){const cols=cl.columns||[],rows=cl.rows||[],m=clColMap(cols),used=[m.num,m.name,m.set,m.rarity,m.value,m.chase].filter(x=>x>=0);
+function clColMap(cols){const idx=rx=>cols.findIndex(c=>new RegExp(rx,'i').test(c));return {num:idx('number|card ?#|^#$|^no\\.?$'),name:idx('card ?name|^name$|name|title'),set:idx('^set$|^set |product'),rarity:idx('rarity|rare'),value:idx('value|market|price|\\$'),chase:idx('chase'),parallel:idx('parallel|variation|variant|finish|^foil$'),cardType:idx('card ?type|^type$')};}
+function clNormType(raw,parallel){const s=(''+(raw||'')).toLowerCase();if(/insert/.test(s))return'insert';if(/parallel/.test(s))return'parallel';if(/base/.test(s))return'base';return parallel?'parallel':'base';}
+function clBuildCards(cl){const cols=cl.columns||[],rows=cl.rows||[],m=clColMap(cols),used=[m.num,m.name,m.set,m.rarity,m.value,m.chase,m.parallel,m.cardType].filter(x=>x>=0);
  return rows.filter(r=>r&&r.some(c=>(''+(c==null?'':c)).trim())).map(r=>{const g=k=>m[k]>=0?(''+(r[m[k]]==null?'':r[m[k]])).trim():'';
    const extra={};cols.forEach((h,ci)=>{const v=(''+(r[ci]==null?'':r[ci])).trim();if(v&&!used.includes(ci))extra[h]=v;});
-   const vv=g('value').replace(/[^0-9.\-]/g,'');
-   return {id:'cc'+Math.random().toString(36).slice(2),num:g('num'),name:g('name'),set:g('set'),rarity:g('rarity'),value:vv===''?'':(+vv||0),chase:/^(1|true|yes|y|chase|x|✓)$/i.test(g('chase')),extra:Object.keys(extra).length?extra:undefined};});}
+   const vv=g('value').replace(/[^0-9.\-]/g,'');let parallel=g('parallel');if(/^base$/i.test(parallel))parallel='';
+   return {id:'cc'+Math.random().toString(36).slice(2),num:g('num'),name:g('name'),set:g('set'),rarity:g('rarity'),value:vv===''?'':(+vv||0),parallel,cardType:clNormType(g('cardType'),parallel),chase:/^(1|true|yes|y|chase|x|✓)$/i.test(g('chase')),extra:Object.keys(extra).length?extra:undefined};});}
 function clDeriveSet(cards){const c={};cards.forEach(x=>{if(x.set)c[x.set]=(c[x.set]||0)+1;});let best='',n=0;for(const k in c){if(c[k]>n){n=c[k];best=k;}}return best;}
-function clNormalize(cl){if(!cl.id)cl.id='cl'+Math.random().toString(36).slice(2);if(!Array.isArray(cl.cards))cl.cards=clBuildCards(cl);cl.cards.forEach(cd=>{if(!cd.id)cd.id='cc'+Math.random().toString(36).slice(2);cd.chase=!!cd.chase;if(cd.value!==''&&cd.value!=null)cd.value=+cd.value||0;});if(!('set'in cl)||!cl.set)cl.set=clDeriveSet(cl.cards);return cl;}
+function clNormalize(cl){if(!cl.id)cl.id='cl'+Math.random().toString(36).slice(2);if(!Array.isArray(cl.cards))cl.cards=clBuildCards(cl);cl.cards.forEach(cd=>{if(!cd.id)cd.id='cc'+Math.random().toString(36).slice(2);cd.chase=!!cd.chase;if(cd.value!==''&&cd.value!=null)cd.value=+cd.value||0;if(!('parallel'in cd))cd.parallel='';if(!('cardType'in cd)||!cd.cardType)cd.cardType=cd.parallel?'parallel':'base';});if(!('set'in cl)||!cl.set)cl.set=clDeriveSet(cl.cards);return cl;}
 const CL_COLS=[
  {key:'num',label:'Card #',type:'text',sortable:true,sortVal:c=>(c.num||''),cell:c=>`<td class="mono"><input value="${esc(c.num||'')}" style="width:82px;font-size:12px" oninput="clEdit('${c.id}','num',this.value)"></td>`},
  {key:'name',label:'Name',core:true,first:true,type:'text',sortable:true,sortVal:c=>(c.name||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.name||'')}" style="min-width:170px" oninput="clEdit('${c.id}','name',this.value)"></td>`},
  {key:'set',label:'Set',type:'text',sortable:true,sortVal:c=>(c.set||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.set||'')}" style="min-width:120px;font-size:12px" oninput="clEdit('${c.id}','set',this.value)"></td>`},
  {key:'rarity',label:'Rarity',type:'text',sortable:true,sortVal:c=>(c.rarity||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.rarity||'')}" style="min-width:130px;font-size:12px" oninput="clEdit('${c.id}','rarity',this.value)"></td>`},
+ {key:'parallel',label:'Parallel',type:'text',sortable:true,sortVal:c=>(c.parallel||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.parallel||'')}" style="min-width:110px;font-size:12px" placeholder="Base" oninput="clEdit('${c.id}','parallel',this.value)"></td>`},
+ {key:'cardType',label:'Type',type:'text',sortable:true,sortVal:c=>({base:0,parallel:1,insert:2}[c.cardType||'base']),cell:c=>`<td><select style="font-size:12px" onchange="clEdit('${c.id}','cardType',this.value)">${['base','parallel','insert'].map(t=>`<option ${((c.cardType||'base')===t)?'selected':''}>${t}</option>`).join('')}</select></td>`},
  {key:'value',label:'Value',type:'num',sortable:true,sortVal:c=>+c.value||0,cell:c=>`<td class="mono"><input type="number" value="${(c.value===''||c.value==null)?'':esc(''+c.value)}" style="width:82px" oninput="clEdit('${c.id}','value',this.value)"></td>`},
  {key:'chase',label:'Chase',type:'num',sortable:true,sortVal:c=>c.chase?1:0,cell:c=>`<td style="text-align:center"><input type="checkbox" style="width:auto" ${c.chase?'checked':''} onchange="clEditChase('${c.id}',this.checked)"></td>`},
  {key:'actions',label:'',core:true,sortable:false,cell:c=>`<td style="white-space:nowrap"><button class="btn x" onclick="clDelCard('${c.id}')">✕</button></td>`},
 ];
 const CL_DEFAULT_COLS=['num','name','set','rarity','value','chase','actions'];
-let clOpenId=null;
-function clCur(){return (S.checklists||[]).find(c=>c.id===clOpenId);}
+let clOpenId=null,PENDING_CL=null,clReviewMode=false,clPendingSheets=null;
+function clCur(){return clReviewMode?PENDING_CL:(S.checklists||[]).find(c=>c.id===clOpenId);}
+function clActiveGrid(){return clReviewMode?GRIDS['cl:__review__']:GRIDS['cl:'+clOpenId];}
+function clPersist(cl){if(!(cl&&cl._pending))save();} /* staged import (_pending) never writes to cloud until Approve */
 function checklistGridCfg(cl){return {sk:'e10_cl_'+cl.id,cols:CL_COLS,defaultCols:CL_DEFAULT_COLS,defaultSort:{col:'num',dir:1},
  defaultFilters:{search:'',rarity:'',chase:'',valueMin:'',set:''},listBoxId:'clListBox',colsMenuId:'clColsMenu',viewPrompt:'Name this view (e.g. "Chase cards", "$50+")',
  base:()=>{const c=clCur();return c?(c.cards||[]):[];},
@@ -938,11 +1058,11 @@ function checklistGridCfg(cl){return {sk:'e10_cl_'+cl.id,cols:CL_COLS,defaultCol
  render:()=>openChecklist(cl.id)};}
 function openChecklist(id){clOpenId=id;const cl=(S.checklists||[]).find(c=>c.id===id);if(!cl){clOpenId=null;dChecklists();return;}if(!GRIDS['cl:'+id])makeGrid('cl:'+id,checklistGridCfg(cl));dChecklists();}
 function closeChecklist(){clOpenId=null;dChecklists();}
-function clEdit(cardId,field,val){const cl=clCur();if(!cl)return;const cd=(cl.cards||[]).find(x=>x.id===cardId);if(!cd)return;if(field==='value'){const v=(''+val).replace(/[^0-9.\-]/g,'');cd.value=v===''?'':(+v||0);}else cd[field]=val;save();}
-function clEditChase(cardId,on){const cl=clCur();if(!cl)return;const cd=(cl.cards||[]).find(x=>x.id===cardId);if(!cd)return;cd.chase=!!on;save();const G=GRIDS['cl:'+cl.id];if(G)gRenderList(G);}
-function clAddCard(){const cl=clCur();if(!cl)return;(cl.cards=cl.cards||[]).push({id:'cc'+Date.now(),num:'',name:'New card',set:cl.set||'',rarity:'',value:'',chase:false});save();const G=GRIDS['cl:'+cl.id];if(G)gRenderList(G);}
-function clDelCard(cardId){const cl=clCur();if(!cl)return;cl.cards=(cl.cards||[]).filter(x=>x.id!==cardId);save();const G=GRIDS['cl:'+cl.id];if(G)gRenderList(G);}
-function clSetField(field,val){const cl=clCur();if(!cl)return;cl[field]=val;save();}
+function clEdit(cardId,field,val){const cl=clCur();if(!cl)return;const cd=(cl.cards||[]).find(x=>x.id===cardId);if(!cd)return;if(field==='value'){const v=(''+val).replace(/[^0-9.\-]/g,'');cd.value=v===''?'':(+v||0);}else cd[field]=val;clPersist(cl);if(clReviewMode&&field==='cardType')renderChecklistReview();}
+function clEditChase(cardId,on){const cl=clCur();if(!cl)return;const cd=(cl.cards||[]).find(x=>x.id===cardId);if(!cd)return;cd.chase=!!on;clPersist(cl);const G=clActiveGrid();if(G)gRenderList(G);}
+function clAddCard(){const cl=clCur();if(!cl)return;(cl.cards=cl.cards||[]).push({id:'cc'+Date.now(),num:'',name:'New card',set:cl.set||'',rarity:'',value:'',parallel:'',cardType:'base',chase:false});clPersist(cl);if(clReviewMode)renderChecklistReview();else{const G=clActiveGrid();if(G)gRenderList(G);}}
+function clDelCard(cardId){const cl=clCur();if(!cl)return;cl.cards=(cl.cards||[]).filter(x=>x.id!==cardId);clPersist(cl);if(clReviewMode)renderChecklistReview();else{const G=clActiveGrid();if(G)gRenderList(G);}}
+function clSetField(field,val){const cl=clCur();if(!cl)return;cl[field]=val;clPersist(cl);}
 function clGridSet(field,val){const G=GRIDS['cl:'+clOpenId];if(!G)return;G.state.filters[field]=val;gRenderList(G);}
 function renderChecklistGrid(cl){const G=GRIDS['cl:'+cl.id]||makeGrid('cl:'+cl.id,checklistGridCfg(cl));const F=G.state.filters;
  const sets=[...new Set((cl.cards||[]).map(c=>c.set).filter(Boolean))].sort(),rarities=[...new Set((cl.cards||[]).map(c=>c.rarity).filter(Boolean))].sort();
@@ -957,11 +1077,17 @@ function renderChecklistGrid(cl){const G=GRIDS['cl:'+cl.id]||makeGrid('cl:'+cl.i
    <div class="etool" style="margin-top:8px;align-items:center">${gColsBtn(G)}${gViewsHTML(G)}</div>
    <div id="clListBox"></div></div>`;
  $('dtc').innerHTML=h;gRenderCols(G);gRenderList(G);}
-function dChecklists(){if(clOpenId){const cl=clCur();if(cl)return renderChecklistGrid(cl);clOpenId=null;}
+function dChecklists(){if(clReviewMode&&PENDING_CL)return renderChecklistReview();if(clOpenId){const cl=clCur();if(cl)return renderChecklistGrid(cl);clOpenId=null;}
  const lm=[['characters','Chase characters'],['sets','Sets / products'],['formats','Show formats'],['diff','Trust / hooks']];
- let h=`<div class="card"><h3 style="font-size:15px">Checklists (CSV)</h3>   <div class="row" style="margin-bottom:8px"><button class="btn sm" onclick="downloadChecklistTemplate()">↓ CSV template</button><span class="lab" style="align-self:center">Required column: <b>Card Name</b> · optional: Card Number, Set, Rarity, Market Value</span></div>
-   <div class="drop" onclick="$('clFile').click()">Click to upload a .csv checklist</div><input id="clFile" type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="uploadChecklist(this)">
-   <div style="margin-top:12px">${S.checklists.length?`<div class="egrid"><table><tr><th>Checklist</th><th>Set</th><th>Cards</th><th></th></tr>${S.checklists.map((c,i)=>`<tr><td>📄 ${esc(c.name)}</td><td>${esc(c.set||'—')}</td><td class="mono">${(c.cards||[]).length}</td><td><div class="actions"><button class="btn sm" onclick="openChecklist('${c.id}')">Open ↗</button><button class="btn sm" onclick="buildBreakFromChecklist('${c.id}')">⚡ Break</button><button class="btn x" onclick="if(confirm('Delete checklist?')){S.checklists.splice(${i},1);save();dChecklists();}">✕</button></div></td></tr>`).join('')}</table></div>`:'<div style="color:var(--mut);font-size:13px">No checklists.</div>'}</div></div>`;
+ let h=`<div class="card"><h3 style="font-size:15px">Checklists</h3>
+   <div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px"><b>Smart import</b> uses AI to map any layout (Topps, Beckett, any columns) to the app's fields and infer base / parallel / insert. <b>Direct import</b> is for a file already in the template — no AI. Both accept <b>.xlsx</b> and <b>.csv</b>, and both let you review &amp; edit before anything commits.</div>
+   <div class="row" style="margin-bottom:10px;gap:8px;flex-wrap:wrap"><button class="btn sm" onclick="downloadChecklistTemplate('csv')">↓ CSV template</button><button class="btn sm" onclick="downloadChecklistTemplate('xlsx')">↓ XLSX template</button><span class="lab" style="align-self:center">Required: <b>Card Name</b> · optional: Card Number, Set, Rarity, Market Value, Parallel, Card Type, Chase</span></div>
+   <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px">
+     <div class="drop" onclick="clImportPick('smart')" style="min-height:78px"><b>✨ Smart import</b><div class="lab" style="text-transform:none;letter-spacing:0;margin-top:4px">Any .xlsx / .csv — AI maps the columns</div></div>
+     <div class="drop" onclick="clImportPick('direct')" style="min-height:78px"><b>⬇ Direct import</b><div class="lab" style="text-transform:none;letter-spacing:0;margin-top:4px">Already formatted — commits with no AI</div></div>
+   </div>
+   <input id="clFile" type="file" accept=".csv,.tsv,.txt,.xlsx,.xls" style="display:none" onchange="clImportFile(this)">
+   <div style="margin-top:12px">${S.checklists.length?`<div class="egrid"><table><tr><th>Checklist</th><th>Set</th><th>Cards</th><th></th></tr>${S.checklists.map((c,i)=>{const cds=c.cards||[];const par=cds.filter(x=>x.cardType==='parallel').length,ins=cds.filter(x=>x.cardType==='insert').length;return `<tr><td>📄 ${esc(c.name)}</td><td>${esc(c.set||'—')}</td><td class="mono">${cds.length}${(par||ins)?` <span class="lab" style="text-transform:none;letter-spacing:0">(${par} par · ${ins} ins)</span>`:''}</td><td><div class="actions"><button class="btn sm" onclick="openChecklist('${c.id}')">Open ↗</button><button class="btn sm" onclick="buildBreakFromChecklist('${c.id}')">⚡ Break</button><button class="btn x" onclick="if(confirm('Delete checklist?')){S.checklists.splice(${i},1);save();dChecklists();}">✕</button></div></td></tr>`;}).join('')}</table></div>`:'<div style="color:var(--mut);font-size:13px">No checklists yet — import one above.</div>'}</div></div>`;
  h+=`<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Attachments</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">Images, PDFs, docs. Small files stored in-browser; large ones referenced only (move to cloud when hosted).</div>
    <div class="drop" onclick="$('atFile').click()">Click to upload a file</div><input id="atFile" type="file" style="display:none" onchange="uploadAttach(this)">
    <div style="margin-top:12px">${S.attachments.length?`<div class="egrid"><table><tr><th>Attachment</th><th>Size</th><th></th></tr>${S.attachments.map((a,i)=>`<tr><td>📎 ${esc(a.name)}</td><td class="lab" style="text-transform:none;letter-spacing:0">${(a.size/1024).toFixed(0)} KB${a.data?'':' · reference'}</td><td><div class="actions">${a.data?`<a class="btn sm" href="${a.data}" download="${esc(a.name)}">Download</a>`:''}<button class="btn x" onclick="S.attachments.splice(${i},1);save();dChecklists()">✕</button></div></td></tr>`).join('')}</table></div>`:'<div style="color:var(--mut);font-size:13px">No attachments.</div>'}</div></div>`;
