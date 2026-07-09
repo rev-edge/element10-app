@@ -48,6 +48,10 @@ label{font-size:12px;color:var(--mut);font-weight:500;display:block;margin:0 0 4
 .cell.peak{background:#f7fce9;border-color:#e4f3bf}.cell.dover{border-color:var(--ink)}
 .show{background:var(--ink);color:#fff;border-radius:8px;padding:7px 8px;margin-bottom:5px;cursor:grab;font-size:11.5px;line-height:1.3}
 .show .nm{font-weight:500}.show .mt{font-family:var(--mono);font-size:10px;color:var(--volt);margin-top:2px}
+.show .rdy{display:flex;align-items:center;gap:4px;margin-top:4px}
+.show .rdy .d{width:7px;height:7px;border-radius:50%;flex:none;opacity:.9}
+.show .rdy .d.copy{background:#4f7cff}.show .rdy .d.brk{background:var(--volt)}.show .rdy .d.inv{background:#3ad13a}
+.show .rdy .ok{font-family:var(--mono);font-size:8.5px;letter-spacing:.04em;color:#0a0b0d;background:var(--volt);border-radius:3px;padding:0 4px;margin-left:auto}
 .addc{color:var(--mut2);font-size:11px;cursor:pointer;text-align:center}.addc:hover{color:var(--ink)}
 .out{background:var(--surface2);border-radius:10px;padding:12px 14px;margin-top:8px;font-size:13.5px;line-height:1.5;position:relative}
 .out .cp{position:absolute;right:8px;top:8px}
@@ -153,8 +157,11 @@ function scheduleGridHTML(){
  let h=`<div style="overflow:auto"><div class="sgrid"><div></div>${DAYS.map(d=>`<div class="hd">${d}</div>`).join('')}`;
  DAYPARTS.forEach(dp=>{h+=`<div class="dp">${dp[0]}<span style="color:var(--mut2)">${dp[2]}</span></div>`;
   DAYS.forEach(day=>{const k=day+'|'+dp[0];const peak=dp[1]>=0.7?'peak':'';const arr=S.shows[k]||[];
-   h+=`<div class="cell ${peak}" ondragover="event.preventDefault()" ondragenter="this.classList.add('dover')" ondragleave="this.classList.remove('dover')" ondrop="this.classList.remove('dover');dropShow('${k}')">${arr.map((s,i)=>`<div class="show" draggable="true" ondragstart="dragShow('${k}',${i})" onclick="event.stopPropagation();editShow('${k}',${i})"><div class="nm">${esc(s.name)}</div><div class="mt">${esc(s.fmt||'')} · ${esc(s.dur||'')}m · ${esc(s.host||'')}</div>${(s.titleSet||s.breakModel||s.repackRef)?`<div class="mt">${s.titleSet?'📝 ':''}${s.breakModel?'📊 ':''}${s.repackRef?'🎁':''}</div>`:''}</div>`).join('')}<div class="addc" onclick="newShow('${k}')">+ add</div></div>`;});});
+   h+=`<div class="cell ${peak}" ondragover="event.preventDefault()" ondragenter="this.classList.add('dover')" ondragleave="this.classList.remove('dover')" ondrop="this.classList.remove('dover');dropShow('${k}')">${arr.map((s,i)=>`<div class="show" draggable="true" ondragstart="dragShow('${k}',${i})" onclick="event.stopPropagation();editShow('${k}',${i})"><div class="nm">${esc(s.name)}</div><div class="mt">${esc(s.fmt||'')} · ${esc(s.dur||'')}m · ${esc(s.host||'')}</div>${showReadyHTML(s)}</div>`).join('')}<div class="addc" onclick="newShow('${k}')">+ add</div></div>`;});});
  h+=`</div></div>`;return h;}
+/* Readiness dots: copy / break model / inventory allocated, + READY when all three are set. */
+function showReadyHTML(s){const c=!!s.titleSet,b=!!s.breakModel,inv=!!(s.inventoryAlloc&&s.inventoryAlloc.length);if(!c&&!b&&!inv)return '';const ready=c&&b&&inv;
+ return `<div class="rdy">${c?'<span class="d copy" title="Copy attached"></span>':''}${b?'<span class="d brk" title="Break model attached"></span>':''}${inv?'<span class="d inv" title="Inventory allocated"></span>':''}${ready?'<span class="ok" title="Copy + break model + inventory all set">READY</span>':''}</div>`;}
 let DRAGS=null;function dragShow(k,i){DRAGS={k,i};}
 function dropShow(k){if(!DRAGS)return;if(!canEditScoped()){DRAGS=null;return roGuard();}const s=S.shows[DRAGS.k].splice(DRAGS.i,1)[0];if(!S.shows[DRAGS.k].length)delete S.shows[DRAGS.k];(S.shows[k]=S.shows[k]||[]).push(s);DRAGS=null;save();rerenderSchedule();}
 function rerenderSchedule(){if($('sec-schedule').classList.contains('on'))renderSchedule();if($('sec-home').classList.contains('on'))renderHome();}
@@ -247,14 +254,18 @@ function closeM(){$('ov').style.display='none';}
 
 /* ---------- HOME ---------- */
 function renderHome(){
- const open=S.todos.filter(t=>!t.done).length, showsThisWeek=Object.values(S.shows).flat().length;
- let h=`<div class="hero"><div><h1>This week</h1><div class="sub">Single-click a show to edit · double-click the board to open the full scheduler</div></div><button class="btn v" onclick="go('schedule')">Open scheduler ↗</button></div>`;
+ const open=S.todos.filter(t=>!t.done).length;
+ const rl=invRollup(S.inventory),proj=opProjectedProfit(),realized=realizedMargin(S.inventory);
+ let h=`<div class="hero"><div><h1>This week</h1><div class="sub">Where the operation stands · single-click a show to edit · double-click the board to open the scheduler</div></div><button class="btn v" onclick="go('schedule')">Open scheduler ↗</button></div>`;
+ h+=`<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:0 0 18px">
+   <div class="metric"><div class="n">${money(rl.cost)}</div><div class="l">Capital deployed</div></div>
+   <div class="metric"><div class="n">${money(rl.committed)}</div><div class="l">Committed to shows</div></div>
+   <div class="metric"><div class="n">${money(rl.free)}</div><div class="l">Free to break</div></div>
+   <div class="metric"><div class="n" style="color:${rl.aging>0?'var(--red)':'inherit'}">${money(rl.aging)}</div><div class="l">Aging &gt;30d idle</div></div>
+   <div class="metric"><div class="n" style="color:#0a8a4a">${money(proj)}</div><div class="l">Projected profit · this week</div></div>
+   <div class="metric"><div class="n" style="color:${realized>=0?'#0a8a4a':'var(--red)'}">${realized>=0?'+':''}${money(realized)}</div><div class="l">Realized to date · ${open} open to-dos</div></div></div>`;
  h+=`<div ondblclick="go('schedule')">${scheduleGridHTML()}</div>`;
- h+=`<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:18px 0">
-   <div class="metric"><div class="n">${S.sales==null?'—':money(S.sales)}</div><div class="l">Sales · last 7 days ${S.sales==null?'(plug in later)':''}</div></div>
-   <div class="metric"><div class="n">${showsThisWeek}</div><div class="l">Shows scheduled</div></div>
-   <div class="metric"><div class="n">${open}</div><div class="l">Open to-dos</div></div>
-   <div class="metric"><div class="n">${S.breaks.length}</div><div class="l">Saved break models</div></div></div>`;
+ h+=`<div style="height:18px"></div>`;
  h+=`<div class="split">`;
  h+=`<div class="card"><h3 style="font-size:16px">Collaborative notes</h3><div class="sub" style="color:var(--mut);font-size:12px;margin:2px 0 8px">Log what you worked on, drop something interesting, or ask the team.</div><div style="margin:8px 0">${S.comments.slice().reverse().map(c=>`<div class="cmt"><div class="who">${esc(c.who)} · ${new Date(c.when).toLocaleDateString()}${c.kind?` <span class="pill" style="margin:0 0 0 4px">${esc(c.kind)}</span>`:''}</div>${esc(c.text)}</div>`).join('')}</div>
    <div class="row"><select id="noteKind" style="max-width:130px"><option>Worked on</option><option>Interesting</option><option>Question</option><option>Note</option></select><input id="cmtin" placeholder="${S.user?'Add a note…':'Sign in to post…'}" onkeydown="if(event.key==='Enter')addNote()"><button class="btn d sm" onclick="addNote()">Post</button></div></div>`;
@@ -290,14 +301,40 @@ function breaksListHTML(){if(!S.breaks.length)return '<div style="color:var(--mu
 function delBreak(i){S.breaks.splice(i,1);save();renderHome();}
 
 /* ---------- SCHEDULE ---------- */
+function scheduleRollupHTML(){
+ const proj=opProjectedProfit(),load=streamerLoad();
+ const pills=Object.entries(load).sort((a,b)=>b[1].shows-a[1].shows).map(([h,o])=>`<span class="pill">${esc(h)}: ${o.shows} show${o.shows!==1?'s':''} · ${o.mins}m</span>`).join('');
+ return `<div class="card" style="margin-bottom:14px"><div class="row" style="justify-content:space-between;align-items:flex-start;gap:14px">
+   <div><span class="lab">Operational week</span><div style="font-family:var(--disp);font-weight:700;font-size:22px;color:#0a8a4a;line-height:1.1">${money(proj)}</div><div class="lab" style="text-transform:none;letter-spacing:0">projected profit · attached models across Universal + your shows</div></div>
+   <div style="text-align:right;min-width:0"><span class="lab">Streamer load</span><div style="margin-top:4px">${pills||'<span class="lab">no shows</span>'}</div></div>
+ </div></div>`;
+}
 function renderSchedule(){
- $('sec-schedule').innerHTML=`<div class="hero"><div><h1>Schedule</h1><div class="sub">Drag shows across the week. Peak windows (evening/late) are shaded.</div></div><div class="row" style="gap:6px">${ROLE==='admin'?`<button class="btn sm" onclick="copyWeekToUniversal()" title="Publish this week to the team baseline everyone sees">Copy week → Universal</button>`:''}<button class="btn v" onclick="newShow()">+ New show</button></div></div>${scheduleGridHTML()}`;
+ $('sec-schedule').innerHTML=`<div class="hero"><div><h1>Schedule</h1><div class="sub">Drag shows across the week. Peak windows (evening/late) are shaded.</div></div><div class="row" style="gap:6px">${ROLE==='admin'?`<button class="btn sm" onclick="copyWeekToUniversal()" title="Publish this week to the team baseline everyone sees">Copy week → Universal</button>`:''}<button class="btn v" onclick="newShow()">+ New show</button></div></div>${scheduleRollupHTML()}${scheduleGridHTML()}`;
 }
 
 /* ---------- SHOW HUB — cross-module attach helpers ---------- */
 let CS_LAST=null;      // last generated copy set in Copy Studio {type,items}
 let LIVE_SEED=null;    // pending break-model seed when Live Break is started from a show
 function allShows(){const out=[];Object.keys(S.shows||{}).forEach(k=>{(S.shows[k]||[]).forEach((s,i)=>{const p=k.split('|');out.push({k,i,id:s.id,label:(s.name||'Untitled')+' · '+p[0]+' '+p[1]});});});return out;}
+/* Operational show set = the Universal baseline shows + the current user's own shows — the two
+   rows always readable under RLS. Cached so rollups/buy-list are stable regardless of which scope
+   tab is selected. The currently-viewed scope is overlaid live from S.shows so edits show at once. */
+let OP_SHOWS={universal:null,mine:null};
+async function loadOpShows(){
+ try{const u=await fetchRow('universal');OP_SHOWS.universal=(u&&u.data&&u.data.shows)||{};}catch(e){OP_SHOWS.universal=OP_SHOWS.universal||{};}
+ try{const m=await fetchRow('user:'+MEID);OP_SHOWS.mine=(m&&m.data&&m.data.shows)||{};}catch(e){OP_SHOWS.mine=OP_SHOWS.mine||{};}
+}
+function opShows(){
+ const uni=(SCOPE==='universal')?(S.shows||{}):(OP_SHOWS.universal||{});
+ const mine=(SCOPE==='mine')?(S.shows||{}):(OP_SHOWS.mine||{});
+ const out=[],seen=new Set();
+ [['universal',uni],['mine',mine]].forEach(([src,obj])=>{Object.keys(obj||{}).forEach(k=>{(obj[k]||[]).forEach((s,i)=>{const id=s.id||(src+'|'+k+'|'+i);if(seen.has(id))return;seen.add(id);const p=k.split('|');out.push({s,k,src,label:(s.name||'Untitled')+' · '+p[0]+' '+p[1]});});});});
+ return out;
+}
+function opProjectedProfit(){return opShows().reduce((a,x)=>a+((x.s.breakModel&&x.s.breakModel.economics&&+x.s.breakModel.economics.profit)||0),0);}
+function realizedMargin(items){return (items||S.inventory||[]).reduce((a,i)=>a+((+i.soldQty>0)?((+i.soldProceeds||0)-(+i.cost||0)*(+i.soldQty||0)):0),0);}
+function streamerLoad(){const m={};opShows().forEach(x=>{const h=x.s.host||'—';const o=m[h]||(m[h]={shows:0,mins:0});o.shows++;o.mins+=(+x.s.dur||0);});return m;}
 function showByRef(ref){if(!ref)return null;const p=ref.split('|||');const arr=S.shows[p[0]];if(!arr||!arr[+p[1]])return null;return{k:p[0],i:+p[1],s:arr[+p[1]]};}
 function showPickerOptions(sel){return `<option value="">— attach to show —</option>`+allShows().map(x=>`<option value="${x.k}|||${x.i}" ${sel===(x.k+'|||'+x.i)?'selected':''}>${esc(x.label)}</option>`).join('');}
 function copyTitleOf(cs){return (cs&&cs.items&&cs.items[0])?(cs.items[0][1]||''):'';}
@@ -510,7 +547,9 @@ function uploadAttach(inp){const f=inp.files[0];if(!f)return;const big=f.size>12
 const INVCATS=['Box','Case','ETB / Sealed','Pack','Raw card','Slab','Other'];
 let dataTab='overview';
 let exCopyRef=''; // Whatnot Export: which show's attached copy to prefill
-let invSearch='',invCatF='',invSetF='',invStatusF='all',invSort={col:'name',dir:1}; // Inventory list controls
+// Inventory list controls — persisted in localStorage so views survive reloads
+let invSearch=localStorage.getItem('e10_invSearch')||'',invCatF=localStorage.getItem('e10_invCatF')||'',invSetF=localStorage.getItem('e10_invSetF')||'',invStatusF=localStorage.getItem('e10_invStatusF')||'all',invSort=(()=>{try{return JSON.parse(localStorage.getItem('e10_invSort'))||{col:'name',dir:1};}catch(e){return {col:'name',dir:1};}})();
+function invPersist(){try{localStorage.setItem('e10_invSearch',invSearch);localStorage.setItem('e10_invCatF',invCatF);localStorage.setItem('e10_invSetF',invSetF);localStorage.setItem('e10_invStatusF',invStatusF);localStorage.setItem('e10_invSort',JSON.stringify(invSort));}catch(e){}}
 function dataHub(){
  const tabs=[['overview','Overview'],['inventory','Inventory'],['checklists','Checklists'],['reports','Reports'],['export','Whatnot Export'],['lists','Lists & Settings']];
  if(ROLE==='admin')tabs.push(['team','Team']);
@@ -541,7 +580,7 @@ function dOverview(){const t=invTotals();const cat=Object.entries(t.byCat).map((
  h+=`<div class="card"><h3 style="font-size:15px">Configure dashboard</h3><div class="row" style="margin-top:10px;gap:18px">${[['catValue','Value by category'],['costMarket','Cost vs market'],['movement','Market movement']].map(([k,l])=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink);margin:0"><input type="checkbox" style="width:auto" ${S.dashCfg[k]?'checked':''} onchange="toggleDash('${k}',this.checked)"> ${l}</label>`).join('')}</div><div class="lab" style="margin-top:10px">Charts recalc from your inventory. Live market prices update these in the background via API once connected.</div></div>`;
  $('dtc').innerHTML=h;}
 function ownerOpts(sel){let opts=`<option value="">Universal / unassigned</option>`;const emails=MEMBERS.map(m=>m.email);if(sel&&!emails.includes(sel))opts+=`<option value="${esc(sel)}" selected>${esc(sel)}</option>`;opts+=MEMBERS.map(m=>`<option value="${esc(m.email)}" ${m.email===sel?'selected':''}>${esc(m.display_name||m.email)}</option>`).join('');return opts;}
-function invRollup(){let cost=0,market=0,committed=0,free=0,aging=0;invView().forEach(i=>{const q=+i.qty||0,v=+i.value||0,c=+i.cost||0;cost+=c*q;market+=v*q;committed+=v*invReserved(i);free+=v*invAvailable(i);if(invAge(i)>30&&invAvailable(i)>0)aging+=v*q;});return{cost,market,gain:market-cost,committed,free,aging};}
+function invRollup(items){items=items||invView();let cost=0,market=0,committed=0,free=0,aging=0;items.forEach(i=>{const q=+i.qty||0,v=+i.value||0,c=+i.cost||0;cost+=c*q;market+=v*q;committed+=v*invReserved(i);free+=v*invAvailable(i);if(invAge(i)>30&&invAvailable(i)>0)aging+=v*q;});return{cost,market,gain:market-cost,committed,free,aging};}
 function invRows(){let rows=invView();const q=invSearch.trim().toLowerCase();
  if(q)rows=rows.filter(i=>(i.name||'').toLowerCase().includes(q));
  if(invCatF)rows=rows.filter(i=>i.cat===invCatF);
@@ -566,7 +605,7 @@ function invRowHTML(i,admin){const q=+i.qty||0,av=invAvailable(i),rsv=invReserve
   <td>${pills}</td>
   <td class="mono" style="${age>30?'color:var(--red)':''}">${age}d${age>30?' ⚠':''}</td>
   <td style="white-space:nowrap"><button class="btn sm" onclick="reserveModal('${i.id}')">Reserve</button> <button class="btn sm" onclick="sellModal('${i.id}')">Sold</button>${admin?` <select style="max-width:110px;font-size:11px" onchange="reassignInv('${i.id}',this.value)">${ownerOpts(i.owner)}</select>`:''} <button class="btn x" onclick="delInv('${i.id}')">✕</button></td></tr>`;}
-function renderInvList(){const box=$('invListBox');if(!box)return;const admin=ROLE==='admin';const rows=invRows();
+function renderInvList(){const box=$('invListBox');if(!box)return;invPersist();const admin=ROLE==='admin';const rows=invRows();
  box.innerHTML=`<div class="egrid wide" style="margin-top:12px"><table><tr>${invSortTh('name','Item')}${invSortTh('onhand','On hand / free')}${invSortTh('cost','Unit cost')}${invSortTh('market','Market')}${invSortTh('gain','Gain')}<th>Allocated to</th>${invSortTh('age','Age')}<th></th></tr>${rows.map(i=>invRowHTML(i,admin)).join('')||`<tr><td colspan="8" style="color:var(--mut)">No items match these filters.</td></tr>`}</table></div><div class="lab" style="margin-top:8px">${rows.length} shown · reservations hard-lock units to a show (app-enforced). ${admin?'Admin: reassign owner, reserve beyond free, release anyone.':'You can release only your own reservations.'}</div>`;}
 function dInventory(){const admin=ROLE==='admin';const rl=invRollup();const sets=[...new Set(S.inventory.map(i=>i.set).filter(Boolean))].sort();
  let h=`<div class="card"><h3 style="font-size:15px">Add inventory</h3>
@@ -586,7 +625,8 @@ function dInventory(){const admin=ROLE==='admin';const rl=invRollup();const sets
    <div class="metric"><div class="n">${money(rl.market)}</div><div class="l">Market value · <span style="color:${rl.gain>=0?'#0a8a4a':'var(--red)'}">${rl.gain>=0?'+':''}${money(rl.gain)}</span></div></div>
    <div class="metric"><div class="n">${money(rl.committed)}</div><div class="l">Committed to shows</div></div>
    <div class="metric"><div class="n">${money(rl.free)}</div><div class="l">Free to break</div></div>
-   <div class="metric"><div class="n" style="color:${rl.aging>0?'var(--red)':'inherit'}">${money(rl.aging)}</div><div class="l">Aging &gt;30d idle</div></div></div>`;
+   <div class="metric"><div class="n" style="color:${rl.aging>0?'var(--red)':'inherit'}">${money(rl.aging)}</div><div class="l">Aging &gt;30d idle</div></div>
+   <div class="metric"><div class="n" style="color:${realizedMargin(invView())>=0?'#0a8a4a':'var(--red)'}">${realizedMargin(invView())>=0?'+':''}${money(realizedMargin(invView()))}</div><div class="l">Realized (sold)</div></div></div>`;
  h+=`<div class="card" style="margin-top:16px"><div class="etool">
      <div style="flex:2;min-width:150px"><label>Search</label><input id="invSearchBox" value="${esc(invSearch)}" placeholder="item name…" oninput="invSearch=this.value;renderInvList()"></div>
      <div><label>Owner</label><div class="eseg"><button class="${invFilter==='mine'?'on':''}" onclick="if(invFilter!=='mine'){invFilter='mine';localStorage.setItem('e10_invfilter',invFilter);dInventory();}">Mine</button><button class="${invFilter==='all'?'on':''}" onclick="if(invFilter!=='all'){invFilter='all';localStorage.setItem('e10_invfilter',invFilter);dInventory();}">Everyone</button></div></div>
@@ -601,7 +641,7 @@ function dInventory(){const admin=ROLE==='admin';const rl=invRollup();const sets
 function buyListHTML(){
  const demand={};const bump=(set,qty,showLabel,unitCost)=>{set=set||'(unspecified)';const d=demand[set]||(demand[set]={qty:0,shows:new Set(),cost:0,costN:0});d.qty+=qty;if(showLabel)d.shows.add(showLabel);if(unitCost>0){d.cost+=unitCost*qty;d.costN+=qty;}};
  const setOfItem=id=>{const it=S.inventory.find(x=>x.id===id);return it?it.set:null;};
- allShows().forEach(x=>{const r=showByRef(x.k+'|||'+x.i);if(!r)return;const s=r.s,label=(s.name||'Untitled');
+ opShows().forEach(x=>{const s=x.s,label=x.label;
    (s.inventoryAlloc||[]).forEach(a=>bump(setOfItem(a.itemId)||a.set,+a.qty||1,label,+a.cost||0));
    (s.needs||[]).forEach(n=>bump(n.set,+n.qty||1,label,+n.approxCost||0));});
  const names=Object.keys(demand);
@@ -946,7 +986,7 @@ async function loadScopedFor(scope){const id=scopedIdFor(scope);SCOPED_ID=id;let
   SCOPED=base;}
  else{REVS[id]=row.rev||0;SCOPED=row.data&&Object.keys(row.data).length?splitLegacy(row.data).sc:blankScoped();}
  normScoped(SCOPED);}
-async function setScope(scope){SCOPE=scope;localStorage.setItem('e10_scope',scope);await loadScopedFor(scope);_lastScoped=null;rebuildS();renderScopebar();currentRender();toast(canEditScoped()?('Editing '+scopeLabel()):('Viewing '+scopeLabel()+' — read-only'));}
+async function setScope(scope){SCOPE=scope;localStorage.setItem('e10_scope',scope);await loadScopedFor(scope);await loadOpShows();_lastScoped=null;rebuildS();renderScopebar();currentRender();toast(canEditScoped()?('Editing '+scopeLabel()):('Viewing '+scopeLabel()+' — read-only'));}
 /* Publish the current week's schedule to the Universal (team baseline) row. Admin-only; Universal is admin-write via RLS. Fetch-merge so other Universal fields (breaks/dashCfg/sales) are preserved. */
 async function copyWeekToUniversal(){
  if(ROLE!=='admin'){toast('Admin only — Universal is admin-managed');return;}
@@ -977,7 +1017,7 @@ async function loadAll(){
  const sh=await fetchRow('shared');REVS['shared']=sh?(sh.rev||0):0;SHARED=sh&&sh.data&&Object.keys(sh.data).length?splitLegacy(sh.data).sh:blankShared();normShared(SHARED);
  if(!sh||!sh.data||!Object.keys(sh.data).length)await writeRow('shared',null,SHARED);
  if(SCOPE!=='mine'&&SCOPE!=='universal'&&ROLE!=='admin')SCOPE='mine';
- await loadScopedFor(SCOPE);rebuildS();subscribeRealtime();}
+ await loadScopedFor(SCOPE);await loadOpShows();rebuildS();subscribeRealtime();}
 renderWho=function(){if($('who'))$('who').innerHTML=`<button class="btn sm" onclick="signOut()">\u{1F464} ${esc(ME||'')}${ROLE==='admin'?' · admin':''} · sign out</button>`;};
 function signOut(){sb.auth.signOut().then(()=>location.reload());}
 function authScreen(msg){document.body.innerHTML=`<div style="max-width:380px;margin:12vh auto;padding:24px;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif">
