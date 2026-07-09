@@ -412,27 +412,34 @@ function genSchedule(){if(!canEditScoped())return roGuard();if(Object.values(S.s
 /* ---------- BREAK CALCULATOR ---------- */
 let BK={products:[],chases:[],auctions:[],invItems:[],cost:0,_last:null};
 function renderBreak(target){target=target||'dtc';const el=$(target);if(!el)return;
- el.innerHTML=`<div class="hero"><div><h1>Break / format model</h1>${BK._preloadNote?`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:4px">${esc(BK._preloadNote)}</div>`:''}</div><button class="btn sm" onclick="newBlankModel()">+ New blank model</button></div>
- <div class="split"><div class="card"><h3 style="font-size:15px">Inputs</h3>
-  <div class="lab" style="margin-top:14px">Product breaks (split into spots)</div><div id="prodList"></div>
-  <div class="row" style="margin-top:6px"><input id="pName" placeholder="Product" style="flex:2"><input id="pSpots" type="number" placeholder="spots" style="flex:1"><input id="pVal" type="number" placeholder="pool $" style="flex:1"><button class="btn sm" onclick="addProd()">+</button></div>
-  <div class="lab" style="margin-top:16px">Chase slabs / cards (bundled into tiered slots)</div><div id="chaseList"></div>
-  <div class="row" style="margin-top:6px"><input id="cbName" placeholder="Chase (e.g. TR Mewtwo)" style="flex:2"><input id="cbVal" type="number" placeholder="$" style="flex:1"><button class="btn sm" onclick="addChase()">+</button></div>
-  ${S.checklists.length?`<div class="row" style="margin-top:8px"><select id="clSel" style="flex:2"><option value="">— load chases from checklist —</option>${S.checklists.map((c,i)=>`<option value="${i}">${esc(c.name)} (${(c.cards||c.rows||[]).length})</option>`).join('')}</select><button class="btn sm" onclick="loadChecklistToBreak()">Load</button></div>`:`<div class="lab" style="margin-top:8px">Upload a checklist in <a onclick="go('data')">Data &amp; Lists</a> to load chases automatically.</div>`}
-  <div class="lab" style="margin-top:16px">Solo auctions (each its own slot)</div><div id="aucList"></div>
-  <div class="row" style="margin-top:6px"><input id="aName" placeholder="Auction item" style="flex:2"><input id="aVal" type="number" placeholder="$" style="flex:1"><button class="btn sm" onclick="addAuc()">+</button></div>
-  <div class="lab" style="margin-top:16px">Pull from inventory (uses real cost &amp; market value)</div><div id="invList"></div>
-  ${S.inventory.length?`<div class="row" style="margin-top:6px"><select id="bkInv" style="flex:2"><option value="">— choose an inventory item —</option>${S.inventory.map((it,ix)=>`<option value="${ix}">${esc(it.name)} · ${esc(it.cat||'')} · ${money(+it.value||0)}</option>`).join('')}</select><button class="btn sm" onclick="bkAddFromInv()">+ Pull</button></div>`:`<div class="lab" style="margin-top:6px">No inventory yet — add items in <a onclick="go('data')">Data &amp; Lists</a> to factor real cost/value into the model.</div>`}
-  <div style="margin-top:16px"><label>Total product cost (what you paid)</label><input id="bCost" type="number" value="${BK.cost}" oninput="BK.cost=+this.value||0;calcBreak()"></div></div>
- <div class="card"><h3 style="font-size:15px">Tuners</h3>
-  <div style="margin-top:12px"><label>Chase slots: <span id="lSlots" class="mono"></span></label><input id="tSlots" type="range" min="1" max="12" value="5" oninput="lSlots.textContent=this.value;calcBreak()"></div>
-  <div style="margin-top:10px"><label>Tiers: <span id="lTiers" class="mono"></span></label><input id="tTiers" type="range" min="1" max="4" value="3" oninput="lTiers.textContent=this.value;calcBreak()"></div>
-  <div style="margin-top:10px"><label>Evenness ↔ disparity: <span id="lEven" class="mono"></span></label><input id="tEven" type="range" min="0" max="100" value="30" oninput="lEven.textContent=this.value+'% disparity';calcBreak()"></div>
-  <div style="margin-top:10px"><label>Markup on value: <span id="lMk" class="mono"></span></label><input id="tMk" type="range" min="0" max="60" value="25" oninput="lMk.textContent=this.value+'%';calcBreak()"></div>
-  <div id="bout" style="margin-top:16px"></div>
-  <div class="row" style="margin-top:14px"><input id="bName" placeholder="Name this model" style="flex:2"><button class="btn d sm" onclick="saveBreak()">Save model</button></div></div></div>
+ if(BK.format==null)BK.format='tiered';if(BK.spots==null)BK.spots=Math.max(4,Math.min(20,BK.chases.length||8));if(BK.feesPct==null)BK.feesPct=9;if(BK.shipPer==null)BK.shipPer=0;if(BK.targetMargin==null)BK.targetMargin=35;if(!BK.priceMode)BK.priceMode='margin';
+ const it=BK.invItems&&BK.invItems[0];
+ el.innerHTML=`<div class="hero"><div><h1>Break / format planner</h1>${BK._preloadNote?`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:4px">${esc(BK._preloadNote)}</div>`:''}</div><button class="btn sm" onclick="newBlankModel()">+ New blank model</button></div>
+ <div class="card"><div class="etool" style="align-items:flex-end">
+   <div style="min-width:150px;flex:1"><label>Product</label><input value="${esc(it?it.name:'')}" placeholder="pull one under Advanced…" ${it?'readonly':''}></div>
+   <div><label>Cost $</label><input id="bCost" type="number" value="${BK.cost}" style="max-width:100px" oninput="BK.cost=+this.value||0;calcBreak()"></div>
+   <div><label>Format</label><select onchange="BK.format=this.value;calcBreak()">${[['random','Random spots'],['tiered','Tiered / ranked'],['team','Team / character'],['pick','Pick-your-Pokémon']].map(([v,l])=>`<option value="${v}" ${BK.format===v?'selected':''}>${l}</option>`).join('')}</select></div>
+   <div><label>Spots</label><input type="number" min="1" value="${BK.spots}" style="max-width:72px" oninput="BK.spots=Math.max(1,+this.value||1);calcBreak()"></div>
+   <div><label>Fees %</label><input type="number" step="0.5" value="${BK.feesPct}" style="max-width:70px" oninput="BK.feesPct=+this.value||0;calcBreak()"></div>
+   <div><label>Ship $/spot</label><input type="number" step="0.5" value="${BK.shipPer}" style="max-width:82px" oninput="BK.shipPer=+this.value||0;calcBreak()"></div>
+   <div><label>Target margin %</label><input id="bkMargin" type="number" value="${BK.priceMode==='margin'?BK.targetMargin:''}" placeholder="${BK.targetMargin}" style="max-width:92px" oninput="BK.targetMargin=+this.value||0;BK.priceMode='margin';var pe=document.getElementById('bkPrice');if(pe)pe.value='';calcBreak()"></div>
+   <div><label>or Spot price $</label><input id="bkPrice" type="number" value="${BK.priceMode==='price'?(BK.spotPrice||''):''}" placeholder="set→" style="max-width:88px" oninput="BK.spotPrice=+this.value||0;BK.priceMode='price';calcBreak()"></div>
+ </div>
+ <details class="gcfg" style="margin-top:8px"><summary class="btn sm">Advanced / add more inputs ▾</summary>
+   <div style="margin-top:8px;padding:12px;border:1px solid var(--line);border-radius:10px">
+     <div class="lab">Chase pool (checklist cards)</div><div id="chaseList"></div>
+     <div class="row" style="margin-top:6px"><input id="cbName" placeholder="Chase card" style="flex:2"><input id="cbVal" type="number" placeholder="$" style="flex:1"><button class="btn sm" onclick="addChase()">+</button></div>
+     ${S.checklists.length?`<div class="row" style="margin-top:8px"><select id="clSel" style="flex:2"><option value="">— load chases from checklist —</option>${S.checklists.map((c,i)=>`<option value="${i}">${esc(c.name)} (${(c.cards||c.rows||[]).length})</option>`).join('')}</select><button class="btn sm" onclick="loadChecklistToBreak()">Load</button></div>`:''}
+     <div class="lab" style="margin-top:12px">Extra products (split into spots)</div><div id="prodList"></div>
+     <div class="row" style="margin-top:6px"><input id="pName" placeholder="Product" style="flex:2"><input id="pSpots" type="number" placeholder="spots" style="flex:1"><input id="pVal" type="number" placeholder="pool $" style="flex:1"><button class="btn sm" onclick="addProd()">+</button></div>
+     <div class="lab" style="margin-top:12px">Solo auctions</div><div id="aucList"></div>
+     <div class="row" style="margin-top:6px"><input id="aName" placeholder="Auction item" style="flex:2"><input id="aVal" type="number" placeholder="$" style="flex:1"><button class="btn sm" onclick="addAuc()">+</button></div>
+     <div class="lab" style="margin-top:12px">Pull from inventory</div><div id="invList"></div>
+     ${S.inventory.length?`<div class="row" style="margin-top:6px"><select id="bkInv" style="flex:2"><option value="">— choose an inventory item —</option>${S.inventory.map((x,ix)=>`<option value="${ix}">${esc(x.name)} · ${esc(x.cat||'')} · ${money(+x.value||0)}</option>`).join('')}</select><button class="btn sm" onclick="bkAddFromInv()">+ Pull</button></div>`:''}
+   </div></details>
+ <div class="row" style="margin-top:12px"><input id="bName" placeholder="Name this model" style="flex:2;max-width:280px"><button class="btn d sm" onclick="saveBreak()">Save model</button></div></div>
+ <div id="bkPlan"></div>
  <div class="card" style="margin-top:16px"><h3 style="font-size:15px">Saved break models — history</h3><div id="bkHist" style="margin-top:8px"></div></div>`;
- $('lSlots').textContent='5';$('lTiers').textContent='3';$('lEven').textContent='30% disparity';$('lMk').textContent='25%';
  renderBKlists();calcBreak();renderBreakHist();
 }
 /* ===== Break/format modeling now lives under Data & Lists → "Break / Format", entered from a
@@ -481,32 +488,91 @@ function loadChecklistToBreak(){const idx=$('clSel').value;if(idx==='')return;co
   cl.rows.forEach(r=>{const nm=r[nc],val=parseFloat((r[vc]||'').toString().replace(/[^0-9.]/g,''));if(nm&&val>0){BK.chases.push({name:nm,val:val});n++;}});}
  renderBKlists();calcBreak();toast(n+' chases loaded from '+cl.name);}
 function balance(items,n){const bins=Array.from({length:n},()=>({sum:0,items:[]}));items.slice().sort((a,b)=>b.val-a.val).forEach(it=>{bins.sort((a,b)=>a.sum-b.sum);bins[0].items.push(it);bins[0].sum+=it.val;});return bins;}
-function calcBreak(){
- const N=+($('tSlots')?.value||5),T=+($('tTiers').value),E=+($('tEven').value),MK=+($('tMk').value)/100;
- let slots=[];const chases=BK.chases.slice().sort((a,b)=>b.val-a.val);
- const premium=Math.round(E/100*Math.min(4,Math.max(0,N-1)));
- chases.slice(0,premium).forEach(c=>slots.push({items:[c],val:c.val}));
- const rest=chases.slice(premium);
- if(rest.length)balance(rest,Math.max(1,N-premium)).forEach(b=>slots.push({items:b.items,val:b.sum}));
- BK.products.forEach(p=>{const each=p.val/p.spots;for(let i=0;i<p.spots;i++)slots.push({items:[{name:p.name+' spot',val:each}],val:each});});
- BK.auctions.forEach(a=>slots.push({items:[a],val:a.val}));
- if(!slots.length){$('bout').innerHTML='<div style="color:var(--mut)">Add products, chases or auctions to model slots.</div>';BK._last=null;return;}
- const sorted=slots.slice().sort((a,b)=>b.val-a.val);const labels=['S','A','B','C'];
- sorted.forEach((s,i)=>{s.tier=labels[Math.min(T-1,Math.floor(i/(sorted.length/T)))];});
- const tierRatio=ti=>{const idx=labels.indexOf(ti);return 1.28-(idx/Math.max(1,T-1))*0.5;};/* top tiers bid ABOVE value, lower tiers below — coherent with slot value */
- let totVal=0,gCold=0,gAvg=0,gHot=0;
- sorted.forEach(s=>{const avg=s.val*tierRatio(s.tier)*(1+MK*0.25);s.avg=avg;totVal+=s.val;gCold+=avg*0.85;gAvg+=avg;gHot+=avg*1.2;});
- const cost=BK.cost||0,net=g=>g*0.91-cost;
- const rows=sorted.map(s=>`<tr><td><span class="tier${s.tier}">${s.tier}</span></td><td>${s.items.map(i=>esc(i.name)).join(' + ')}</td><td class="mono">${money(s.val)}</td><td class="mono">${money(s.avg)}</td></tr>`).join('');
- $('bout').innerHTML=`<div class="grid" style="grid-template-columns:1fr 1fr 1fr;gap:10px">
-   <div class="metric"><div class="n" style="font-size:22px">${money(gAvg)}</div><div class="l">Exp. gross (avg)</div></div>
-   <div class="metric"><div class="n" style="font-size:22px">${money(net(gAvg))}</div><div class="l">Proj. profit</div></div>
-   <div class="metric"><div class="n" style="font-size:22px">${sorted.length}</div><div class="l">Total slots</div></div></div>
-  <div style="font-size:12px;color:var(--mut);margin:10px 0">Room range — cold ${money(gCold)} → hot ${money(gHot)} · card value ${money(totVal)} · gross vs card value ${totVal?(gAvg/totVal*100).toFixed(0):0}% · minus cost ${money(cost)} &amp; ~9% fees</div>
-  <div class="egrid" style="max-height:300px"><table><tr><th>Tier</th><th>Slot contents</th><th>Value</th><th>Exp. bid</th></tr>${rows}</table></div>`;
- BK._last={slots:sorted.length,tiers:T,gross:gAvg,
-   rows:sorted.map(s=>({label:s.items.map(i=>i.name).join(' + '),tier:s.tier,val:s.val,exp:s.avg})),
-   economics:{grossAvg:gAvg,profit:net(gAvg),cost:cost,totVal:totVal,cold:gCold,hot:gHot}};
+function bkCharGroups(pool){const chars=(S.lists&&S.lists.characters)||[];const groups={};
+ pool.forEach(c=>{const nm=(c.name||'');let key=chars.find(ch=>new RegExp('\\b'+ch.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b','i').test(nm));
+  if(!key)key=(nm.split(/[ \-–—/(]/)[0]||'Other').trim()||'Other';
+  (groups[key]=groups[key]||{key,cards:[],val:0});groups[key].cards.push({name:c.name,val:+c.val||0});groups[key].val+=(+c.val||0);});
+ return Object.values(groups).sort((a,b)=>b.val-a.val);}
+function computePlan(){
+ const pool=[...BK.chases,...BK.auctions.map(a=>({name:a.name,val:+a.val||0})),...BK.products.map(p=>({name:p.name,val:+p.val||0}))].filter(c=>c&&c.name);
+ const poolVal=pool.reduce((s,c)=>s+(+c.val||0),0);
+ const fmt=BK.format||'tiered',f=(BK.feesPct==null?9:+BK.feesPct)/100,shipPer=+BK.shipPer||0,P=+BK.cost||0,targetMargin=(BK.targetMargin==null?35:+BK.targetMargin)/100;
+ let buckets=[];
+ if(fmt==='random'){const N=Math.max(1,+BK.spots||1);for(let i=0;i<N;i++)buckets.push({label:'Spot '+(i+1),cards:[],val:poolVal/N});}
+ else if(fmt==='tiered'){if(pool.length){const N=Math.max(1,Math.min(+BK.spots||1,pool.length));balance(pool.map(c=>({name:c.name,val:+c.val||0})),N).forEach((b,i)=>buckets.push({label:b.items.map(x=>x.name).join(' + ')||('Spot '+(i+1)),cards:b.items,val:b.sum}));}}
+ else{bkCharGroups(pool).forEach(g=>buckets.push({label:g.key,cards:g.cards,val:g.val}));}
+ const spotCount=buckets.length||1,shipTotal=shipPer*spotCount;
+ let R;if(BK.priceMode==='price'){R=(+BK.spotPrice||0)*spotCount;}else{const denom=(1-f)-targetMargin;R=denom>0?(P+shipTotal)/denom:(P+shipTotal)*2.5;}
+ R=Math.max(R,0);
+ const floor=(1-f)>0?Math.max(0,((P/spotCount)+shipPer)/(1-f)):0;
+ const sumV=buckets.reduce((s,b)=>s+(+b.val||0),0),floorTotal=floor*spotCount,surplus=Math.max(0,R-floorTotal);
+ buckets.forEach(b=>{const w=sumV>0?(b.val/sumV):(1/spotCount);b.price=floor+surplus*w;});
+ if(fmt==='random'){const p=Math.max(floor,R/spotCount);buckets.forEach(b=>b.price=p);}
+ buckets.forEach(b=>b.price=Math.round(b.price));
+ const tl=['S','A','B','C'],byPrice=buckets.slice().sort((a,b)=>b.price-a.price);byPrice.forEach((b,i)=>{b.tier=tl[Math.min(3,Math.floor(i/(byPrice.length/4)))];});
+ const revenue=buckets.reduce((s,b)=>s+b.price,0),fees=revenue*f,shipping=shipPer*spotCount,totalCost=P+fees+shipping,net=revenue-totalCost,margin=revenue>0?net/revenue:0,roi=P>0?net/P:0;
+ const perSpotNet=buckets.map(b=>b.price*(1-f)-shipPer).sort((a,b)=>b-a);let cum=0,be=0;for(const n of perSpotNet){if(cum>=P)break;cum+=n;be++;}const breakeven=P<=0?0:Math.min(be,spotCount);
+ const netAt=r=>revenue*r*(1-f)-P-shipPer*spotCount*Math.min(1,r);
+ return {fmt,pool,poolVal,buckets,spotCount,revenue,fees,shipping,totalCost,net,margin,roi,breakeven,floor,P,f,shipPer,cold:netAt(0.8),hot:netAt(1.2),perSpotBuyerVal:poolVal/spotCount};
+}
+function bkPlanHTML(p){const tierCls={S:'tierS',A:'tierA',B:'tierB',C:'tierC'};const reserveOf=b=>Math.round(Math.max(p.floor,b.price*0.6));
+ if(p.fmt==='random'){const price=p.buckets[0]?p.buckets[0].price:0,mult=price>0?(p.perSpotBuyerVal/price):0;
+  return `<div class="card" style="margin-top:14px"><h3 style="font-size:15px">Spot plan — Random</h3><div class="lab" style="text-transform:none;letter-spacing:0;margin-top:8px;font-size:13px"><b>${p.spotCount} spots</b> at <b>${money(price)}</b> each · buyer gets ~${money(p.perSpotBuyerVal)} card value per spot (<b>${mult.toFixed(2)}×</b> the spot price) · revenue ${money(price*p.spotCount)} · reserve ${money(Math.round(p.floor))}/spot</div></div>`;}
+ const sorted=p.buckets.slice().sort((a,b)=>b.price-a.price);let head,rows;
+ if(p.fmt==='tiered'){head='<th>Tier</th><th>Slot contents</th><th>Card value</th><th>Price</th><th>Reserve</th>';
+  rows=sorted.map(b=>`<tr><td><span class="${tierCls[b.tier]||''}">${b.tier}</span></td><td>${esc(b.cards&&b.cards.length?b.cards.map(c=>c.name).join(' + '):b.label)}</td><td class="mono">${money(b.val)}</td><td class="mono"><b>${money(b.price)}</b></td><td class="mono">${money(reserveOf(b))}</td></tr>`).join('');}
+ else{const lbl=p.fmt==='pick'?'Pick':'Slot';head=`<th>${lbl}</th><th>Cards</th><th>Value</th><th>Price</th><th>Reserve</th>`;
+  rows=sorted.map(b=>`<tr><td><b>${esc(b.label)}</b></td><td class="lab" style="text-transform:none;letter-spacing:0;font-size:12px">${esc((b.cards||[]).map(c=>c.name+' ('+money(c.val)+')').join(', '))||'—'}</td><td class="mono">${money(b.val)}</td><td class="mono"><b>${money(b.price)}</b></td><td class="mono">${money(reserveOf(b))}</td></tr>`).join('');}
+ const title={tiered:'Tiered / ranked',team:'Team / character',pick:'Pick-your-Pokémon'}[p.fmt];
+ return `<div class="card" style="margin-top:14px"><h3 style="font-size:15px">Spot plan — ${title}</h3><div class="egrid" style="max-height:360px;margin-top:8px"><table><tr>${head}</tr>${rows}</table></div><div class="lab" style="margin-top:6px;text-transform:none;letter-spacing:0">${p.spotCount} ${p.fmt==='tiered'?'spots':'slots'} · prices value-weighted, floored at the reserve so nothing sells under cost.</div></div>`;}
+function calcBreak(){const box=$('bkPlan');if(!box)return;
+ const p=computePlan();
+ if(!p.buckets.length||(p.poolVal<=0&&p.P<=0)){const noPool=p.poolVal<=0&&p.P>0;box.innerHTML='<div class="card" style="margin-top:16px"><div style="color:var(--mut);font-size:13px">'+(noPool?'No chase pool yet — add cards from a checklist or the Advanced inputs to rank a <b>'+esc(p.fmt)+'</b> plan, or switch Format to <b>Random</b> to price blind spots against the '+money(p.P)+' cost.':'Add a product cost and a chase pool (preload from a product + checklist, or use Advanced) to plan a break.')+'</div></div>';BK._last=null;return;}
+ const sig=(p.net<=0||p.breakeven>p.spotCount)?'red':((p.breakeven<=Math.ceil(p.spotCount*0.7)&&p.margin>=0.2)?'green':'amber');
+ const sc={green:'#0a8a4a',amber:'#b8860b',red:'#e8332b'}[sig],sl={green:'GO',amber:'CAUTION',red:'NO-GO'}[sig],sb={green:'rgba(58,209,58,.12)',amber:'rgba(255,200,58,.16)',red:'rgba(232,51,43,.10)'}[sig];
+ const pc=v=>v>=0?'#0a8a4a':'#e8332b';
+ let h=`<div class="card" style="margin-top:16px;border-left:4px solid ${sc}">
+   <div class="row" style="justify-content:space-between;align-items:center"><h3 style="font-size:15px">Economic verdict</h3><span class="pill" style="margin:0;background:${sb};color:${sc};border-color:${sc};font-weight:800">${sl}</span></div>
+   <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(115px,1fr));margin-top:12px">
+     <div class="metric"><div class="n" style="font-size:20px">${money(p.revenue)}</div><div class="l">Revenue · ${p.spotCount} spots</div></div>
+     <div class="metric"><div class="n" style="font-size:20px;color:${pc(p.net)}">${p.net>=0?'+':''}${money(p.net)}</div><div class="l">Net profit</div></div>
+     <div class="metric"><div class="n" style="font-size:20px">${(p.margin*100).toFixed(0)}%</div><div class="l">Gross margin</div></div>
+     <div class="metric"><div class="n" style="font-size:20px">${p.P>0?(p.roi*100).toFixed(0)+'%':'—'}</div><div class="l">ROI</div></div>
+     <div class="metric"><div class="n" style="font-size:20px">${p.breakeven}/${p.spotCount}</div><div class="l">Break-even spots</div></div></div>
+   <div style="font-size:12.5px;color:var(--mut);margin-top:10px">Cost: product ${money(p.P)} + fees ${money(p.fees)} (${(p.f*100).toFixed(0)}%) + shipping ${money(p.shipping)} = <b>${money(p.totalCost)}</b> · card-value pool ${money(p.poolVal)} (buyer ~${money(p.perSpotBuyerVal)}/spot)</div>
+   <div class="row" style="gap:10px;margin-top:10px;flex-wrap:wrap">
+     <div class="metric" style="flex:1;min-width:105px"><div class="n" style="font-size:17px;color:${pc(p.cold)}">${p.cold>=0?'+':''}${money(p.cold)}</div><div class="l">Cold · 80%</div></div>
+     <div class="metric" style="flex:1;min-width:105px"><div class="n" style="font-size:17px;color:${pc(p.net)}">${p.net>=0?'+':''}${money(p.net)}</div><div class="l">Expected · 100%</div></div>
+     <div class="metric" style="flex:1;min-width:105px"><div class="n" style="font-size:17px;color:${pc(p.hot)}">${p.hot>=0?'+':''}${money(p.hot)}</div><div class="l">Hot · 120%</div></div></div>
+   <div class="lab" style="margin-top:10px;text-transform:none;letter-spacing:0;font-size:12.5px">Reserve / min-bid: don't sell below <b>${money(Math.round(p.floor))}</b>/spot — below this, revenue at expected sell-through won't cover total cost.</div>
+ </div>`;
+ h+=bkPlanHTML(p);
+ if(BK._modelId)h+='<div id="bkRecon"></div>';
+ box.innerHTML=h;
+ if(BK._modelId)renderReconcile(BK._modelId);
+ BK._last={slots:p.spotCount,tiers:new Set(p.buckets.map(b=>b.tier)).size,gross:Math.round(p.revenue),
+  rows:p.buckets.map(b=>({label:b.label,tier:b.tier,val:Math.round(b.val),price:b.price,exp:b.price})),
+  economics:{grossAvg:Math.round(p.revenue),profit:Math.round(p.net),cost:Math.round(p.P),totVal:Math.round(p.poolVal),cold:Math.round(p.cold),hot:Math.round(p.hot),margin:+(p.margin*100).toFixed(1),roi:+(p.roi*100).toFixed(1),breakeven:p.breakeven,fees:Math.round(p.fees),shipping:Math.round(p.shipping),reserve:Math.round(p.floor),format:p.fmt}};
+}
+async function renderReconcile(modelId){const el=$('bkRecon');if(!el)return;const model=(S.breaks||[]).find(b=>b.id===modelId);if(!model){el.innerHTML='';return;}
+ let show=null;Object.keys(S.shows||{}).forEach(k=>(S.shows[k]||[]).forEach(s=>{if(s.breakModelId===modelId)show=s;}));
+ const modeledRev=model.economics?model.economics.grossAvg:model.gross,modeledNet=model.economics?model.economics.profit:null;
+ const wrap=b=>`<div class="card" style="margin-top:14px"><h3 style="font-size:15px">Modeled vs actual</h3>${b}</div>`;
+ if(!show){el.innerHTML=wrap('<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:6px;font-size:13px">Attach this model to a show and run its Live Break to compare modeled vs actual.</div>');return;}
+ el.innerHTML=wrap('<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:6px;font-size:13px">Checking Live Break for <b>'+esc(show.name)+'</b>…</div>');
+ let sess=null;try{const{data}=await sb.from('e10_break_sessions').select('id,name,created_at').eq('streamer_uid',MEID).order('created_at',{ascending:false});
+  const nm=(show.name||'').toLowerCase();(data||[]).forEach(x=>{if(!sess&&x.name&&(x.name.toLowerCase().includes(nm)||nm.includes(x.name.toLowerCase())))sess=x;});}catch(e){}
+ if(!sess){el.innerHTML=wrap('<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:6px;font-size:13px">No Live Break session found yet for <b>'+esc(show.name)+'</b>. Modeled revenue '+money(modeledRev)+(modeledNet!=null?' · net '+money(modeledNet):'')+' — actuals appear once you run it.</div>');return;}
+ let slots=[];try{const{data}=await sb.from('e10_break_slots').select('price,state').eq('session_id',sess.id);slots=data||[];}catch(e){}
+ const sold=slots.filter(s=>s.state==='sold'),priced=sold.filter(s=>+s.price>0),actualRev=priced.reduce((a,s)=>a+(+s.price||0),0);
+ const varPct=modeledRev>0&&priced.length?((actualRev-modeledRev)/modeledRev*100):null;
+ const pc=v=>v>=0?'#0a8a4a':'#e8332b';
+ let body=`<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-top:10px">
+   <div class="metric"><div class="n" style="font-size:18px">${money(modeledRev)}</div><div class="l">Modeled revenue</div></div>
+   <div class="metric"><div class="n" style="font-size:18px">${priced.length?money(actualRev):'—'}</div><div class="l">Actual sold (${priced.length}/${slots.length} priced)</div></div>
+   ${varPct!=null?`<div class="metric"><div class="n" style="font-size:18px;color:${pc(varPct)}">${varPct>=0?'+':''}${varPct.toFixed(0)}%</div><div class="l">Variance</div></div>`:''}</div>`;
+ if(!priced.length)body+=`<div class="lab" style="margin-top:8px;text-transform:none;letter-spacing:0;font-size:12.5px">Session <b>${esc(sess.name)}</b> found — ${sold.length} spot(s) marked sold but no per-spot price captured. Enter sale prices on the Live Break spots to enable full reconciliation.</div>`;
+ el.innerHTML=wrap(body);
 }
 function clearSchedule(){if(!canEditScoped())return roGuard();if(confirm('Replace current schedule?')){S.shows={};save();renderGen();}}
 function toggleDash(k,v){if(!canEditScoped()){roGuard();dOverview();return;}S.dashCfg[k]=v;save();dOverview();}
@@ -514,15 +580,16 @@ function saveBreak(){if(!BK._last)return;if(!canEditScoped())return roGuard();
  S.breaks.unshift({id:'bk'+Date.now(),name:($('bName').value.trim()||'Break model'),ts:Date.now(),
    slots:BK._last.slots,tiers:BK._last.tiers,gross:BK._last.gross,
    economics:BK._last.economics,rows:BK._last.rows,
-   inputs:{products:BK.products.slice(),chases:BK.chases.slice(),auctions:BK.auctions.slice(),cost:BK.cost},
+   inputs:{products:BK.products.slice(),chases:BK.chases.slice(),auctions:BK.auctions.slice(),cost:BK.cost,
+     format:BK.format,spots:BK.spots,feesPct:BK.feesPct,shipPer:BK.shipPer,targetMargin:BK.targetMargin,spotPrice:BK.spotPrice,priceMode:BK.priceMode},
    invItems:BK.invItems.slice()});
  save();renderBreakHist();const nm=$('bName');if(nm)nm.value='';toast('Saved break model');}
 function renderBreakHist(){const el=$('bkHist');if(!el)return;
  el.innerHTML=(S.breaks||[]).length?`<div class="egrid wide"><table><tr><th>Break model</th><th>Details</th><th></th></tr>${S.breaks.map(b=>`<tr><td>📊 ${esc(b.name)}</td><td class="lab" style="text-transform:none;letter-spacing:0">${b.slots} slots · ${b.tiers} tiers · exp ${money(b.gross)}${b.economics?' · profit '+money(b.economics.profit):''}${(b.invItems&&b.invItems.length)?' · '+b.invItems.length+' inv':''}</td><td><div class="actions"><button class="btn sm" onclick="reopenBreak('${b.id}')">Reopen</button><button class="btn sm" onclick="dupBreak('${b.id}')">Duplicate</button><button class="btn sm" onclick="renameBreak('${b.id}')">Rename</button><select onchange="attachBreakToShow('${b.id}',this.value);this.value=''" style="max-width:150px;font-size:12px">${showPickerOptions('')}</select><button class="btn x" onclick="delBreakById('${b.id}')">✕</button></div></td></tr>`).join('')}</table></div>`:'<div style="color:var(--mut);font-size:13px">No saved models yet. Build one above, name it, then Save model.</div>';}
-function reopenBreak(id){const b=(S.breaks||[]).find(x=>x.id===id);if(!b)return;
- if(b.inputs){BK.products=(b.inputs.products||[]).slice();BK.chases=(b.inputs.chases||[]).slice();BK.auctions=(b.inputs.auctions||[]).slice();BK.cost=+b.inputs.cost||0;}
- else{BK.products=[];BK.chases=[];BK.auctions=[];BK.cost=0;}
- BK.invItems=(b.invItems||[]).slice();BK._preloadNote='Reopened “'+b.name+'”';dModeler();toast('Reopened '+b.name);}
+function reopenBreak(id){const b=(S.breaks||[]).find(x=>x.id===id);if(!b)return;const q=b.inputs||{};
+ BK.products=(q.products||[]).slice();BK.chases=(q.chases||[]).slice();BK.auctions=(q.auctions||[]).slice();BK.cost=+q.cost||0;
+ BK.format=q.format||'tiered';BK.spots=q.spots!=null?q.spots:null;BK.feesPct=q.feesPct!=null?q.feesPct:9;BK.shipPer=q.shipPer!=null?q.shipPer:0;BK.targetMargin=q.targetMargin!=null?q.targetMargin:35;BK.spotPrice=q.spotPrice!=null?q.spotPrice:null;BK.priceMode=q.priceMode||'margin';
+ BK.invItems=(b.invItems||[]).slice();BK._modelId=id;BK._preloadNote='Reopened “'+b.name+'”';dModeler();toast('Reopened '+b.name);}
 function dupBreak(id){if(!canEditScoped())return roGuard();const b=(S.breaks||[]).find(x=>x.id===id);if(!b)return;const c=JSON.parse(JSON.stringify(b));c.id='bk'+Date.now();c.name=b.name+' (copy)';c.ts=Date.now();S.breaks.unshift(c);save();renderBreakHist();}
 function renameBreak(id){if(!canEditScoped())return roGuard();const b=(S.breaks||[]).find(x=>x.id===id);if(!b)return;const v=prompt('Rename break model',b.name);if(v==null)return;b.name=v.trim()||b.name;save();renderBreakHist();}
 function delBreakById(id){if(!canEditScoped())return roGuard();S.breaks=(S.breaks||[]).filter(x=>x.id!==id);save();renderBreakHist();}
@@ -1206,8 +1273,9 @@ async function liveStart(){const name=($('liveName')&&$('liveName').value.trim()
  LIVE.session=data;LIVE.slots=[];await liveEvent('session_started',null,{name});
  if(seedModel){const rows=(seedModel.rows&&seedModel.rows.length)?seedModel.rows:null;
    const n=rows?rows.length:Math.max(1,+seedModel.slots||1);
-   for(let i=0;i<n;i++){const label=rows?(rows[i].label||('Spot '+(i+1))):('Spot '+(i+1));
-     try{const{data:sl}=await sb.from('e10_break_slots').insert({session_id:LIVE.session.id,label,position:i}).select().maybeSingle();if(sl)LIVE.slots.push(sl);}catch(e){}}}
+   for(let i=0;i<n;i++){const row=rows?rows[i]:null;const label=row?(row.label||('Spot '+(i+1))):('Spot '+(i+1));
+     const ins={session_id:LIVE.session.id,label,position:i};if(row){if(row.price!=null)ins.price=row.price;if(row.tier)ins.tier=row.tier;}
+     try{const{data:sl}=await sb.from('e10_break_slots').insert(ins).select().maybeSingle();if(sl)LIVE.slots.push(sl);}catch(e){}}}
  LIVE_SEED=null;liveSubscribe();renderLive();toast('Live break started'+(seedModel?' — seeded '+LIVE.slots.length+' spots':''));
 }
 async function liveEnd(){if(!LIVE.session||!confirm('End this live break session?'))return;
@@ -1220,8 +1288,9 @@ async function liveAddSlot(){if(!LIVE.session)return;const label=($('slotLabel')
 }
 async function liveAssign(id){const sl=LIVE.slots.find(x=>x.id===id);if(!sl)return;
  const label=$('al_'+id)?$('al_'+id).value.trim():sl.label;const handle=$('ah_'+id)?$('ah_'+id).value.trim():sl.buyer_handle;
- try{await sb.from('e10_break_slots').update({label,buyer_handle:handle||null,updated_at:new Date().toISOString()}).eq('id',id);}catch(e){toast(e.message);return;}
- sl.label=label;sl.buyer_handle=handle;await liveEvent('assigned',id,{label,buyer_handle:handle});toast('Spot saved');renderLive();
+ const pe=$('pr_'+id),price=pe?(pe.value===''?null:+pe.value||0):(sl.price!=null?sl.price:null);
+ try{await sb.from('e10_break_slots').update({label,buyer_handle:handle||null,price,updated_at:new Date().toISOString()}).eq('id',id);}catch(e){toast(e.message);return;}
+ sl.label=label;sl.buyer_handle=handle;sl.price=price;await liveEvent('assigned',id,{label,buyer_handle:handle,price});toast('Spot saved');renderLive();
 }
 async function liveSlotState(id,state){const sl=LIVE.slots.find(x=>x.id===id);if(!sl)return;
  try{await sb.from('e10_break_slots').update({state,updated_at:new Date().toISOString()}).eq('id',id);}catch(e){toast(e.message);return;}
@@ -1252,11 +1321,13 @@ function liveStartHTML(){const models=(S.breaks||[]);const seed=LIVE_SEED;const 
 }
 function liveActiveHTML(){const s=LIVE.session;const dir=liveDirUrl();const overlayUrl=dir+'overlay.html?code='+s.share_code;const companionUrl=dir+'companion.html';
  const sold=LIVE.slots.filter(x=>x.state==='sold').length,avail=LIVE.slots.filter(x=>x.state==='available').length;
+ const soldRev=LIVE.slots.filter(x=>x.state==='sold').reduce((a,x)=>a+(+x.price||0),0);
  return `<div class="hero"><div><h1>${esc(s.name)}</h1><div class="sub">Live break in progress · share code <b class="mono">${esc(s.share_code)}</b></div></div><button class="btn x" onclick="liveEnd()">End session</button></div>
  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-bottom:14px">
    <div class="metric"><div class="n">${LIVE.slots.length}</div><div class="l">Spots</div></div>
    <div class="metric"><div class="n">${sold}</div><div class="l">Sold</div></div>
-   <div class="metric"><div class="n">${avail}</div><div class="l">Available</div></div></div>
+   <div class="metric"><div class="n">${avail}</div><div class="l">Available</div></div>
+   <div class="metric"><div class="n">${money(soldRev)}</div><div class="l">Sold revenue</div></div></div>
  <div class="card" style="margin-bottom:14px"><div class="row" style="gap:10px;align-items:center;flex-wrap:wrap">
    <button class="btn ${s.stash_or_pass?'v':''}" onclick="liveToggleStash()">Stash-or-pass: <b>${s.stash_or_pass?'ON':'OFF'}</b></button>
    <button class="btn ${s.case_hit?'d':''}" onclick="liveCaseHit()">${s.case_hit?'🔥 CASE HIT — live':'Flag case hit'}</button>
@@ -1267,14 +1338,15 @@ function liveActiveHTML(){const s=LIVE.session;const dir=liveDirUrl();const over
    <div class="lab" style="margin-top:6px">Add the overlay as an OBS <b>Browser</b> source (transparent). Viewers open the companion, sign in, and link their Whatnot handle once.</div></div>
  <div class="card"><div class="row" style="justify-content:space-between"><h3 style="font-size:15px">Spots (${LIVE.slots.length})</h3></div>
    <div class="row" style="margin-top:8px;gap:6px"><input id="slotLabel" placeholder="Team / character (e.g. Charizard, Team 3)" style="flex:2" onkeydown="if(event.key==='Enter')liveAddSlot()"><button class="btn sm" onclick="liveAddSlot()">+ Add spot</button></div>
-   <div class="egrid wide" style="margin-top:10px"><table><tr><th>#</th><th>Team / label</th><th>Buyer (Whatnot)</th><th>State</th><th>Case</th><th></th></tr>
-   ${LIVE.slots.map((sl,i)=>liveSlotRow(sl,i)).join('')||`<tr><td colspan="6" style="color:var(--mut)">No spots yet — add one above.</td></tr>`}</table></div></div>`;
+   <div class="egrid wide" style="margin-top:10px"><table><tr><th>#</th><th>Team / label</th><th>Buyer (Whatnot)</th><th>Sold $</th><th>State</th><th>Case</th><th></th></tr>
+   ${LIVE.slots.map((sl,i)=>liveSlotRow(sl,i)).join('')||`<tr><td colspan="7" style="color:var(--mut)">No spots yet — add one above.</td></tr>`}</table></div></div>`;
 }
 function liveSlotRow(sl,i){const st=sl.state;
  return `<tr>
   <td class="mono">${i+1}</td>
   <td><input id="al_${sl.id}" value="${esc(sl.label||'')}" style="min-width:150px"></td>
   <td><input id="ah_${sl.id}" value="${esc(sl.buyer_handle||'')}" placeholder="@handle" style="width:130px"></td>
+  <td><input id="pr_${sl.id}" type="number" value="${sl.price!=null?sl.price:''}" placeholder="$" style="width:72px" title="Sale price — captured on Save"></td>
   <td><select onchange="liveSlotState('${sl.id}',this.value)">${['available','sold','held'].map(x=>`<option ${x===st?'selected':''}>${x}</option>`).join('')}</select></td>
   <td style="text-align:center"><button class="btn x" style="color:${sl.case_hit?'var(--red)':'var(--mut2)'}" onclick="liveSlotCaseHit('${sl.id}')">${sl.case_hit?'🔥':'○'}</button></td>
   <td><button class="btn sm" onclick="liveAssign('${sl.id}')">Save</button> <button class="btn x" onclick="liveDelSlot('${sl.id}')">✕</button></td></tr>`;
