@@ -78,6 +78,11 @@ td{padding:8px 10px;border-bottom:1px solid var(--line)}
 .eseg button:last-child{border-right:none}
 .eseg button:hover{background:var(--surface2)}
 .eseg button.on{background:var(--ink);color:#fff}
+details.gcfg{position:relative;display:inline-block}
+details.gcfg>summary{list-style:none;cursor:pointer}details.gcfg>summary::-webkit-details-marker{display:none}
+.gpop{position:absolute;z-index:60;top:calc(100% + 4px);left:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 26px rgba(0,0,0,.14);padding:10px;min-width:240px;max-height:360px;overflow:auto}
+.gpop .grow{display:flex;align-items:center;gap:4px;font-size:12.5px;padding:2px 0}
+.gpop .grow .btn.x.sm{padding:0 5px}
 .ov{position:fixed;inset:0;background:#0008;display:none;align-items:center;justify-content:center;z-index:60;padding:18px}
 .modal{background:var(--surface);border-radius:var(--r);padding:22px;max-width:520px;width:100%;max-height:88vh;overflow:auto}
 .hero{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:14px}
@@ -545,11 +550,21 @@ function uploadAttach(inp){const f=inp.files[0];if(!f)return;const big=f.size>12
 
 /* ---------- INVENTORY & DATA HUB ---------- */
 const INVCATS=['Box','Case','ETB / Sealed','Pack','Raw card','Slab','Other'];
+const TPG=['PSA','BGS','SGC','CGC','TAG']; // third-party graders
+/* Parse a legacy free-text cond like "PSA 9" / "SGC 9.5" into structured grade fields.
+   Non-TPG values ("Sealed","LP","NM","PSA mixed") return null and stay in cond — never drop data. */
+function parseGrade(cond){const m=(cond||'').trim().match(/^(PSA|BGS|SGC|CGC|TAG)\s*([0-9]{1,2}(?:\.[05])?)$/i);return m?{gradingCompany:m[1].toUpperCase(),grade:m[2]}:null;}
 let dataTab='overview';
 let exCopyRef=''; // Whatnot Export: which show's attached copy to prefill
 // Inventory list controls — persisted in localStorage so views survive reloads
 let invSearch=localStorage.getItem('e10_invSearch')||'',invCatF=localStorage.getItem('e10_invCatF')||'',invSetF=localStorage.getItem('e10_invSetF')||'',invStatusF=localStorage.getItem('e10_invStatusF')||'all',invSort=(()=>{try{return JSON.parse(localStorage.getItem('e10_invSort'))||{col:'name',dir:1};}catch(e){return {col:'name',dir:1};}})();
-function invPersist(){try{localStorage.setItem('e10_invSearch',invSearch);localStorage.setItem('e10_invCatF',invCatF);localStorage.setItem('e10_invSetF',invSetF);localStorage.setItem('e10_invStatusF',invStatusF);localStorage.setItem('e10_invSort',JSON.stringify(invSort));}catch(e){}}
+let invGCF=localStorage.getItem('e10_invGCF')||'',invGradeMin=localStorage.getItem('e10_invGradeMin')||'',invYearF=localStorage.getItem('e10_invYearF')||'';
+let invCols=(()=>{try{return JSON.parse(localStorage.getItem('e10_inv_cols'))||null;}catch(e){return null;}})();
+let invViews=(()=>{try{return JSON.parse(localStorage.getItem('e10_inv_views'))||[];}catch(e){return [];}})();
+let invActiveView=-1; // session-only: which saved view is currently selected
+function invPersist(){try{localStorage.setItem('e10_invSearch',invSearch);localStorage.setItem('e10_invCatF',invCatF);localStorage.setItem('e10_invSetF',invSetF);localStorage.setItem('e10_invStatusF',invStatusF);localStorage.setItem('e10_invGCF',invGCF);localStorage.setItem('e10_invGradeMin',invGradeMin);localStorage.setItem('e10_invYearF',invYearF);localStorage.setItem('e10_invSort',JSON.stringify(invSort));}catch(e){}}
+function invColsPersist(){try{localStorage.setItem('e10_inv_cols',JSON.stringify(invVisibleKeys()));}catch(e){}}
+function invViewsPersist(){try{localStorage.setItem('e10_inv_views',JSON.stringify(invViews));}catch(e){}}
 function dataHub(){
  const tabs=[['overview','Overview'],['inventory','Inventory'],['checklists','Checklists'],['reports','Reports'],['export','Whatnot Export'],['lists','Lists & Settings']];
  if(ROLE==='admin')tabs.push(['team','Team']);
@@ -581,33 +596,70 @@ function dOverview(){const t=invTotals();const cat=Object.entries(t.byCat).map((
  $('dtc').innerHTML=h;}
 function ownerOpts(sel){let opts=`<option value="">Universal / unassigned</option>`;const emails=MEMBERS.map(m=>m.email);if(sel&&!emails.includes(sel))opts+=`<option value="${esc(sel)}" selected>${esc(sel)}</option>`;opts+=MEMBERS.map(m=>`<option value="${esc(m.email)}" ${m.email===sel?'selected':''}>${esc(m.display_name||m.email)}</option>`).join('');return opts;}
 function invRollup(items){items=items||invView();let cost=0,market=0,committed=0,free=0,aging=0;items.forEach(i=>{const q=+i.qty||0,v=+i.value||0,c=+i.cost||0;cost+=c*q;market+=v*q;committed+=v*invReserved(i);free+=v*invAvailable(i);if(invAge(i)>30&&invAvailable(i)>0)aging+=v*q;});return{cost,market,gain:market-cost,committed,free,aging};}
+/* ===== Configurable data-grid module: column chooser + saved views =====
+   Driven by a descriptor (INV_COLS below). Each column: {key,label,type:'num'|'text',core,sortable,
+   sortVal(row), cell(row,admin)}. Reuse on another grid by supplying its own column descriptor +
+   its own state/localStorage keys (see extension note near dInventory). */
+const INV_COLS=[
+ {key:'name',label:'Item',core:true,type:'text',sortable:true,sortVal:i=>(i.name||'').toLowerCase(),
+  cell:(i,admin)=>{const sold=(+i.soldQty||0)>0?`<div class="lab" style="text-transform:none;letter-spacing:0;color:var(--mut2)">sold ${i.soldQty} · ${money(i.soldProceeds||0)}</div>`:'';return `<td><b>${esc(i.name)}</b> <span class="pill" style="margin:0">${esc(i.cat)}</span>${sold}</td>`;}},
+ {key:'cat',label:'Category',type:'text',sortable:true,sortVal:i=>(i.cat||'').toLowerCase(),cell:i=>`<td>${esc(i.cat||'')||'—'}</td>`},
+ {key:'set',label:'Set',type:'text',sortable:true,sortVal:i=>(i.set||'').toLowerCase(),cell:i=>`<td>${esc(i.set||'')||'—'}</td>`},
+ {key:'gradingCompany',label:'Grading',type:'text',sortable:true,sortVal:i=>(i.gradingCompany||''),cell:i=>`<td>${i.gradingCompany?`<span class="pill" style="margin:0">${esc(i.gradingCompany)}</span>`:'<span class="lab">—</span>'}</td>`},
+ {key:'grade',label:'Grade',type:'num',sortable:true,sortVal:i=>(i.grade!==''&&i.grade!=null)?+i.grade:-1,cell:i=>`<td class="mono">${(i.grade!==''&&i.grade!=null)?esc(''+i.grade):'—'}</td>`},
+ {key:'cardNumber',label:'Card #',type:'text',sortable:true,sortVal:i=>(i.cardNumber||''),cell:i=>`<td class="mono">${esc(i.cardNumber||'')||'—'}</td>`},
+ {key:'year',label:'Year',type:'num',sortable:true,sortVal:i=>+i.year||0,cell:i=>`<td class="mono">${i.year?esc(''+i.year):'—'}</td>`},
+ {key:'cond',label:'Condition',type:'text',sortable:true,sortVal:i=>(i.cond||'').toLowerCase(),cell:i=>`<td>${esc(i.cond||'')||'—'}</td>`},
+ {key:'onhand',label:'On hand / Free',type:'num',sortable:true,sortVal:i=>invAvailable(i),cell:i=>{const q=+i.qty||0,av=invAvailable(i),rsv=invReserved(i);return `<td class="mono">${q} / <b style="color:${av>0?'#0a8a4a':'var(--mut2)'}">${av}</b>${rsv?` <span class="lab">(${rsv} res)</span>`:''}</td>`;}},
+ {key:'qty',label:'Qty',type:'num',sortable:true,sortVal:i=>+i.qty||0,cell:i=>`<td class="mono">${+i.qty||0}</td>`},
+ {key:'reserved',label:'Reserved',type:'num',sortable:true,sortVal:i=>invReserved(i),cell:i=>`<td class="mono">${invReserved(i)}</td>`},
+ {key:'cost',label:'Unit cost',type:'num',sortable:true,sortVal:i=>+i.cost||0,cell:i=>`<td class="mono">${money(+i.cost||0)}</td>`},
+ {key:'market',label:'Market',type:'num',sortable:true,sortVal:i=>+i.value||0,cell:i=>`<td class="mono">${money(+i.value||0)}</td>`},
+ {key:'gain',label:'Gain',type:'num',sortable:true,sortVal:i=>((+i.value||0)-(+i.cost||0))*(+i.qty||1),cell:i=>{const g=((+i.value||0)-(+i.cost||0))*(+i.qty||0);return `<td class="mono" style="color:${g>=0?'#0a8a4a':'var(--red)'}">${g>=0?'+':''}${money(g)}</td>`;}},
+ {key:'alloc',label:'Allocated to',type:'text',sortable:true,sortVal:i=>invReserved(i),cell:(i,admin)=>{const pills=(i.reservations||[]).map(r=>`<span class="pill" style="margin:2px">${esc(r.showLabel||'show')} ×${r.qty}${(admin||r.streamerUid===MEID)?` <a onclick="releaseReservation('${i.id}','${r.showId}','${r.streamerUid}')" style="color:var(--red)">✕</a>`:''}</span>`).join('')||'<span class="lab">—</span>';return `<td>${pills}</td>`;}},
+ {key:'age',label:'Age',type:'num',sortable:true,sortVal:i=>invAge(i),cell:i=>{const age=invAge(i);return `<td class="mono" style="${age>30?'color:var(--red)':''}">${age}d${age>30?' ⚠':''}</td>`;}},
+ {key:'owner',label:'Owner',type:'text',sortable:true,sortVal:i=>ownerName(i.owner).toLowerCase(),cell:i=>`<td>${esc(ownerName(i.owner))}</td>`},
+ {key:'status',label:'Status',type:'text',sortable:true,sortVal:i=>{const av=invAvailable(i);return av>0?'0free':(invReserved(i)>0?'1reserved':((+i.soldQty||0)>0?'2sold':'3none'));},cell:i=>{const av=invAvailable(i),rsv=invReserved(i),sold=(+i.soldQty||0)>0;return `<td><span class="lab">${av>0?'Free':(rsv>0?'Reserved':(sold?'Sold':'—'))}</span></td>`;}},
+ {key:'actions',label:'',core:true,sortable:false,cell:(i,admin)=>`<td style="white-space:nowrap"><button class="btn sm" onclick="reserveModal('${i.id}')">Reserve</button> <button class="btn sm" onclick="sellModal('${i.id}')">Sold</button>${admin?` <select style="max-width:110px;font-size:11px" onchange="reassignInv('${i.id}',this.value)">${ownerOpts(i.owner)}</select>`:''} <button class="btn x" onclick="delInv('${i.id}')">✕</button></td>`},
+];
+const INV_DEFAULT_COLS=['name','cat','set','gradingCompany','grade','onhand','cost','market','gain','alloc','age','actions'];
+function invColDef(k){return INV_COLS.find(c=>c.key===k);}
+function invVisibleKeys(){let keys=(Array.isArray(invCols)&&invCols.length?invCols:INV_DEFAULT_COLS).filter(invColDef);
+ INV_COLS.filter(c=>c.core).forEach(c=>{if(!keys.includes(c.key)){if(c.key==='name')keys.unshift(c.key);else keys.push(c.key);}});return keys;}
+function invVisibleCols(){return invVisibleKeys().map(invColDef);}
 function invRows(){let rows=invView();const q=invSearch.trim().toLowerCase();
  if(q)rows=rows.filter(i=>(i.name||'').toLowerCase().includes(q));
  if(invCatF)rows=rows.filter(i=>i.cat===invCatF);
  if(invSetF)rows=rows.filter(i=>(i.set||'')===invSetF);
+ if(invGCF)rows=rows.filter(i=>(i.gradingCompany||'')===invGCF);
+ if(invGradeMin!=='')rows=rows.filter(i=>i.grade!==''&&i.grade!=null&&(+i.grade)>=(+invGradeMin));
+ if(invYearF!=='')rows=rows.filter(i=>(''+(i.year||''))===(''+invYearF));
  if(invStatusF==='onhand')rows=rows.filter(i=>(+i.qty||0)>0);
  else if(invStatusF==='sold')rows=rows.filter(i=>(+i.soldQty||0)>0);
  else if(invStatusF==='free')rows=rows.filter(i=>invAvailable(i)>0);
  else if(invStatusF==='reserved')rows=rows.filter(i=>invReserved(i)>0);
- const c=invSort.col,d=invSort.dir,key=i=>c==='name'?(i.name||'').toLowerCase():c==='onhand'?invAvailable(i):c==='cost'?(+i.cost||0):c==='market'?(+i.value||0):c==='gain'?((+i.value||0)-(+i.cost||0))*(+i.qty||1):c==='age'?invAge(i):0;
+ const sc=invColDef(invSort.col)||invColDef('name'),d=invSort.dir,key=sc.sortVal;
  return rows.slice().sort((a,b)=>{const ka=key(a),kb=key(b);return (ka<kb?-1:ka>kb?1:0)*d;});}
-function invSortTh(col,label){const on=invSort.col===col;return `<th class="srt${on?' on':''}" onclick="invSortSet('${col}')">${label}<span class="chev">${on?(invSort.dir>0?'▲':'▼'):'↕'}</span></th>`;}
+function invSortTh(c){if(!c.sortable)return `<th></th>`;const on=invSort.col===c.key;return `<th class="srt${on?' on':''}" onclick="invSortSet('${c.key}')">${esc(c.label)}<span class="chev">${on?(invSort.dir>0?'▲':'▼'):'↕'}</span></th>`;}
 function invSortSet(col){if(invSort.col===col)invSort.dir*=-1;else{invSort.col=col;invSort.dir=1;}renderInvList();}
-function invRowHTML(i,admin){const q=+i.qty||0,av=invAvailable(i),rsv=invReserved(i),g=((+i.value||0)-(+i.cost||0))*q,age=invAge(i);
- const pills=(i.reservations||[]).map(r=>`<span class="pill" style="margin:2px">${esc(r.showLabel||'show')} ×${r.qty}${(admin||r.streamerUid===MEID)?` <a onclick="releaseReservation('${i.id}','${r.showId}','${r.streamerUid}')" style="color:var(--red)">✕</a>`:''}</span>`).join('')||'<span class="lab">—</span>';
- const sold=(+i.soldQty||0)>0?`<div class="lab" style="text-transform:none;letter-spacing:0;color:var(--mut2)">sold ${i.soldQty} · ${money(i.soldProceeds||0)}</div>`:'';
- return `<tr>
-  <td><b>${esc(i.name)}</b> <span class="pill" style="margin:0">${esc(i.cat)}</span>${sold}</td>
-  <td class="mono">${q} / <b style="color:${av>0?'#0a8a4a':'var(--mut2)'}">${av}</b>${rsv?` <span class="lab">(${rsv} res)</span>`:''}</td>
-  <td class="mono">${money(+i.cost||0)}</td>
-  <td class="mono">${money(+i.value||0)}</td>
-  <td class="mono" style="color:${g>=0?'#0a8a4a':'var(--red)'}">${g>=0?'+':''}${money(g)}</td>
-  <td>${pills}</td>
-  <td class="mono" style="${age>30?'color:var(--red)':''}">${age}d${age>30?' ⚠':''}</td>
-  <td style="white-space:nowrap"><button class="btn sm" onclick="reserveModal('${i.id}')">Reserve</button> <button class="btn sm" onclick="sellModal('${i.id}')">Sold</button>${admin?` <select style="max-width:110px;font-size:11px" onchange="reassignInv('${i.id}',this.value)">${ownerOpts(i.owner)}</select>`:''} <button class="btn x" onclick="delInv('${i.id}')">✕</button></td></tr>`;}
-function renderInvList(){const box=$('invListBox');if(!box)return;invPersist();const admin=ROLE==='admin';const rows=invRows();
- box.innerHTML=`<div class="egrid wide" style="margin-top:12px"><table><tr>${invSortTh('name','Item')}${invSortTh('onhand','On hand / free')}${invSortTh('cost','Unit cost')}${invSortTh('market','Market')}${invSortTh('gain','Gain')}<th>Allocated to</th>${invSortTh('age','Age')}<th></th></tr>${rows.map(i=>invRowHTML(i,admin)).join('')||`<tr><td colspan="8" style="color:var(--mut)">No items match these filters.</td></tr>`}</table></div><div class="lab" style="margin-top:8px">${rows.length} shown · reservations hard-lock units to a show (app-enforced). ${admin?'Admin: reassign owner, reserve beyond free, release anyone.':'You can release only your own reservations.'}</div>`;}
-function dInventory(){const admin=ROLE==='admin';const rl=invRollup();const sets=[...new Set(S.inventory.map(i=>i.set).filter(Boolean))].sort();
+function renderInvList(){const box=$('invListBox');if(!box)return;invPersist();const admin=ROLE==='admin';const rows=invRows();const cols=invVisibleCols();
+ box.innerHTML=`<div class="egrid wide" style="margin-top:12px"><table><tr>${cols.map(invSortTh).join('')}</tr>${rows.map(i=>`<tr>${cols.map(c=>c.cell(i,admin)).join('')}</tr>`).join('')||`<tr><td colspan="${cols.length}" style="color:var(--mut)">No items match these filters.</td></tr>`}</table></div><div class="lab" style="margin-top:8px">${rows.length} shown · reservations hard-lock units to a show (app-enforced). ${admin?'Admin: reassign owner, reserve beyond free, release anyone.':'You can release only your own reservations.'}</div>`;}
+/* column chooser */
+function invColMenuHTML(){const vis=invVisibleKeys();const hidden=INV_COLS.filter(c=>!vis.includes(c.key));
+ const row=(c,idx,shown)=>`<div class="grow"><label style="flex:1;display:flex;align-items:center;gap:6px;margin:0"><input type="checkbox" style="width:auto" ${shown?'checked':''} ${c.core?'disabled':''} onchange="invToggleCol('${c.key}',this.checked)"> ${esc(c.label||'Actions')}${c.core?' <span class="lab">core</span>':''}</label>${(shown&&!c.core)?`<button class="btn x sm" ${idx===0?'disabled':''} onclick="invMoveCol('${c.key}',-1)">▲</button><button class="btn x sm" onclick="invMoveCol('${c.key}',1)">▼</button>`:''}</div>`;
+ return `<div class="lab" style="margin-bottom:4px">Shown (order with ▲▼)</div>${vis.map((k,idx)=>row(invColDef(k),idx,true)).join('')}${hidden.length?`<div class="lab" style="margin:8px 0 4px">Add column</div>${hidden.map(c=>row(c,0,false)).join('')}`:''}<div class="row" style="margin-top:8px"><button class="btn x sm" onclick="invResetCols()">Reset to default</button></div>`;}
+function renderInvCols(){const el=$('invColsMenu');if(el)el.innerHTML=invColMenuHTML();}
+function invToggleCol(key,on){const c=invColDef(key);if(!c||c.core)return;let keys=invVisibleKeys();if(on){if(!keys.includes(key)){const ai=keys.indexOf('actions');keys.splice(ai>=0?ai:keys.length,0,key);}}else keys=keys.filter(k=>k!==key);invCols=keys;invColsPersist();renderInvCols();renderInvList();}
+function invMoveCol(key,dir){let keys=invVisibleKeys();const i=keys.indexOf(key),j=i+dir;if(i<0||j<0||j>=keys.length||invColDef(key).core||invColDef(keys[j]).core)return;[keys[i],keys[j]]=[keys[j],keys[i]];invCols=keys;invColsPersist();renderInvCols();renderInvList();}
+function invResetCols(){invCols=null;localStorage.removeItem('e10_inv_cols');renderInvCols();renderInvList();}
+/* saved filter views */
+function invFilterState(){return {search:invSearch,cat:invCatF,set:invSetF,status:invStatusF,gc:invGCF,gradeMin:invGradeMin,year:invYearF,owner:invFilter};}
+function invSaveView(){const name=prompt('Name this view (e.g. "PSA 10s", "Aging slabs", "Free sealed boxes")');if(name==null||!name.trim())return;invViews.push({name:name.trim(),filters:invFilterState(),cols:invVisibleKeys(),sort:{col:invSort.col,dir:invSort.dir}});invActiveView=invViews.length-1;invViewsPersist();dInventory();toast('View saved');}
+function invApplyView(idx){const v=invViews[+idx];if(!v)return;invActiveView=+idx;const f=v.filters||{};invSearch=f.search||'';invCatF=f.cat||'';invSetF=f.set||'';invStatusF=f.status||'all';invGCF=f.gc||'';invGradeMin=f.gradeMin||'';invYearF=f.year||'';if(f.owner){invFilter=f.owner;localStorage.setItem('e10_invfilter',invFilter);}if(Array.isArray(v.cols)&&v.cols.length){invCols=v.cols.slice();invColsPersist();}if(v.sort)invSort={col:v.sort.col,dir:v.sort.dir};invPersist();dInventory();toast('Applied “'+v.name+'”');}
+function invRenameView(idx){const v=invViews[+idx];if(!v)return;const n=prompt('Rename view',v.name);if(n==null)return;v.name=n.trim()||v.name;invViewsPersist();dInventory();}
+function invDeleteView(idx){const v=invViews[+idx];if(!v||!confirm('Delete view “'+v.name+'”?'))return;invViews.splice(+idx,1);invActiveView=-1;invViewsPersist();dInventory();}
+function invResetFilters(){invSearch='';invCatF='';invSetF='';invStatusF='all';invGCF='';invGradeMin='';invYearF='';invActiveView=-1;invPersist();dInventory();toast('Filters reset');}
+function dInventory(){const admin=ROLE==='admin';const rl=invRollup();const sets=[...new Set(S.inventory.map(i=>i.set).filter(Boolean))].sort();const years=[...new Set(S.inventory.map(i=>i.year).filter(Boolean))].sort();
  let h=`<div class="card"><h3 style="font-size:15px">Add inventory</h3>
    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(128px,1fr));margin-top:10px">
    <div><label>Name</label><input id="ivN" placeholder="e.g. Ascended Heroes Box"></div>
@@ -616,7 +668,11 @@ function dInventory(){const admin=ROLE==='admin';const rl=invRollup();const sets
    <div><label>Qty</label><input id="ivQ" type="number" value="1"></div>
    <div><label>Unit cost $</label><input id="ivCo" type="number" placeholder="0"></div>
    <div><label>Market $</label><input id="ivV" type="number" placeholder="0"></div>
-   <div><label>Condition/grade</label><input id="ivG" placeholder="PSA 10 / NM / Sealed"></div>
+   <div><label>Grading co.</label><select id="ivGC"><option value="">— raw/sealed —</option>${TPG.map(g=>`<option>${g}</option>`).join('')}</select></div>
+   <div><label>Grade</label><input id="ivGrade" placeholder="10 / 9.5"></div>
+   <div><label>Card #</label><input id="ivNum" placeholder="199/191"></div>
+   <div><label>Year</label><input id="ivYear" type="number" placeholder="2023"></div>
+   <div><label>Condition</label><input id="ivG" placeholder="NM / LP / Sealed"></div>
    <div><label>Image</label><div class="row" style="gap:6px"><input id="ivImg" placeholder="URL or upload" style="min-width:0"><button class="btn sm" onclick="invUploadImg()">⬆</button></div><img id="ivImgPv" style="display:none;height:40px;border-radius:5px;margin-top:4px;border:1px solid var(--line)"></div>
    <div><label>Owner</label><select id="ivOwner">${ownerOpts(ME)}</select></div></div>
    <div class="row" style="margin-top:12px"><button class="btn v" onclick="addInv()">+ Add item</button><button class="btn sm" onclick="downloadInvTemplate()">↓ CSV template</button><button class="btn sm" onclick="$('ivCSV').click()">Import CSV</button><input id="ivCSV" type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="importInv(this)"></div></div>`;
@@ -628,14 +684,22 @@ function dInventory(){const admin=ROLE==='admin';const rl=invRollup();const sets
    <div class="metric"><div class="n" style="color:${rl.aging>0?'var(--red)':'inherit'}">${money(rl.aging)}</div><div class="l">Aging &gt;30d idle</div></div>
    <div class="metric"><div class="n" style="color:${realizedMargin(invView())>=0?'#0a8a4a':'var(--red)'}">${realizedMargin(invView())>=0?'+':''}${money(realizedMargin(invView()))}</div><div class="l">Realized (sold)</div></div></div>`;
  h+=`<div class="card" style="margin-top:16px"><div class="etool">
-     <div style="flex:2;min-width:150px"><label>Search</label><input id="invSearchBox" value="${esc(invSearch)}" placeholder="item name…" oninput="invSearch=this.value;renderInvList()"></div>
+     <div style="flex:2;min-width:140px"><label>Search</label><input id="invSearchBox" value="${esc(invSearch)}" placeholder="item name…" oninput="invSearch=this.value;renderInvList()"></div>
      <div><label>Owner</label><div class="eseg"><button class="${invFilter==='mine'?'on':''}" onclick="if(invFilter!=='mine'){invFilter='mine';localStorage.setItem('e10_invfilter',invFilter);dInventory();}">Mine</button><button class="${invFilter==='all'?'on':''}" onclick="if(invFilter!=='all'){invFilter='all';localStorage.setItem('e10_invfilter',invFilter);dInventory();}">Everyone</button></div></div>
      <div><label>Category</label><select onchange="invCatF=this.value;renderInvList()"><option value="">All</option>${INVCATS.map(c=>`<option ${invCatF===c?'selected':''}>${c}</option>`).join('')}</select></div>
      <div><label>Set</label><select onchange="invSetF=this.value;renderInvList()"><option value="">All</option>${sets.map(s=>`<option ${invSetF===s?'selected':''}>${esc(s)}</option>`).join('')}</select></div>
+     <div><label>Grading</label><select onchange="invGCF=this.value;renderInvList()"><option value="">All</option>${TPG.map(g=>`<option ${invGCF===g?'selected':''}>${g}</option>`).join('')}</select></div>
+     <div><label>Grade ≥</label><input type="number" step="0.5" value="${esc(invGradeMin)}" placeholder="any" style="max-width:80px" oninput="invGradeMin=this.value;renderInvList()"></div>
+     <div><label>Year</label><select onchange="invYearF=this.value;renderInvList()"><option value="">All</option>${years.map(y=>`<option ${(''+invYearF)===(''+y)?'selected':''}>${esc(''+y)}</option>`).join('')}</select></div>
      <div><label>Status</label><select onchange="invStatusF=this.value;renderInvList()">${[['all','All'],['onhand','On hand'],['free','Has free'],['reserved','Reserved'],['sold','Sold']].map(([v,l])=>`<option value="${v}" ${invStatusF===v?'selected':''}>${l}</option>`).join('')}</select></div>
-   </div><div id="invListBox"></div></div>`;
+   </div>
+   <div class="etool" style="margin-top:8px;align-items:center">
+     <details class="gcfg"><summary class="btn sm">⚙ Columns</summary><div class="gpop" id="invColsMenu"></div></details>
+     <div><label>Views</label><div class="row" style="gap:6px;align-items:center"><select id="invViewSel" onchange="invApplyView(this.value)" style="max-width:150px"><option value="">— saved views —</option>${invViews.map((v,i)=>`<option value="${i}" ${invActiveView===i?'selected':''}>${esc(v.name)}</option>`).join('')}</select><button class="btn sm" onclick="invSaveView()">Save view</button><button class="btn sm" onclick="invResetFilters()">Reset</button>${invViews.length?`<button class="btn x sm" title="Rename selected view" onclick="invActiveView>=0?invRenameView(invActiveView):toast('Select a view first')">✎</button><button class="btn x sm" title="Delete selected view" onclick="invActiveView>=0?invDeleteView(invActiveView):toast('Select a view first')">✕</button>`:''}</div></div>
+   </div>
+   <div id="invListBox"></div></div>`;
  h+=buyListHTML();
- $('dtc').innerHTML=h;renderInvList();}
+ $('dtc').innerHTML=h;renderInvCols();renderInvList();}
 /* Buy list: aggregate demand BY SET across scheduled shows (break-model allocations + manual
    needs) vs free-to-break supply. Driven by real shows + real inventory, not a placeholder. */
 function buyListHTML(){
@@ -655,7 +719,9 @@ function buyListHTML(){
  return `<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Buy list from the schedule</h3>
    <div class="egrid"><table><tr><th>Set / product</th><th>Needed by</th><th>Demand</th><th>Free</th><th>Gap</th><th>~Order</th></tr>${rows}</table></div>
    <div class="row" style="justify-content:flex-end;margin-top:8px"><b>Projected order: ~${money(projected)}</b></div></div>`;}
-function addInv(){const n=$('ivN').value.trim();if(!n)return;const owner=($('ivOwner')&&$('ivOwner').value!=='')?$('ivOwner').value:(ROLE==='admin'&&$('ivOwner')?null:ME);S.inventory.push({id:'i'+Date.now(),name:n,cat:$('ivC').value,set:$('ivS').value,qty:+$('ivQ').value||1,cost:+$('ivCo').value||0,value:+$('ivV').value||0,cond:$('ivG').value,img:$('ivImg').value,owner});save();dInventory();toast('Added');}
+function addInv(){const n=$('ivN').value.trim();if(!n)return;const owner=($('ivOwner')&&$('ivOwner').value!=='')?$('ivOwner').value:(ROLE==='admin'&&$('ivOwner')?null:ME);
+ const gv=id=>{const el=$(id);return el?el.value.trim():'';};
+ S.inventory.push({id:'i'+Date.now(),name:n,cat:$('ivC').value,set:$('ivS').value,qty:+$('ivQ').value||1,cost:+$('ivCo').value||0,value:+$('ivV').value||0,gradingCompany:gv('ivGC'),grade:gv('ivGrade'),cardNumber:gv('ivNum'),year:gv('ivYear'),cond:gv('ivG'),img:$('ivImg').value,owner});save();dInventory();toast('Added');}
 function delInv(id){S.inventory=S.inventory.filter(x=>x.id!==id);save();dInventory();}
 function reassignInv(id,val){const it=S.inventory.find(x=>x.id===id);if(!it)return;it.owner=val||null;save();dInventory();toast('Reassigned to '+ownerName(it.owner));}
 /* ---- Reservations & sold — app-enforced hard lock via cloudCommitShared ---- */
@@ -711,9 +777,9 @@ function sellModal(itemId){const it=S.inventory.find(x=>x.id===itemId);if(!it)re
  $('ov').style.display='flex';}
 async function doSell(itemId){const q=$('slQty')?+$('slQty').value:1;const p=$('slAmt')?+$('slAmt').value:0;const res=await markSold(itemId,q,p);if(res&&res.ok)closeM();}
 function downloadInvTemplate(){const rows=[
- ['Name','Category','Set','Qty','Unit Cost','Market Value','Condition','Image URL','Owner'],
- ['Ascended Heroes Booster Box','Box','Ascended Heroes','1','89','140','Sealed','',''],
- ['Charizard ex SIR','Slab','Ascended Heroes','1','120','260','PSA 10','','']];
+ ['Name','Category','Set','Grading Company','Grade','Card #','Year','Qty','Unit Cost','Market Value','Condition','Image URL','Owner'],
+ ['Ascended Heroes Booster Box','Box','Ascended Heroes','','','','2024','1','89','140','Sealed','',''],
+ ['Charizard ex SIR','Slab','Ascended Heroes','PSA','10','199/191','2024','1','120','260','','','']];
  csvDL('element10_inventory_template.csv',rows);toast('Template downloaded — keep the header row, then Import CSV');}
 /* ---- import validation (shared) ---- */
 let _impProceed=null;
@@ -727,7 +793,8 @@ function importReport(title,msg,errors,onProceed){
  $('modal').innerHTML=h;$('ov').style.display='flex';
 }
 function validateInv(p){const idx=rx=>p.columns.findIndex(c=>new RegExp(rx,'i').test(c));
- const ni=idx('name|title|card|product'),ci=idx('categor|type'),si=idx('^set'),qi=idx('qty|quantity'),coi=idx('cost|paid'),vi=idx('value|market|price'),gi=idx('cond|grade'),imi=idx('image|img|url'),oi=idx('owner|assigned|streamer');
+ const ni=idx('^name|title|product'),ci=idx('categor|type'),si=idx('^set'),qi=idx('qty|quantity'),coi=idx('cost|paid'),vi=idx('value|market|price'),gi=idx('^cond'),imi=idx('image|img|url'),oi=idx('owner|assigned|streamer');
+ const gci=idx('grading'),gri=idx('^grade'),cni=idx('card ?#|card ?number|number'),yri=idx('^year');
  const missing=[];if(ni<0)missing.push('Name');
  const errors=[],valid=[];
  p.rows.forEach((rw,i)=>{if(rw.every(c=>!(''+(c==null?'':c)).trim()))return;const rn=i+2,er=[];
@@ -738,8 +805,12 @@ function validateInv(p){const idx=rx=>p.columns.findIndex(c=>new RegExp(rx,'i').
    const cost=num(coi,'Unit Cost'),value=num(vi,'Market Value');
    const img=imi>=0?(rw[imi]||'').trim():'';if(img&&!/^https?:\/\//i.test(img))er.push(['Image URL','must start with http:// or https://']);
    const owner=(oi>=0&&(rw[oi]||'').trim())?(rw[oi]||'').trim():ME;
+   let gradingCompany='';if(gci>=0&&(rw[gci]||'').trim()){const g=(rw[gci]||'').trim().toUpperCase();if(!TPG.includes(g))er.push(['Grading Company',`"${rw[gci].trim()}" must be one of: ${TPG.join(', ')} (or blank)`]);else gradingCompany=g;}
+   let grade='';if(gri>=0&&(rw[gri]||'').trim()){const g=(rw[gri]||'').trim();if(!/^([0-9]|10)(\.[05])?$/.test(g))er.push(['Grade',`"${g}" must be 0–10 (e.g. 9, 9.5, 10)`]);else grade=g;}
+   let year='';if(yri>=0&&(rw[yri]||'').trim()){const y=(rw[yri]||'').trim();if(!/^\d{4}$/.test(y)||+y<1996||+y>2035)er.push(['Year',`"${y}" must be a 4-digit year (1996–2035)`]);else year=y;}
+   const cardNumber=cni>=0?(rw[cni]||'').trim():'';
    if(er.length)er.forEach(([c,m])=>errors.push({row:rn,col:c,msg:m}));
-   else valid.push({id:'i'+Date.now()+i,name,cat,set:si>=0?(rw[si]||'').trim():'',qty,cost,value,cond:gi>=0?(rw[gi]||'').trim():'',img,owner});
+   else valid.push({id:'i'+Date.now()+i,name,cat,set:si>=0?(rw[si]||'').trim():'',gradingCompany,grade,cardNumber,year,qty,cost,value,cond:gi>=0?(rw[gi]||'').trim():'',img,owner});
  });
  return {missing,errors,valid};
 }
@@ -905,7 +976,10 @@ const SHARED_KEYS=['comments','todos','streamers','lists','attachments','checkli
 
 function blankShared(){return{comments:[],todos:[],streamers:['Trent'],lists:JSON.parse(JSON.stringify(DEF_LISTS)),attachments:[],checklists:[],inventory:[],repacks:[]};}
 function blankScoped(){return{shows:{},breaks:[],copySets:[],dashCfg:{catValue:true,costMarket:true,movement:true},sales:null};}
-function normShared(o){o=o||{};if(!o.comments)o.comments=[];if(!o.todos)o.todos=[];o.todos.forEach(t=>{if(t.desc==null)t.desc='';if(!t.comments)t.comments=[];});if(!o.streamers)o.streamers=['Trent'];if(!o.lists)o.lists=JSON.parse(JSON.stringify(DEF_LISTS));['characters','sets','formats','diff'].forEach(k=>{if(!o.lists[k])o.lists[k]=(DEF_LISTS[k]||[]).slice();});['attachments','checklists','inventory','repacks'].forEach(k=>{if(!o[k])o[k]=[];});o.inventory.forEach(it=>{if(!it.id)it.id='i'+Math.random().toString(36).slice(2);if(!('owner'in it))it.owner=null;if(!(+it.qty>=0))it.qty=(+it.qty||1);if(!Array.isArray(it.reservations))it.reservations=[];it.reservations.forEach(r=>{r.qty=+r.qty||0;});if(!it.addedAt)it.addedAt=Date.now();});o.repacks.forEach(p=>{if(!p.cards)p.cards=[];if(!p.pool)p.pool=[];});return o;}
+function normShared(o){o=o||{};if(!o.comments)o.comments=[];if(!o.todos)o.todos=[];o.todos.forEach(t=>{if(t.desc==null)t.desc='';if(!t.comments)t.comments=[];});if(!o.streamers)o.streamers=['Trent'];if(!o.lists)o.lists=JSON.parse(JSON.stringify(DEF_LISTS));['characters','sets','formats','diff'].forEach(k=>{if(!o.lists[k])o.lists[k]=(DEF_LISTS[k]||[]).slice();});['attachments','checklists','inventory','repacks'].forEach(k=>{if(!o[k])o[k]=[];});o.inventory.forEach(it=>{if(!it.id)it.id='i'+Math.random().toString(36).slice(2);if(!('owner'in it))it.owner=null;if(!(+it.qty>=0))it.qty=(+it.qty||1);if(!Array.isArray(it.reservations))it.reservations=[];it.reservations.forEach(r=>{r.qty=+r.qty||0;});if(!it.addedAt)it.addedAt=Date.now();
+  /* structured grade fields — backfill once, losslessly, from the free-text cond */
+  if(!('gradingCompany'in it)){it.gradingCompany='';it.grade=('grade'in it)?it.grade:'';const g=parseGrade(it.cond);if(g){it.gradingCompany=g.gradingCompany;it.grade=g.grade;it.cond='';}}
+  if(!('grade'in it))it.grade='';if(!('cardNumber'in it))it.cardNumber='';if(!('year'in it))it.year='';});o.repacks.forEach(p=>{if(!p.cards)p.cards=[];if(!p.pool)p.pool=[];});return o;}
 function normScoped(o){o=o||{};if(!o.shows)o.shows={};if(!o.breaks)o.breaks=[];if(!o.copySets)o.copySets=[];if(!o.dashCfg)o.dashCfg={catValue:true,costMarket:true,movement:true};if(!('sales'in o))o.sales=null;
  Object.keys(o.shows).forEach(k=>{(o.shows[k]||[]).forEach(s=>{if(!s.id)s.id='sh'+Math.random().toString(36).slice(2);if(s.notes==null)s.notes='';if(!('titleSet'in s))s.titleSet=null;if(!('breakModel'in s))s.breakModel=null;if(!Array.isArray(s.inventoryAlloc))s.inventoryAlloc=[];if(!('repackRef'in s))s.repackRef=null;if(!Array.isArray(s.needs))s.needs=[];});});
  o.breaks.forEach(b=>{if(!b.id)b.id='bk'+Math.random().toString(36).slice(2);if(!('ts'in b))b.ts=null;});
