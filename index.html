@@ -418,7 +418,7 @@ function renderBreak(){
   <div class="row" style="margin-top:6px"><input id="pName" placeholder="Product" style="flex:2"><input id="pSpots" type="number" placeholder="spots" style="flex:1"><input id="pVal" type="number" placeholder="pool $" style="flex:1"><button class="btn sm" onclick="addProd()">+</button></div>
   <div class="lab" style="margin-top:16px">Chase slabs / cards (bundled into tiered slots)</div><div id="chaseList"></div>
   <div class="row" style="margin-top:6px"><input id="cbName" placeholder="Chase (e.g. TR Mewtwo)" style="flex:2"><input id="cbVal" type="number" placeholder="$" style="flex:1"><button class="btn sm" onclick="addChase()">+</button></div>
-  ${S.checklists.length?`<div class="row" style="margin-top:8px"><select id="clSel" style="flex:2"><option value="">— load chases from checklist —</option>${S.checklists.map((c,i)=>`<option value="${i}">${esc(c.name)} (${c.rows.length})</option>`).join('')}</select><button class="btn sm" onclick="loadChecklistToBreak()">Load</button></div>`:`<div class="lab" style="margin-top:8px">Upload a checklist in <a onclick="go('data')">Data &amp; Lists</a> to load chases automatically.</div>`}
+  ${S.checklists.length?`<div class="row" style="margin-top:8px"><select id="clSel" style="flex:2"><option value="">— load chases from checklist —</option>${S.checklists.map((c,i)=>`<option value="${i}">${esc(c.name)} (${(c.cards||c.rows||[]).length})</option>`).join('')}</select><button class="btn sm" onclick="loadChecklistToBreak()">Load</button></div>`:`<div class="lab" style="margin-top:8px">Upload a checklist in <a onclick="go('data')">Data &amp; Lists</a> to load chases automatically.</div>`}
   <div class="lab" style="margin-top:16px">Solo auctions (each its own slot)</div><div id="aucList"></div>
   <div class="row" style="margin-top:6px"><input id="aName" placeholder="Auction item" style="flex:2"><input id="aVal" type="number" placeholder="$" style="flex:1"><button class="btn sm" onclick="addAuc()">+</button></div>
   <div class="lab" style="margin-top:16px">Pull from inventory (uses real cost &amp; market value)</div><div id="invList"></div>
@@ -456,11 +456,10 @@ function bkDelInv(i){const it=BK.invItems[i];if(!it)return;BK.invItems.splice(i,
 function addProd(){const n=$('pName').value.trim(),s=+$('pSpots').value,v=+$('pVal').value;if(!n||!s)return;BK.products.push({name:n,spots:s,val:v||0});$('pName').value=$('pSpots').value=$('pVal').value='';renderBKlists();calcBreak();}
 function addChase(){const n=$('cbName').value.trim(),v=+$('cbVal').value;if(!n||!v)return;BK.chases.push({name:n,val:v});$('cbName').value=$('cbVal').value='';renderBKlists();calcBreak();}
 function addAuc(){const n=$('aName').value.trim(),v=+$('aVal').value;if(!n||!v)return;BK.auctions.push({name:n,val:v});$('aName').value=$('aVal').value='';renderBKlists();calcBreak();}
-function loadChecklistToBreak(){const idx=$('clSel').value;if(idx==='')return;const cl=S.checklists[+idx];
- // find a name col and value col
- const vcol=cl.columns.findIndex(c=>/value|price|\$|market/i.test(c));const ncol=cl.columns.findIndex(c=>/name|card|title|chase|item/i.test(c));
- const nc=ncol<0?0:ncol, vc=vcol<0?1:vcol;let n=0;
- cl.rows.forEach(r=>{const nm=r[nc],val=parseFloat((r[vc]||'').toString().replace(/[^0-9.]/g,''));if(nm&&val>0){BK.chases.push({name:nm,val:val});n++;}});
+function loadChecklistToBreak(){const idx=$('clSel').value;if(idx==='')return;const cl=S.checklists[+idx];let n=0;
+ if(Array.isArray(cl.cards)&&cl.cards.length){cl.cards.forEach(c=>{const v=+c.value||0;if(c.name&&v>0){BK.chases.push({name:c.name,val:v});n++;}});}
+ else{const vcol=cl.columns.findIndex(c=>/value|price|\$|market/i.test(c)),ncol=cl.columns.findIndex(c=>/name|card|title|chase|item/i.test(c)),nc=ncol<0?0:ncol,vc=vcol<0?1:vcol;
+  cl.rows.forEach(r=>{const nm=r[nc],val=parseFloat((r[vc]||'').toString().replace(/[^0-9.]/g,''));if(nm&&val>0){BK.chases.push({name:nm,val:val});n++;}});}
  renderBKlists();calcBreak();toast(n+' chases loaded from '+cl.name);}
 function balance(items,n){const bins=Array.from({length:n},()=>({sum:0,items:[]}));items.slice().sort((a,b)=>b.val-a.val).forEach(it=>{bins.sort((a,b)=>a.sum-b.sum);bins[0].items.push(it);bins[0].sum+=it.val;});return bins;}
 function calcBreak(){
@@ -522,7 +521,7 @@ function rmStreamer(v){S.streamers=S.streamers.filter(x=>x!==v);save();renderDat
 function parseCSV(text){const lines=text.replace(/\r/g,'').split('\n').filter(l=>l.trim().length);
  const pl=l=>{const out=[];let cur='',q=false;for(let i=0;i<l.length;i++){const c=l[i];if(q){if(c=='"'){if(l[i+1]=='"'){cur+='"';i++;}else q=false;}else cur+=c;}else{if(c=='"')q=true;else if(c==','||c=='\t'){out.push(cur);cur='';}else cur+=c;}}out.push(cur);return out.map(x=>x.trim());};
  const rows=lines.map(pl);const columns=rows.shift()||[];return{columns,rows};}
-function downloadChecklistTemplate(){csvDL('element10_checklist_template.csv',[['Card Name','Card Number','Set','Rarity','Market Value'],['Charizard ex','006/197','Ascended Heroes','Special Illustration Rare','260'],['Pikachu','025/165','Pokémon 151','Common','2']]);toast('Template downloaded — keep the header row, then upload');}
+function downloadChecklistTemplate(){csvDL('element10_checklist_template.csv',[['Card Name','Card Number','Set','Rarity','Market Value','Chase'],['Charizard ex','006/197','Ascended Heroes','Special Illustration Rare','260','yes'],['Pikachu','025/165','Pokémon 151','Common','2','']]);toast('Template downloaded — keep the header row, then upload');}
 function validateChecklist(p){const idx=rx=>p.columns.findIndex(c=>new RegExp(rx,'i').test(c));
  const ni=idx('card ?name|^name$|name|title|card'),vi=idx('value|market|price');
  const missing=[];if(ni<0)missing.push('Card Name');
@@ -556,15 +555,41 @@ const TPG=['PSA','BGS','SGC','CGC','TAG']; // third-party graders
 function parseGrade(cond){const m=(cond||'').trim().match(/^(PSA|BGS|SGC|CGC|TAG)\s*([0-9]{1,2}(?:\.[05])?)$/i);return m?{gradingCompany:m[1].toUpperCase(),grade:m[2]}:null;}
 let dataTab='overview';
 let exCopyRef=''; // Whatnot Export: which show's attached copy to prefill
-// Inventory list controls — persisted in localStorage so views survive reloads
-let invSearch=localStorage.getItem('e10_invSearch')||'',invCatF=localStorage.getItem('e10_invCatF')||'',invSetF=localStorage.getItem('e10_invSetF')||'',invStatusF=localStorage.getItem('e10_invStatusF')||'all',invSort=(()=>{try{return JSON.parse(localStorage.getItem('e10_invSort'))||{col:'name',dir:1};}catch(e){return {col:'name',dir:1};}})();
-let invGCF=localStorage.getItem('e10_invGCF')||'',invGradeMin=localStorage.getItem('e10_invGradeMin')||'',invYearF=localStorage.getItem('e10_invYearF')||'';
-let invCols=(()=>{try{return JSON.parse(localStorage.getItem('e10_inv_cols'))||null;}catch(e){return null;}})();
-let invViews=(()=>{try{return JSON.parse(localStorage.getItem('e10_inv_views'))||[];}catch(e){return [];}})();
-let invActiveView=-1; // session-only: which saved view is currently selected
-function invPersist(){try{localStorage.setItem('e10_invSearch',invSearch);localStorage.setItem('e10_invCatF',invCatF);localStorage.setItem('e10_invSetF',invSetF);localStorage.setItem('e10_invStatusF',invStatusF);localStorage.setItem('e10_invGCF',invGCF);localStorage.setItem('e10_invGradeMin',invGradeMin);localStorage.setItem('e10_invYearF',invYearF);localStorage.setItem('e10_invSort',JSON.stringify(invSort));}catch(e){}}
-function invColsPersist(){try{localStorage.setItem('e10_inv_cols',JSON.stringify(invVisibleKeys()));}catch(e){}}
-function invViewsPersist(){try{localStorage.setItem('e10_inv_views',JSON.stringify(invViews));}catch(e){}}
+/* ===== Reusable configurable-grid engine (drives inventory + checklists from a descriptor) =====
+   A grid G = {id, sk (localStorage prefix), cfg, state{cols,sort,filters,views,activeView}}.
+   cfg supplies: cols[] (descriptor), defaultCols[], defaultSort, defaultFilters, base(G)->rows,
+   filter(row,f)->bool, searchFn(row,q)->bool, listBoxId, colsMenuId, footer(rows,admin), render(),
+   onApply(G), migrate(G), viewPrompt. Column: {key,label,type,core,first,sortable,sortVal(row),cell(row,admin,G)}. */
+const GRIDS={};
+function gLoad(k,def){try{const v=JSON.parse(localStorage.getItem(k));return v==null?def:v;}catch(e){return def;}}
+function makeGrid(id,cfg){const sk=cfg.sk;const G={id,sk,cfg,state:{cols:gLoad(sk+'_cols',null),sort:gLoad(sk+'_sort',cfg.defaultSort||{col:cfg.defaultCols[0],dir:1}),filters:Object.assign({},cfg.defaultFilters||{},gLoad(sk+'_filters',{})),views:gLoad(sk+'_views',[]),activeView:-1}};if(cfg.migrate)cfg.migrate(G);GRIDS[id]=G;return G;}
+function gColDef(G,k){return G.cfg.cols.find(c=>c.key===k);}
+function gVisibleKeys(G){let keys=(Array.isArray(G.state.cols)&&G.state.cols.length?G.state.cols:G.cfg.defaultCols).filter(k=>gColDef(G,k));G.cfg.cols.filter(c=>c.core).forEach(c=>{if(!keys.includes(c.key)){if(c.first)keys.unshift(c.key);else keys.push(c.key);}});return keys;}
+function gVisibleCols(G){return gVisibleKeys(G).map(k=>gColDef(G,k));}
+function gPersist(G){try{const s=G.sk;localStorage.setItem(s+'_cols',JSON.stringify(gVisibleKeys(G)));localStorage.setItem(s+'_sort',JSON.stringify(G.state.sort));localStorage.setItem(s+'_filters',JSON.stringify(G.state.filters));localStorage.setItem(s+'_views',JSON.stringify(G.state.views));}catch(e){}}
+function gRows(G){let rows=G.cfg.base(G).slice();const f=G.state.filters;const q=(f.search||'').trim().toLowerCase();
+ if(q&&G.cfg.searchFn)rows=rows.filter(r=>G.cfg.searchFn(r,q));
+ if(G.cfg.filter)rows=rows.filter(r=>G.cfg.filter(r,f));
+ const sc=gColDef(G,G.state.sort.col)||gVisibleCols(G)[0],d=G.state.sort.dir,key=sc?sc.sortVal:(_=>0);
+ return rows.sort((a,b)=>{const ka=key(a),kb=key(b);return (ka<kb?-1:ka>kb?1:0)*d;});}
+function gSortTh(G,c){if(!c.sortable)return `<th></th>`;const on=G.state.sort.col===c.key;return `<th class="srt${on?' on':''}" onclick="gSortSet('${G.id}','${c.key}')">${esc(c.label)}<span class="chev">${on?(G.state.sort.dir>0?'▲':'▼'):'↕'}</span></th>`;}
+function gSortSet(id,key){const G=GRIDS[id];if(!G)return;if(G.state.sort.col===key)G.state.sort.dir*=-1;else G.state.sort={col:key,dir:1};gPersist(G);gRenderList(G);}
+function gRenderList(G){const box=$(G.cfg.listBoxId);if(!box)return;gPersist(G);const admin=ROLE==='admin';const rows=gRows(G),cols=gVisibleCols(G);
+ box.innerHTML=`<div class="egrid wide" style="margin-top:12px"><table><tr>${cols.map(c=>gSortTh(G,c)).join('')}</tr>${rows.map(i=>`<tr>${cols.map(c=>c.cell(i,admin,G)).join('')}</tr>`).join('')||`<tr><td colspan="${cols.length}" style="color:var(--mut)">No rows match.</td></tr>`}</table></div>${G.cfg.footer?G.cfg.footer(rows,admin):''}`;}
+function gColMenuHTML(G){const vis=gVisibleKeys(G),hidden=G.cfg.cols.filter(c=>!vis.includes(c.key));
+ const row=(c,idx,shown)=>`<div class="grow"><label style="flex:1;display:flex;align-items:center;gap:6px;margin:0"><input type="checkbox" style="width:auto" ${shown?'checked':''} ${c.core?'disabled':''} onchange="gToggleCol('${G.id}','${c.key}',this.checked)"> ${esc(c.label||'Actions')}${c.core?' <span class="lab">core</span>':''}</label>${(shown&&!c.core)?`<button class="btn x sm" ${idx===0?'disabled':''} onclick="gMoveCol('${G.id}','${c.key}',-1)">▲</button><button class="btn x sm" onclick="gMoveCol('${G.id}','${c.key}',1)">▼</button>`:''}</div>`;
+ return `<div class="lab" style="margin-bottom:4px">Shown (order with ▲▼)</div>${vis.map((k,idx)=>row(gColDef(G,k),idx,true)).join('')}${hidden.length?`<div class="lab" style="margin:8px 0 4px">Add column</div>${hidden.map(c=>row(c,0,false)).join('')}`:''}<div class="row" style="margin-top:8px"><button class="btn x sm" onclick="gResetCols('${G.id}')">Reset to default</button></div>`;}
+function gRenderCols(G){const el=$(G.cfg.colsMenuId);if(el)el.innerHTML=gColMenuHTML(G);}
+function gToggleCol(id,key,on){const G=GRIDS[id];const c=gColDef(G,key);if(!c||c.core)return;let keys=gVisibleKeys(G);if(on){if(!keys.includes(key)){const li=keys.findIndex(k=>gColDef(G,k).core&&!gColDef(G,k).first);keys.splice(li>=0?li:keys.length,0,key);}}else keys=keys.filter(k=>k!==key);G.state.cols=keys;gPersist(G);gRenderCols(G);gRenderList(G);}
+function gMoveCol(id,key,dir){const G=GRIDS[id];let keys=gVisibleKeys(G);const i=keys.indexOf(key),j=i+dir;if(i<0||j<0||j>=keys.length||gColDef(G,key).core||gColDef(G,keys[j]).core)return;[keys[i],keys[j]]=[keys[j],keys[i]];G.state.cols=keys;gPersist(G);gRenderCols(G);gRenderList(G);}
+function gResetCols(id){const G=GRIDS[id];G.state.cols=null;try{localStorage.removeItem(G.sk+'_cols');}catch(e){}gRenderCols(G);gRenderList(G);}
+function gColsBtn(G){return `<details class="gcfg"><summary class="btn sm">⚙ Columns</summary><div class="gpop" id="${G.cfg.colsMenuId}"></div></details>`;}
+function gViewsHTML(G){return `<div><label>Views</label><div class="row" style="gap:6px;align-items:center"><select onchange="gApplyView('${G.id}',this.value)" style="max-width:150px"><option value="">— saved views —</option>${G.state.views.map((v,i)=>`<option value="${i}" ${G.state.activeView===i?'selected':''}>${esc(v.name)}</option>`).join('')}</select><button class="btn sm" onclick="gSaveView('${G.id}')">Save view</button><button class="btn sm" onclick="gResetFilters('${G.id}')">Reset</button>${G.state.views.length?`<button class="btn x sm" title="Rename selected" onclick="var G=GRIDS['${G.id}'];G.state.activeView>=0?gRenameView('${G.id}',G.state.activeView):toast('Select a view first')">✎</button><button class="btn x sm" title="Delete selected" onclick="var G=GRIDS['${G.id}'];G.state.activeView>=0?gDeleteView('${G.id}',G.state.activeView):toast('Select a view first')">✕</button>`:''}</div></div>`;}
+function gSaveView(id){const G=GRIDS[id];const name=prompt(G.cfg.viewPrompt||'Name this view');if(name==null||!name.trim())return;G.state.views.push({name:name.trim(),filters:Object.assign({},G.state.filters),cols:gVisibleKeys(G),sort:Object.assign({},G.state.sort)});G.state.activeView=G.state.views.length-1;gPersist(G);G.cfg.render();toast('View saved');}
+function gApplyView(id,idx){const G=GRIDS[id];const v=G.state.views[+idx];if(!v)return;G.state.activeView=+idx;G.state.filters=Object.assign({},G.cfg.defaultFilters||{},v.filters||{});if(Array.isArray(v.cols)&&v.cols.length)G.state.cols=v.cols.slice();if(v.sort)G.state.sort=Object.assign({},v.sort);gPersist(G);if(G.cfg.onApply)G.cfg.onApply(G);G.cfg.render();toast('Applied “'+v.name+'”');}
+function gRenameView(id,idx){const G=GRIDS[id];const v=G.state.views[+idx];if(!v)return;const n=prompt('Rename view',v.name);if(n==null)return;v.name=n.trim()||v.name;gPersist(G);G.cfg.render();}
+function gDeleteView(id,idx){const G=GRIDS[id];const v=G.state.views[+idx];if(!v||!confirm('Delete view “'+v.name+'”?'))return;G.state.views.splice(+idx,1);G.state.activeView=-1;gPersist(G);G.cfg.render();}
+function gResetFilters(id){const G=GRIDS[id];G.state.filters=Object.assign({},G.cfg.defaultFilters||{});G.state.activeView=-1;gPersist(G);if(G.cfg.onApply)G.cfg.onApply(G);G.cfg.render();toast('Filters reset');}
 function dataHub(){
  const tabs=[['overview','Overview'],['inventory','Inventory'],['checklists','Checklists'],['reports','Reports'],['export','Whatnot Export'],['lists','Lists & Settings']];
  if(ROLE==='admin')tabs.push(['team','Team']);
@@ -601,7 +626,7 @@ function invRollup(items){items=items||invView();let cost=0,market=0,committed=0
    sortVal(row), cell(row,admin)}. Reuse on another grid by supplying its own column descriptor +
    its own state/localStorage keys (see extension note near dInventory). */
 const INV_COLS=[
- {key:'name',label:'Item',core:true,type:'text',sortable:true,sortVal:i=>(i.name||'').toLowerCase(),
+ {key:'name',label:'Item',core:true,first:true,type:'text',sortable:true,sortVal:i=>(i.name||'').toLowerCase(),
   cell:(i,admin)=>{const sold=(+i.soldQty||0)>0?`<div class="lab" style="text-transform:none;letter-spacing:0;color:var(--mut2)">sold ${i.soldQty} · ${money(i.soldProceeds||0)}</div>`:'';return `<td><b>${esc(i.name)}</b> <span class="pill" style="margin:0">${esc(i.cat)}</span>${sold}</td>`;}},
  {key:'cat',label:'Category',type:'text',sortable:true,sortVal:i=>(i.cat||'').toLowerCase(),cell:i=>`<td>${esc(i.cat||'')||'—'}</td>`},
  {key:'set',label:'Set',type:'text',sortable:true,sortVal:i=>(i.set||'').toLowerCase(),cell:i=>`<td>${esc(i.set||'')||'—'}</td>`},
@@ -623,42 +648,21 @@ const INV_COLS=[
  {key:'actions',label:'',core:true,sortable:false,cell:(i,admin)=>`<td style="white-space:nowrap"><button class="btn sm" onclick="reserveModal('${i.id}')">Reserve</button> <button class="btn sm" onclick="sellModal('${i.id}')">Sold</button>${admin?` <select style="max-width:110px;font-size:11px" onchange="reassignInv('${i.id}',this.value)">${ownerOpts(i.owner)}</select>`:''} <button class="btn x" onclick="delInv('${i.id}')">✕</button></td>`},
 ];
 const INV_DEFAULT_COLS=['name','cat','set','gradingCompany','grade','onhand','cost','market','gain','alloc','age','actions'];
-function invColDef(k){return INV_COLS.find(c=>c.key===k);}
-function invVisibleKeys(){let keys=(Array.isArray(invCols)&&invCols.length?invCols:INV_DEFAULT_COLS).filter(invColDef);
- INV_COLS.filter(c=>c.core).forEach(c=>{if(!keys.includes(c.key)){if(c.key==='name')keys.unshift(c.key);else keys.push(c.key);}});return keys;}
-function invVisibleCols(){return invVisibleKeys().map(invColDef);}
-function invRows(){let rows=invView();const q=invSearch.trim().toLowerCase();
- if(q)rows=rows.filter(i=>(i.name||'').toLowerCase().includes(q));
- if(invCatF)rows=rows.filter(i=>i.cat===invCatF);
- if(invSetF)rows=rows.filter(i=>(i.set||'')===invSetF);
- if(invGCF)rows=rows.filter(i=>(i.gradingCompany||'')===invGCF);
- if(invGradeMin!=='')rows=rows.filter(i=>i.grade!==''&&i.grade!=null&&(+i.grade)>=(+invGradeMin));
- if(invYearF!=='')rows=rows.filter(i=>(''+(i.year||''))===(''+invYearF));
- if(invStatusF==='onhand')rows=rows.filter(i=>(+i.qty||0)>0);
- else if(invStatusF==='sold')rows=rows.filter(i=>(+i.soldQty||0)>0);
- else if(invStatusF==='free')rows=rows.filter(i=>invAvailable(i)>0);
- else if(invStatusF==='reserved')rows=rows.filter(i=>invReserved(i)>0);
- const sc=invColDef(invSort.col)||invColDef('name'),d=invSort.dir,key=sc.sortVal;
- return rows.slice().sort((a,b)=>{const ka=key(a),kb=key(b);return (ka<kb?-1:ka>kb?1:0)*d;});}
-function invSortTh(c){if(!c.sortable)return `<th></th>`;const on=invSort.col===c.key;return `<th class="srt${on?' on':''}" onclick="invSortSet('${c.key}')">${esc(c.label)}<span class="chev">${on?(invSort.dir>0?'▲':'▼'):'↕'}</span></th>`;}
-function invSortSet(col){if(invSort.col===col)invSort.dir*=-1;else{invSort.col=col;invSort.dir=1;}renderInvList();}
-function renderInvList(){const box=$('invListBox');if(!box)return;invPersist();const admin=ROLE==='admin';const rows=invRows();const cols=invVisibleCols();
- box.innerHTML=`<div class="egrid wide" style="margin-top:12px"><table><tr>${cols.map(invSortTh).join('')}</tr>${rows.map(i=>`<tr>${cols.map(c=>c.cell(i,admin)).join('')}</tr>`).join('')||`<tr><td colspan="${cols.length}" style="color:var(--mut)">No items match these filters.</td></tr>`}</table></div><div class="lab" style="margin-top:8px">${rows.length} shown · reservations hard-lock units to a show (app-enforced). ${admin?'Admin: reassign owner, reserve beyond free, release anyone.':'You can release only your own reservations.'}</div>`;}
-/* column chooser */
-function invColMenuHTML(){const vis=invVisibleKeys();const hidden=INV_COLS.filter(c=>!vis.includes(c.key));
- const row=(c,idx,shown)=>`<div class="grow"><label style="flex:1;display:flex;align-items:center;gap:6px;margin:0"><input type="checkbox" style="width:auto" ${shown?'checked':''} ${c.core?'disabled':''} onchange="invToggleCol('${c.key}',this.checked)"> ${esc(c.label||'Actions')}${c.core?' <span class="lab">core</span>':''}</label>${(shown&&!c.core)?`<button class="btn x sm" ${idx===0?'disabled':''} onclick="invMoveCol('${c.key}',-1)">▲</button><button class="btn x sm" onclick="invMoveCol('${c.key}',1)">▼</button>`:''}</div>`;
- return `<div class="lab" style="margin-bottom:4px">Shown (order with ▲▼)</div>${vis.map((k,idx)=>row(invColDef(k),idx,true)).join('')}${hidden.length?`<div class="lab" style="margin:8px 0 4px">Add column</div>${hidden.map(c=>row(c,0,false)).join('')}`:''}<div class="row" style="margin-top:8px"><button class="btn x sm" onclick="invResetCols()">Reset to default</button></div>`;}
-function renderInvCols(){const el=$('invColsMenu');if(el)el.innerHTML=invColMenuHTML();}
-function invToggleCol(key,on){const c=invColDef(key);if(!c||c.core)return;let keys=invVisibleKeys();if(on){if(!keys.includes(key)){const ai=keys.indexOf('actions');keys.splice(ai>=0?ai:keys.length,0,key);}}else keys=keys.filter(k=>k!==key);invCols=keys;invColsPersist();renderInvCols();renderInvList();}
-function invMoveCol(key,dir){let keys=invVisibleKeys();const i=keys.indexOf(key),j=i+dir;if(i<0||j<0||j>=keys.length||invColDef(key).core||invColDef(keys[j]).core)return;[keys[i],keys[j]]=[keys[j],keys[i]];invCols=keys;invColsPersist();renderInvCols();renderInvList();}
-function invResetCols(){invCols=null;localStorage.removeItem('e10_inv_cols');renderInvCols();renderInvList();}
-/* saved filter views */
-function invFilterState(){return {search:invSearch,cat:invCatF,set:invSetF,status:invStatusF,gc:invGCF,gradeMin:invGradeMin,year:invYearF,owner:invFilter};}
-function invSaveView(){const name=prompt('Name this view (e.g. "PSA 10s", "Aging slabs", "Free sealed boxes")');if(name==null||!name.trim())return;invViews.push({name:name.trim(),filters:invFilterState(),cols:invVisibleKeys(),sort:{col:invSort.col,dir:invSort.dir}});invActiveView=invViews.length-1;invViewsPersist();dInventory();toast('View saved');}
-function invApplyView(idx){const v=invViews[+idx];if(!v)return;invActiveView=+idx;const f=v.filters||{};invSearch=f.search||'';invCatF=f.cat||'';invSetF=f.set||'';invStatusF=f.status||'all';invGCF=f.gc||'';invGradeMin=f.gradeMin||'';invYearF=f.year||'';if(f.owner){invFilter=f.owner;localStorage.setItem('e10_invfilter',invFilter);}if(Array.isArray(v.cols)&&v.cols.length){invCols=v.cols.slice();invColsPersist();}if(v.sort)invSort={col:v.sort.col,dir:v.sort.dir};invPersist();dInventory();toast('Applied “'+v.name+'”');}
-function invRenameView(idx){const v=invViews[+idx];if(!v)return;const n=prompt('Rename view',v.name);if(n==null)return;v.name=n.trim()||v.name;invViewsPersist();dInventory();}
-function invDeleteView(idx){const v=invViews[+idx];if(!v||!confirm('Delete view “'+v.name+'”?'))return;invViews.splice(+idx,1);invActiveView=-1;invViewsPersist();dInventory();}
-function invResetFilters(){invSearch='';invCatF='';invSetF='';invStatusF='all';invGCF='';invGradeMin='';invYearF='';invActiveView=-1;invPersist();dInventory();toast('Filters reset');}
+const invGridCfg={sk:'e10_inv',cols:INV_COLS,defaultCols:INV_DEFAULT_COLS,defaultSort:{col:'name',dir:1},
+ defaultFilters:{search:'',cat:'',set:'',status:'all',gc:'',gradeMin:'',year:'',owner:'mine'},
+ listBoxId:'invListBox',colsMenuId:'invColsMenu',viewPrompt:'Name this view (e.g. "PSA 10s", "Aging slabs", "Free sealed boxes")',
+ base:(G)=>{invFilter=G.state.filters.owner||'mine';return invView();},
+ searchFn:(i,q)=>(i.name||'').toLowerCase().includes(q),
+ filter:(i,f)=>{if(f.cat&&i.cat!==f.cat)return false;if(f.set&&(i.set||'')!==f.set)return false;if(f.gc&&(i.gradingCompany||'')!==f.gc)return false;if(f.gradeMin!==''&&f.gradeMin!=null&&!(i.grade!==''&&i.grade!=null&&(+i.grade)>=(+f.gradeMin)))return false;if(f.year!==''&&f.year!=null&&(''+(i.year||''))!==(''+f.year))return false;const st=f.status;if(st==='onhand')return (+i.qty||0)>0;if(st==='sold')return (+i.soldQty||0)>0;if(st==='free')return invAvailable(i)>0;if(st==='reserved')return invReserved(i)>0;return true;},
+ footer:(rows,admin)=>`<div class="lab" style="margin-top:8px">${rows.length} shown · reservations hard-lock units to a show (app-enforced). ${admin?'Admin: reassign owner, reserve beyond free, release anyone.':'You can release only your own reservations.'}</div>`,
+ onApply:(G)=>{invFilter=G.state.filters.owner||'mine';try{localStorage.setItem('e10_invfilter',invFilter);}catch(e){}},
+ render:()=>dInventory(),
+ /* one-time migration: carry over the pre-engine per-field localStorage selections so nothing resets */
+ migrate:(G)=>{if(localStorage.getItem('e10_inv_filters')==null){const f=G.state.filters,gv=(k,d)=>{const v=localStorage.getItem(k);return v==null?d:v;};
+   f.search=gv('e10_invSearch','');f.cat=gv('e10_invCatF','');f.set=gv('e10_invSetF','');f.status=gv('e10_invStatusF','all');f.gc=gv('e10_invGCF','');f.gradeMin=gv('e10_invGradeMin','');f.year=gv('e10_invYearF','');f.owner=gv('e10_invfilter','mine');
+   const s=gLoad('e10_invSort',null);if(s&&s.col)G.state.sort=s;}}
+};
+const INVG=makeGrid('inv',invGridCfg);
 function dInventory(){const admin=ROLE==='admin';const rl=invRollup();const sets=[...new Set(S.inventory.map(i=>i.set).filter(Boolean))].sort();const years=[...new Set(S.inventory.map(i=>i.year).filter(Boolean))].sort();
  let h=`<div class="card"><h3 style="font-size:15px">Add inventory</h3>
    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(128px,1fr));margin-top:10px">
@@ -683,23 +687,21 @@ function dInventory(){const admin=ROLE==='admin';const rl=invRollup();const sets
    <div class="metric"><div class="n">${money(rl.free)}</div><div class="l">Free to break</div></div>
    <div class="metric"><div class="n" style="color:${rl.aging>0?'var(--red)':'inherit'}">${money(rl.aging)}</div><div class="l">Aging &gt;30d idle</div></div>
    <div class="metric"><div class="n" style="color:${realizedMargin(invView())>=0?'#0a8a4a':'var(--red)'}">${realizedMargin(invView())>=0?'+':''}${money(realizedMargin(invView()))}</div><div class="l">Realized (sold)</div></div></div>`;
+ const F=INVG.state.filters;
  h+=`<div class="card" style="margin-top:16px"><div class="etool">
-     <div style="flex:2;min-width:140px"><label>Search</label><input id="invSearchBox" value="${esc(invSearch)}" placeholder="item name…" oninput="invSearch=this.value;renderInvList()"></div>
-     <div><label>Owner</label><div class="eseg"><button class="${invFilter==='mine'?'on':''}" onclick="if(invFilter!=='mine'){invFilter='mine';localStorage.setItem('e10_invfilter',invFilter);dInventory();}">Mine</button><button class="${invFilter==='all'?'on':''}" onclick="if(invFilter!=='all'){invFilter='all';localStorage.setItem('e10_invfilter',invFilter);dInventory();}">Everyone</button></div></div>
-     <div><label>Category</label><select onchange="invCatF=this.value;renderInvList()"><option value="">All</option>${INVCATS.map(c=>`<option ${invCatF===c?'selected':''}>${c}</option>`).join('')}</select></div>
-     <div><label>Set</label><select onchange="invSetF=this.value;renderInvList()"><option value="">All</option>${sets.map(s=>`<option ${invSetF===s?'selected':''}>${esc(s)}</option>`).join('')}</select></div>
-     <div><label>Grading</label><select onchange="invGCF=this.value;renderInvList()"><option value="">All</option>${TPG.map(g=>`<option ${invGCF===g?'selected':''}>${g}</option>`).join('')}</select></div>
-     <div><label>Grade ≥</label><input type="number" step="0.5" value="${esc(invGradeMin)}" placeholder="any" style="max-width:80px" oninput="invGradeMin=this.value;renderInvList()"></div>
-     <div><label>Year</label><select onchange="invYearF=this.value;renderInvList()"><option value="">All</option>${years.map(y=>`<option ${(''+invYearF)===(''+y)?'selected':''}>${esc(''+y)}</option>`).join('')}</select></div>
-     <div><label>Status</label><select onchange="invStatusF=this.value;renderInvList()">${[['all','All'],['onhand','On hand'],['free','Has free'],['reserved','Reserved'],['sold','Sold']].map(([v,l])=>`<option value="${v}" ${invStatusF===v?'selected':''}>${l}</option>`).join('')}</select></div>
+     <div style="flex:2;min-width:140px"><label>Search</label><input value="${esc(F.search||'')}" placeholder="item name…" oninput="INVG.state.filters.search=this.value;gRenderList(INVG)"></div>
+     <div><label>Owner</label><div class="eseg"><button class="${F.owner==='mine'?'on':''}" onclick="if(INVG.state.filters.owner!=='mine'){INVG.state.filters.owner='mine';invFilter='mine';localStorage.setItem('e10_invfilter','mine');gPersist(INVG);dInventory();}">Mine</button><button class="${F.owner==='all'?'on':''}" onclick="if(INVG.state.filters.owner!=='all'){INVG.state.filters.owner='all';invFilter='all';localStorage.setItem('e10_invfilter','all');gPersist(INVG);dInventory();}">Everyone</button></div></div>
+     <div><label>Category</label><select onchange="INVG.state.filters.cat=this.value;gRenderList(INVG)"><option value="">All</option>${INVCATS.map(c=>`<option ${F.cat===c?'selected':''}>${c}</option>`).join('')}</select></div>
+     <div><label>Set</label><select onchange="INVG.state.filters.set=this.value;gRenderList(INVG)"><option value="">All</option>${sets.map(s=>`<option ${F.set===s?'selected':''}>${esc(s)}</option>`).join('')}</select></div>
+     <div><label>Grading</label><select onchange="INVG.state.filters.gc=this.value;gRenderList(INVG)"><option value="">All</option>${TPG.map(g=>`<option ${F.gc===g?'selected':''}>${g}</option>`).join('')}</select></div>
+     <div><label>Grade ≥</label><input type="number" step="0.5" value="${esc(F.gradeMin||'')}" placeholder="any" style="max-width:80px" oninput="INVG.state.filters.gradeMin=this.value;gRenderList(INVG)"></div>
+     <div><label>Year</label><select onchange="INVG.state.filters.year=this.value;gRenderList(INVG)"><option value="">All</option>${years.map(y=>`<option ${(''+(F.year||''))===(''+y)?'selected':''}>${esc(''+y)}</option>`).join('')}</select></div>
+     <div><label>Status</label><select onchange="INVG.state.filters.status=this.value;gRenderList(INVG)">${[['all','All'],['onhand','On hand'],['free','Has free'],['reserved','Reserved'],['sold','Sold']].map(([v,l])=>`<option value="${v}" ${F.status===v?'selected':''}>${l}</option>`).join('')}</select></div>
    </div>
-   <div class="etool" style="margin-top:8px;align-items:center">
-     <details class="gcfg"><summary class="btn sm">⚙ Columns</summary><div class="gpop" id="invColsMenu"></div></details>
-     <div><label>Views</label><div class="row" style="gap:6px;align-items:center"><select id="invViewSel" onchange="invApplyView(this.value)" style="max-width:150px"><option value="">— saved views —</option>${invViews.map((v,i)=>`<option value="${i}" ${invActiveView===i?'selected':''}>${esc(v.name)}</option>`).join('')}</select><button class="btn sm" onclick="invSaveView()">Save view</button><button class="btn sm" onclick="invResetFilters()">Reset</button>${invViews.length?`<button class="btn x sm" title="Rename selected view" onclick="invActiveView>=0?invRenameView(invActiveView):toast('Select a view first')">✎</button><button class="btn x sm" title="Delete selected view" onclick="invActiveView>=0?invDeleteView(invActiveView):toast('Select a view first')">✕</button>`:''}</div></div>
-   </div>
+   <div class="etool" style="margin-top:8px;align-items:center">${gColsBtn(INVG)}${gViewsHTML(INVG)}</div>
    <div id="invListBox"></div></div>`;
  h+=buyListHTML();
- $('dtc').innerHTML=h;renderInvCols();renderInvList();}
+ $('dtc').innerHTML=h;gRenderCols(INVG);gRenderList(INVG);}
 /* Buy list: aggregate demand BY SET across scheduled shows (break-model allocations + manual
    needs) vs free-to-break supply. Driven by real shows + real inventory, not a placeholder. */
 function buyListHTML(){
@@ -820,10 +822,60 @@ function importInv(inp){const f=inp.files[0];if(!f)return;const r=new FileReader
  if(!res.valid.length){importReport('Inventory import','No data rows found in the file.',null,null);return;}
  res.valid.forEach(it=>S.inventory.push(it));save();dInventory();toast(res.valid.length+' items imported');
 };r.readAsText(f);inp.value='';}
-function dChecklists(){const lm=[['characters','Chase characters'],['sets','Sets / products'],['formats','Show formats'],['diff','Trust / hooks']];
+/* ===== Checklists as structured, configurable card grids (reuses the grid engine) ===== */
+function clColMap(cols){const idx=rx=>cols.findIndex(c=>new RegExp(rx,'i').test(c));return {num:idx('number|card ?#|^#$|^no\\.?$'),name:idx('card ?name|^name$|name|title'),set:idx('^set$|^set |product'),rarity:idx('rarity|rare'),value:idx('value|market|price|\\$'),chase:idx('chase')};}
+function clBuildCards(cl){const cols=cl.columns||[],rows=cl.rows||[],m=clColMap(cols),used=[m.num,m.name,m.set,m.rarity,m.value,m.chase].filter(x=>x>=0);
+ return rows.filter(r=>r&&r.some(c=>(''+(c==null?'':c)).trim())).map(r=>{const g=k=>m[k]>=0?(''+(r[m[k]]==null?'':r[m[k]])).trim():'';
+   const extra={};cols.forEach((h,ci)=>{const v=(''+(r[ci]==null?'':r[ci])).trim();if(v&&!used.includes(ci))extra[h]=v;});
+   const vv=g('value').replace(/[^0-9.\-]/g,'');
+   return {id:'cc'+Math.random().toString(36).slice(2),num:g('num'),name:g('name'),set:g('set'),rarity:g('rarity'),value:vv===''?'':(+vv||0),chase:/^(1|true|yes|y|chase|x|✓)$/i.test(g('chase')),extra:Object.keys(extra).length?extra:undefined};});}
+function clDeriveSet(cards){const c={};cards.forEach(x=>{if(x.set)c[x.set]=(c[x.set]||0)+1;});let best='',n=0;for(const k in c){if(c[k]>n){n=c[k];best=k;}}return best;}
+function clNormalize(cl){if(!cl.id)cl.id='cl'+Math.random().toString(36).slice(2);if(!Array.isArray(cl.cards))cl.cards=clBuildCards(cl);cl.cards.forEach(cd=>{if(!cd.id)cd.id='cc'+Math.random().toString(36).slice(2);cd.chase=!!cd.chase;if(cd.value!==''&&cd.value!=null)cd.value=+cd.value||0;});if(!('set'in cl)||!cl.set)cl.set=clDeriveSet(cl.cards);return cl;}
+const CL_COLS=[
+ {key:'num',label:'Card #',type:'text',sortable:true,sortVal:c=>(c.num||''),cell:c=>`<td class="mono"><input value="${esc(c.num||'')}" style="width:82px;font-size:12px" oninput="clEdit('${c.id}','num',this.value)"></td>`},
+ {key:'name',label:'Name',core:true,first:true,type:'text',sortable:true,sortVal:c=>(c.name||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.name||'')}" style="min-width:170px" oninput="clEdit('${c.id}','name',this.value)"></td>`},
+ {key:'set',label:'Set',type:'text',sortable:true,sortVal:c=>(c.set||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.set||'')}" style="min-width:120px;font-size:12px" oninput="clEdit('${c.id}','set',this.value)"></td>`},
+ {key:'rarity',label:'Rarity',type:'text',sortable:true,sortVal:c=>(c.rarity||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.rarity||'')}" style="min-width:130px;font-size:12px" oninput="clEdit('${c.id}','rarity',this.value)"></td>`},
+ {key:'value',label:'Value',type:'num',sortable:true,sortVal:c=>+c.value||0,cell:c=>`<td class="mono"><input type="number" value="${(c.value===''||c.value==null)?'':esc(''+c.value)}" style="width:82px" oninput="clEdit('${c.id}','value',this.value)"></td>`},
+ {key:'chase',label:'Chase',type:'num',sortable:true,sortVal:c=>c.chase?1:0,cell:c=>`<td style="text-align:center"><input type="checkbox" style="width:auto" ${c.chase?'checked':''} onchange="clEditChase('${c.id}',this.checked)"></td>`},
+ {key:'actions',label:'',core:true,sortable:false,cell:c=>`<td style="white-space:nowrap"><button class="btn x" onclick="clDelCard('${c.id}')">✕</button></td>`},
+];
+const CL_DEFAULT_COLS=['num','name','set','rarity','value','chase','actions'];
+let clOpenId=null;
+function clCur(){return (S.checklists||[]).find(c=>c.id===clOpenId);}
+function checklistGridCfg(cl){return {sk:'e10_cl_'+cl.id,cols:CL_COLS,defaultCols:CL_DEFAULT_COLS,defaultSort:{col:'num',dir:1},
+ defaultFilters:{search:'',rarity:'',chase:'',valueMin:'',set:''},listBoxId:'clListBox',colsMenuId:'clColsMenu',viewPrompt:'Name this view (e.g. "Chase cards", "$50+")',
+ base:()=>{const c=clCur();return c?(c.cards||[]):[];},
+ searchFn:(c,q)=>((c.name||'')+' '+(c.num||'')).toLowerCase().includes(q),
+ filter:(c,f)=>{if(f.rarity&&(c.rarity||'')!==f.rarity)return false;if(f.set&&(c.set||'')!==f.set)return false;if(f.chase==='yes'&&!c.chase)return false;if(f.chase==='no'&&c.chase)return false;if(f.valueMin!==''&&f.valueMin!=null&&!((+c.value||0)>=(+f.valueMin)))return false;return true;},
+ footer:(rows)=>`<div class="lab" style="margin-top:8px">${rows.length} cards${rows.filter(c=>c.chase).length?` · ${rows.filter(c=>c.chase).length} chase`:''} · edits save to the shared workspace</div>`,
+ render:()=>openChecklist(cl.id)};}
+function openChecklist(id){clOpenId=id;const cl=(S.checklists||[]).find(c=>c.id===id);if(!cl){clOpenId=null;dChecklists();return;}if(!GRIDS['cl:'+id])makeGrid('cl:'+id,checklistGridCfg(cl));dChecklists();}
+function closeChecklist(){clOpenId=null;dChecklists();}
+function clEdit(cardId,field,val){const cl=clCur();if(!cl)return;const cd=(cl.cards||[]).find(x=>x.id===cardId);if(!cd)return;if(field==='value'){const v=(''+val).replace(/[^0-9.\-]/g,'');cd.value=v===''?'':(+v||0);}else cd[field]=val;save();}
+function clEditChase(cardId,on){const cl=clCur();if(!cl)return;const cd=(cl.cards||[]).find(x=>x.id===cardId);if(!cd)return;cd.chase=!!on;save();const G=GRIDS['cl:'+cl.id];if(G)gRenderList(G);}
+function clAddCard(){const cl=clCur();if(!cl)return;(cl.cards=cl.cards||[]).push({id:'cc'+Date.now(),num:'',name:'New card',set:cl.set||'',rarity:'',value:'',chase:false});save();const G=GRIDS['cl:'+cl.id];if(G)gRenderList(G);}
+function clDelCard(cardId){const cl=clCur();if(!cl)return;cl.cards=(cl.cards||[]).filter(x=>x.id!==cardId);save();const G=GRIDS['cl:'+cl.id];if(G)gRenderList(G);}
+function clSetField(field,val){const cl=clCur();if(!cl)return;cl[field]=val;save();}
+function clGridSet(field,val){const G=GRIDS['cl:'+clOpenId];if(!G)return;G.state.filters[field]=val;gRenderList(G);}
+function renderChecklistGrid(cl){const G=GRIDS['cl:'+cl.id]||makeGrid('cl:'+cl.id,checklistGridCfg(cl));const F=G.state.filters;
+ const sets=[...new Set((cl.cards||[]).map(c=>c.set).filter(Boolean))].sort(),rarities=[...new Set((cl.cards||[]).map(c=>c.rarity).filter(Boolean))].sort();
+ let h=`<div class="card"><div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><div class="row" style="gap:8px;align-items:center"><button class="btn sm" onclick="closeChecklist()">← Checklists</button><h3 style="font-size:15px">${esc(cl.name)}</h3></div><div class="row" style="gap:6px;align-items:center"><span class="lab">Set</span><input value="${esc(cl.set||'')}" placeholder="set (join key for Phase 2)" style="max-width:200px" oninput="clSetField('set',this.value)"><button class="btn v sm" onclick="clAddCard()">+ Add card</button></div></div>
+   <div class="etool" style="margin-top:12px">
+     <div style="flex:2;min-width:140px"><label>Search</label><input value="${esc(F.search||'')}" placeholder="card name / #…" oninput="clGridSet('search',this.value)"></div>
+     <div><label>Rarity</label><select onchange="clGridSet('rarity',this.value)"><option value="">All</option>${rarities.map(r=>`<option ${F.rarity===r?'selected':''}>${esc(r)}</option>`).join('')}</select></div>
+     <div><label>Set</label><select onchange="clGridSet('set',this.value)"><option value="">All</option>${sets.map(s=>`<option ${F.set===s?'selected':''}>${esc(s)}</option>`).join('')}</select></div>
+     <div><label>Chase</label><select onchange="clGridSet('chase',this.value)">${[['','All'],['yes','Chase only'],['no','Non-chase']].map(([v,l])=>`<option value="${v}" ${F.chase===v?'selected':''}>${l}</option>`).join('')}</select></div>
+     <div><label>Value ≥</label><input type="number" value="${esc(F.valueMin||'')}" placeholder="any" style="max-width:80px" oninput="clGridSet('valueMin',this.value)"></div>
+   </div>
+   <div class="etool" style="margin-top:8px;align-items:center">${gColsBtn(G)}${gViewsHTML(G)}</div>
+   <div id="clListBox"></div></div>`;
+ $('dtc').innerHTML=h;gRenderCols(G);gRenderList(G);}
+function dChecklists(){if(clOpenId){const cl=clCur();if(cl)return renderChecklistGrid(cl);clOpenId=null;}
+ const lm=[['characters','Chase characters'],['sets','Sets / products'],['formats','Show formats'],['diff','Trust / hooks']];
  let h=`<div class="card"><h3 style="font-size:15px">Checklists (CSV)</h3>   <div class="row" style="margin-bottom:8px"><button class="btn sm" onclick="downloadChecklistTemplate()">↓ CSV template</button><span class="lab" style="align-self:center">Required column: <b>Card Name</b> · optional: Card Number, Set, Rarity, Market Value</span></div>
    <div class="drop" onclick="$('clFile').click()">Click to upload a .csv checklist</div><input id="clFile" type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="uploadChecklist(this)">
-   <div style="margin-top:12px">${S.checklists.length?`<div class="egrid"><table><tr><th>Checklist</th><th>Rows</th><th></th></tr>${S.checklists.map((c,i)=>`<tr><td>📄 ${esc(c.name)}</td><td class="mono">${c.rows.length}</td><td><div class="actions"><select id="clcol_${i}" style="max-width:140px">${c.columns.map(col=>`<option>${esc(col)}</option>`).join('')}</select><select id="cltgt_${i}" style="max-width:120px">${lm.map(([k,label])=>`<option value="${k}">→ ${label}</option>`).join('')}</select><button class="btn sm" onclick="populateFromChecklist(${i})">Populate</button><button class="btn x" onclick="S.checklists.splice(${i},1);save();dChecklists()">✕</button></div></td></tr>`).join('')}</table></div>`:'<div style="color:var(--mut);font-size:13px">No checklists.</div>'}</div></div>`;
+   <div style="margin-top:12px">${S.checklists.length?`<div class="egrid"><table><tr><th>Checklist</th><th>Set</th><th>Cards</th><th></th></tr>${S.checklists.map((c,i)=>`<tr><td>📄 ${esc(c.name)}</td><td>${esc(c.set||'—')}</td><td class="mono">${(c.cards||[]).length}</td><td><div class="actions"><button class="btn sm" onclick="openChecklist('${c.id}')">Open ↗</button><button class="btn x" onclick="if(confirm('Delete checklist?')){S.checklists.splice(${i},1);save();dChecklists();}">✕</button></div></td></tr>`).join('')}</table></div>`:'<div style="color:var(--mut);font-size:13px">No checklists.</div>'}</div></div>`;
  h+=`<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Attachments</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">Images, PDFs, docs. Small files stored in-browser; large ones referenced only (move to cloud when hosted).</div>
    <div class="drop" onclick="$('atFile').click()">Click to upload a file</div><input id="atFile" type="file" style="display:none" onchange="uploadAttach(this)">
    <div style="margin-top:12px">${S.attachments.length?`<div class="egrid"><table><tr><th>Attachment</th><th>Size</th><th></th></tr>${S.attachments.map((a,i)=>`<tr><td>📎 ${esc(a.name)}</td><td class="lab" style="text-transform:none;letter-spacing:0">${(a.size/1024).toFixed(0)} KB${a.data?'':' · reference'}</td><td><div class="actions">${a.data?`<a class="btn sm" href="${a.data}" download="${esc(a.name)}">Download</a>`:''}<button class="btn x" onclick="S.attachments.splice(${i},1);save();dChecklists()">✕</button></div></td></tr>`).join('')}</table></div>`:'<div style="color:var(--mut);font-size:13px">No attachments.</div>'}</div></div>`;
@@ -979,7 +1031,7 @@ function blankScoped(){return{shows:{},breaks:[],copySets:[],dashCfg:{catValue:t
 function normShared(o){o=o||{};if(!o.comments)o.comments=[];if(!o.todos)o.todos=[];o.todos.forEach(t=>{if(t.desc==null)t.desc='';if(!t.comments)t.comments=[];});if(!o.streamers)o.streamers=['Trent'];if(!o.lists)o.lists=JSON.parse(JSON.stringify(DEF_LISTS));['characters','sets','formats','diff'].forEach(k=>{if(!o.lists[k])o.lists[k]=(DEF_LISTS[k]||[]).slice();});['attachments','checklists','inventory','repacks'].forEach(k=>{if(!o[k])o[k]=[];});o.inventory.forEach(it=>{if(!it.id)it.id='i'+Math.random().toString(36).slice(2);if(!('owner'in it))it.owner=null;if(!(+it.qty>=0))it.qty=(+it.qty||1);if(!Array.isArray(it.reservations))it.reservations=[];it.reservations.forEach(r=>{r.qty=+r.qty||0;});if(!it.addedAt)it.addedAt=Date.now();
   /* structured grade fields — backfill once, losslessly, from the free-text cond */
   if(!('gradingCompany'in it)){it.gradingCompany='';it.grade=('grade'in it)?it.grade:'';const g=parseGrade(it.cond);if(g){it.gradingCompany=g.gradingCompany;it.grade=g.grade;it.cond='';}}
-  if(!('grade'in it))it.grade='';if(!('cardNumber'in it))it.cardNumber='';if(!('year'in it))it.year='';});o.repacks.forEach(p=>{if(!p.cards)p.cards=[];if(!p.pool)p.pool=[];});return o;}
+  if(!('grade'in it))it.grade='';if(!('cardNumber'in it))it.cardNumber='';if(!('year'in it))it.year='';});o.repacks.forEach(p=>{if(!p.cards)p.cards=[];if(!p.pool)p.pool=[];});o.checklists.forEach(clNormalize);return o;}
 function normScoped(o){o=o||{};if(!o.shows)o.shows={};if(!o.breaks)o.breaks=[];if(!o.copySets)o.copySets=[];if(!o.dashCfg)o.dashCfg={catValue:true,costMarket:true,movement:true};if(!('sales'in o))o.sales=null;
  Object.keys(o.shows).forEach(k=>{(o.shows[k]||[]).forEach(s=>{if(!s.id)s.id='sh'+Math.random().toString(36).slice(2);if(s.notes==null)s.notes='';if(!('titleSet'in s))s.titleSet=null;if(!('breakModel'in s))s.breakModel=null;if(!Array.isArray(s.inventoryAlloc))s.inventoryAlloc=[];if(!('repackRef'in s))s.repackRef=null;if(!Array.isArray(s.needs))s.needs=[];});});
  o.breaks.forEach(b=>{if(!b.id)b.id='bk'+Math.random().toString(36).slice(2);if(!('ts'in b))b.ts=null;});
