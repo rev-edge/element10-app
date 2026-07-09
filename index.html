@@ -256,7 +256,7 @@ function closeM(){$('ov').style.display='none';}
 function renderHome(){
  const open=S.todos.filter(t=>!t.done).length;
  const rl=invRollup(S.inventory),proj=opProjectedProfit(),realized=realizedMargin(S.inventory);
- let h=`<div class="hero"><div><h1>This week</h1><div class="sub">Where the operation stands · single-click a show to edit · double-click the board to open the scheduler</div></div><button class="btn v" onclick="go('schedule')">Open scheduler ↗</button></div>`;
+ let h=`<div class="hero"><div><h1>This week</h1></div><button class="btn v" onclick="go('schedule')">Open scheduler ↗</button></div>`;
  h+=`<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:0 0 18px">
    <div class="metric"><div class="n">${money(rl.cost)}</div><div class="l">Capital deployed</div></div>
    <div class="metric"><div class="n">${money(rl.committed)}</div><div class="l">Committed to shows</div></div>
@@ -267,7 +267,7 @@ function renderHome(){
  h+=`<div ondblclick="go('schedule')">${scheduleGridHTML()}</div>`;
  h+=`<div style="height:18px"></div>`;
  h+=`<div class="split">`;
- h+=`<div class="card"><h3 style="font-size:16px">Collaborative notes</h3><div class="sub" style="color:var(--mut);font-size:12px;margin:2px 0 8px">Log what you worked on, drop something interesting, or ask the team.</div><div style="margin:8px 0">${S.comments.slice().reverse().map(c=>`<div class="cmt"><div class="who">${esc(c.who)} · ${new Date(c.when).toLocaleDateString()}${c.kind?` <span class="pill" style="margin:0 0 0 4px">${esc(c.kind)}</span>`:''}</div>${esc(c.text)}</div>`).join('')}</div>
+ h+=`<div class="card"><h3 style="font-size:16px">Collaborative notes</h3><div style="margin:8px 0">${S.comments.slice().reverse().map(c=>`<div class="cmt"><div class="who">${esc(c.who)} · ${new Date(c.when).toLocaleDateString()}${c.kind?` <span class="pill" style="margin:0 0 0 4px">${esc(c.kind)}</span>`:''}</div>${esc(c.text)}</div>`).join('')}</div>
    <div class="row"><select id="noteKind" style="max-width:130px"><option>Worked on</option><option>Interesting</option><option>Question</option><option>Note</option></select><input id="cmtin" placeholder="${S.user?'Add a note…':'Sign in to post…'}" onkeydown="if(event.key==='Enter')addNote()"><button class="btn d sm" onclick="addNote()">Post</button></div></div>`;
  h+=`<div class="card"><h3 style="font-size:16px">To-do <span class="lab" style="font-weight:400">— click a task to add detail</span></h3><div style="margin:12px 0" id="todos">${todoHTML()}</div>
    <div class="row"><input id="todoin" placeholder="Add a task…" onkeydown="if(event.key==='Enter')addTodo()"><button class="btn d sm" onclick="addTodo()">Add</button></div></div>`;
@@ -310,7 +310,7 @@ function scheduleRollupHTML(){
  </div></div>`;
 }
 function renderSchedule(){
- $('sec-schedule').innerHTML=`<div class="hero"><div><h1>Schedule</h1><div class="sub">Drag shows across the week. Peak windows (evening/late) are shaded.</div></div><div class="row" style="gap:6px">${ROLE==='admin'?`<button class="btn sm" onclick="copyWeekToUniversal()" title="Publish this week to the team baseline everyone sees">Copy week → Universal</button>`:''}<button class="btn v" onclick="newShow()">+ New show</button></div></div>${scheduleRollupHTML()}${scheduleGridHTML()}`;
+ $('sec-schedule').innerHTML=`<div class="hero"><div><h1>Schedule</h1></div><div class="row" style="gap:6px">${ROLE==='admin'?`<button class="btn sm" onclick="copyWeekToUniversal()" title="Publish this week to the team baseline everyone sees">Copy week → Universal</button>`:''}<button class="btn v" onclick="newShow()">+ New show</button></div></div>${scheduleRollupHTML()}${scheduleGridHTML()}`;
 }
 
 /* ---------- SHOW HUB — cross-module attach helpers ---------- */
@@ -342,7 +342,7 @@ function copyDescOf(cs){if(!cs||!cs.items)return '';const d=cs.items.find(it=>/o
 
 /* ---------- COPY STUDIO ---------- */
 function renderCopy(){
- $('sec-copy').innerHTML=`<div class="hero"><div><h1>Copy Studio</h1><div class="sub">Self-contained — draws on your editable lists (Data &amp; Lists) and the OS title formulas.</div></div></div>
+ $('sec-copy').innerHTML=`<div class="hero"><div><h1>Copy Studio</h1></div></div>
   <div class="card"><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
    <div><label>Type</label><select id="cType">${['Whatnot show title','YouTube title','Short/TikTok hook','Description','Tags'].map(x=>`<option>${x}</option>`).join('')}</select></div>
    <div><label>Set</label><select id="cSet"><option value="">— random —</option>${L('sets').map(x=>`<option>${esc(x)}</option>`).join('')}</select></div>
@@ -353,7 +353,7 @@ function renderCopy(){
    </div><div class="row" style="margin-top:14px"><button class="btn v" onclick="genCopy()">Generate</button><span class="lab" style="align-self:center">3 angles: curiosity · search · drama</span></div>
    <div id="cout"></div>
    <div class="row" style="margin-top:12px"><input id="csName" placeholder="Name this set to save it…" style="flex:2"><button class="btn d sm" onclick="saveCopySet()">Save set</button><span class="lab" style="align-self:center">Saved sets persist &amp; can attach to a show</span></div></div>
-  <div class="card" style="margin-top:16px"><h3 style="font-size:15px">Saved copy — history</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">Reopen, duplicate, rename, delete, or attach a set to a show (the show then carries the copy into Whatnot Export).</div><div id="csHist" style="margin-top:8px"></div></div>`;
+  <div class="card" style="margin-top:16px"><h3 style="font-size:15px">Saved copy — history</h3><div id="csHist" style="margin-top:8px"></div></div>`;
  renderCopyHist();
 }
 function pickData(){return{set:$('cSet').value||rand(L('sets')),char:$('cChar').value||rand(L('characters')),fmt:$('cFmt').value||rand(L('formats')),price:$('cPrice').value,host:$('cHost').value,diff:rand(L('diff')),time:rand(['8:00','8:30','7:00','9:00']),low:rand(['3','5','7']),x:rand(['400','850','1000'])};}
@@ -379,7 +379,7 @@ function attachCopyToShow(id,ref){if(!ref)return;if(!canEditScoped())return roGu
 
 /* ---------- SCHEDULE GEN ---------- */
 function renderGen(){
- $('sec-gen').innerHTML=`<div class="hero"><div><h1>Schedule Generator</h1><div class="sub">Peak-viewership windows + your streamers + the format menu → flagship in evening primetime.</div></div></div>
+ $('sec-gen').innerHTML=`<div class="hero"><div><h1>Schedule Generator</h1></div></div>
   <div class="card"><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
    <div><label>Shows per day</label><select id="gPer">${[1,2,3,4].map(n=>`<option ${n===2?'selected':''}>${n}</option>`).join('')}</select></div>
    <div><label>Include weekends</label><select id="gWknd"><option>Yes</option><option>No</option></select></div>
@@ -407,7 +407,7 @@ function genSchedule(){if(!canEditScoped())return roGuard();if(Object.values(S.s
 /* ---------- BREAK CALCULATOR ---------- */
 let BK={products:[],chases:[],auctions:[],invItems:[],cost:0,_last:null};
 function renderBreak(){
- $('sec-break').innerHTML=`<div class="hero"><div><h1>Break Calculator</h1><div class="sub">Model tiered break slots across products, chase slabs &amp; auctions — with expected bids and projected profit.</div></div></div>
+ $('sec-break').innerHTML=`<div class="hero"><div><h1>Break Calculator</h1></div></div>
  <div class="split"><div class="card"><h3 style="font-size:15px">Inputs</h3>
   <div class="lab" style="margin-top:14px">Product breaks (split into spots)</div><div id="prodList"></div>
   <div class="row" style="margin-top:6px"><input id="pName" placeholder="Product" style="flex:2"><input id="pSpots" type="number" placeholder="spots" style="flex:1"><input id="pVal" type="number" placeholder="pool $" style="flex:1"><button class="btn sm" onclick="addProd()">+</button></div>
@@ -426,7 +426,7 @@ function renderBreak(){
   <div style="margin-top:10px"><label>Markup on value: <span id="lMk" class="mono"></span></label><input id="tMk" type="range" min="0" max="60" value="25" oninput="lMk.textContent=this.value+'%';calcBreak()"></div>
   <div id="bout" style="margin-top:16px"></div>
   <div class="row" style="margin-top:14px"><input id="bName" placeholder="Name this model" style="flex:2"><button class="btn d sm" onclick="saveBreak()">Save model</button></div></div></div>
- <div class="card" style="margin-top:16px"><h3 style="font-size:15px">Saved break models — history</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">Reopen to edit, duplicate, rename, delete, or attach to a show (pre-populates a Live Break from the model).</div><div id="bkHist" style="margin-top:8px"></div></div>`;
+ <div class="card" style="margin-top:16px"><h3 style="font-size:15px">Saved break models — history</h3><div id="bkHist" style="margin-top:8px"></div></div>`;
  $('lSlots').textContent='5';$('lTiers').textContent='3';$('lEven').textContent='30% disparity';$('lMk').textContent='25%';
  renderBKlists();calcBreak();renderBreakHist();
 }
@@ -554,7 +554,7 @@ function dataHub(){
  const tabs=[['overview','Overview'],['inventory','Inventory'],['checklists','Checklists'],['reports','Reports'],['export','Whatnot Export'],['lists','Lists & Settings']];
  if(ROLE==='admin')tabs.push(['team','Team']);
  if(dataTab==='team'&&ROLE!=='admin')dataTab='overview';
- let h=`<div class="hero"><div><h1>Inventory &amp; Data</h1><div class="sub">Track boxes, cases, raw &amp; slabs · value dashboards · reports · export to Whatnot.</div></div></div>`;
+ let h=`<div class="hero"><div><h1>Inventory &amp; Data</h1></div></div>`;
  h+=`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">${tabs.map(t=>`<button class="tab ${t[0]===dataTab?'on':''}" onclick="dataTab='${t[0]}';dataHub()">${t[1]}</button>`).join('')}</div><div id="dtc"></div>`;
  $('sec-data').innerHTML=h;
  ({overview:dOverview,inventory:dInventory,checklists:dChecklists,reports:dReports,export:dExport,lists:dLists,team:dTeam}[dataTab])();
@@ -577,7 +577,7 @@ function dOverview(){const t=invTotals();const cat=Object.entries(t.byCat).map((
  if(S.dashCfg.catValue)h+=`<div class="card" style="margin-bottom:16px"><h3 style="font-size:15px">Value by category</h3><div style="margin-top:12px">${svgBars(cat)}</div></div>`;
  if(S.dashCfg.costMarket)h+=`<div class="card" style="margin-bottom:16px"><h3 style="font-size:15px">Cost vs market</h3><div style="margin-top:12px">${svgBars([{label:'Cost basis',value:t.cost},{label:'Market value',value:t.val}])}</div></div>`;
  if(S.dashCfg.movement)h+=`<div class="card" style="margin-bottom:16px"><h3 style="font-size:15px">Market movement</h3><div style="margin-top:12px">${svgSpark()}</div></div>`;
- h+=`<div class="card"><h3 style="font-size:15px">Configure dashboard</h3><div class="row" style="margin-top:10px;gap:18px">${[['catValue','Value by category'],['costMarket','Cost vs market'],['movement','Market movement']].map(([k,l])=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink);margin:0"><input type="checkbox" style="width:auto" ${S.dashCfg[k]?'checked':''} onchange="toggleDash('${k}',this.checked)"> ${l}</label>`).join('')}</div><div class="lab" style="margin-top:10px">Charts recalc from your inventory. Live market prices update these in the background via API once connected.</div></div>`;
+ h+=`<div class="card"><h3 style="font-size:15px">Configure dashboard</h3><div class="row" style="margin-top:10px;gap:18px">${[['catValue','Value by category'],['costMarket','Cost vs market'],['movement','Market movement']].map(([k,l])=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink);margin:0"><input type="checkbox" style="width:auto" ${S.dashCfg[k]?'checked':''} onchange="toggleDash('${k}',this.checked)"> ${l}</label>`).join('')}</div></div>`;
  $('dtc').innerHTML=h;}
 function ownerOpts(sel){let opts=`<option value="">Universal / unassigned</option>`;const emails=MEMBERS.map(m=>m.email);if(sel&&!emails.includes(sel))opts+=`<option value="${esc(sel)}" selected>${esc(sel)}</option>`;opts+=MEMBERS.map(m=>`<option value="${esc(m.email)}" ${m.email===sel?'selected':''}>${esc(m.display_name||m.email)}</option>`).join('');return opts;}
 function invRollup(items){items=items||invView();let cost=0,market=0,committed=0,free=0,aging=0;items.forEach(i=>{const q=+i.qty||0,v=+i.value||0,c=+i.cost||0;cost+=c*q;market+=v*q;committed+=v*invReserved(i);free+=v*invAvailable(i);if(invAge(i)>30&&invAvailable(i)>0)aging+=v*q;});return{cost,market,gain:market-cost,committed,free,aging};}
@@ -597,7 +597,7 @@ function invRowHTML(i,admin){const q=+i.qty||0,av=invAvailable(i),rsv=invReserve
  const pills=(i.reservations||[]).map(r=>`<span class="pill" style="margin:2px">${esc(r.showLabel||'show')} ×${r.qty}${(admin||r.streamerUid===MEID)?` <a onclick="releaseReservation('${i.id}','${r.showId}','${r.streamerUid}')" style="color:var(--red)">✕</a>`:''}</span>`).join('')||'<span class="lab">—</span>';
  const sold=(+i.soldQty||0)>0?`<div class="lab" style="text-transform:none;letter-spacing:0;color:var(--mut2)">sold ${i.soldQty} · ${money(i.soldProceeds||0)}</div>`:'';
  return `<tr>
-  <td><b>${esc(i.name)}</b> <span class="pill" style="margin:0">${esc(i.cat)}</span>${i.set?`<div class="lab" style="text-transform:none;letter-spacing:0">${esc(i.set)}${i.cond?' · '+esc(i.cond):''}</div>`:''}${sold}</td>
+  <td><b>${esc(i.name)}</b> <span class="pill" style="margin:0">${esc(i.cat)}</span>${sold}</td>
   <td class="mono">${q} / <b style="color:${av>0?'#0a8a4a':'var(--mut2)'}">${av}</b>${rsv?` <span class="lab">(${rsv} res)</span>`:''}</td>
   <td class="mono">${money(+i.cost||0)}</td>
   <td class="mono">${money(+i.value||0)}</td>
@@ -653,7 +653,6 @@ function buyListHTML(){
    const pills=[...d.shows].map(l=>`<span class="pill" style="margin:1px">${esc(l)}</span>`).join('');
    return `<tr><td><b>${esc(set)}</b></td><td>${pills}</td><td class="mono">${d.qty}</td><td class="mono">${free}</td><td class="mono" style="color:${gap>0?'var(--red)':'#0a8a4a'}">${gap>0?('-'+gap):'covered'}</td><td class="mono">${gap>0?('~'+money(order)):'—'}</td></tr>`;}).join('');
  return `<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Buy list from the schedule</h3>
-   <div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">What upcoming shows need (break-model allocations + manual needs) vs what’s free to break, by set.</div>
    <div class="egrid"><table><tr><th>Set / product</th><th>Needed by</th><th>Demand</th><th>Free</th><th>Gap</th><th>~Order</th></tr>${rows}</table></div>
    <div class="row" style="justify-content:flex-end;margin-top:8px"><b>Projected order: ~${money(projected)}</b></div></div>`;}
 function addInv(){const n=$('ivN').value.trim();if(!n)return;const owner=($('ivOwner')&&$('ivOwner').value!=='')?$('ivOwner').value:(ROLE==='admin'&&$('ivOwner')?null:ME);S.inventory.push({id:'i'+Date.now(),name:n,cat:$('ivC').value,set:$('ivS').value,qty:+$('ivQ').value||1,cost:+$('ivCo').value||0,value:+$('ivV').value||0,cond:$('ivG').value,img:$('ivImg').value,owner});save();dInventory();toast('Added');}
@@ -751,8 +750,7 @@ function importInv(inp){const f=inp.files[0];if(!f)return;const r=new FileReader
  res.valid.forEach(it=>S.inventory.push(it));save();dInventory();toast(res.valid.length+' items imported');
 };r.readAsText(f);inp.value='';}
 function dChecklists(){const lm=[['characters','Chase characters'],['sets','Sets / products'],['formats','Show formats'],['diff','Trust / hooks']];
- let h=`<div class="card"><h3 style="font-size:15px">Checklists (CSV)</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">Upload a product/set checklist. Populate a pick-list from any column, or load chases into the Break Calculator.</div>
-   <div class="row" style="margin-bottom:8px"><button class="btn sm" onclick="downloadChecklistTemplate()">↓ CSV template</button><span class="lab" style="align-self:center">Required column: <b>Card Name</b> · optional: Card Number, Set, Rarity, Market Value</span></div>
+ let h=`<div class="card"><h3 style="font-size:15px">Checklists (CSV)</h3>   <div class="row" style="margin-bottom:8px"><button class="btn sm" onclick="downloadChecklistTemplate()">↓ CSV template</button><span class="lab" style="align-self:center">Required column: <b>Card Name</b> · optional: Card Number, Set, Rarity, Market Value</span></div>
    <div class="drop" onclick="$('clFile').click()">Click to upload a .csv checklist</div><input id="clFile" type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="uploadChecklist(this)">
    <div style="margin-top:12px">${S.checklists.length?`<div class="egrid"><table><tr><th>Checklist</th><th>Rows</th><th></th></tr>${S.checklists.map((c,i)=>`<tr><td>📄 ${esc(c.name)}</td><td class="mono">${c.rows.length}</td><td><div class="actions"><select id="clcol_${i}" style="max-width:140px">${c.columns.map(col=>`<option>${esc(col)}</option>`).join('')}</select><select id="cltgt_${i}" style="max-width:120px">${lm.map(([k,label])=>`<option value="${k}">→ ${label}</option>`).join('')}</select><button class="btn sm" onclick="populateFromChecklist(${i})">Populate</button><button class="btn x" onclick="S.checklists.splice(${i},1);save();dChecklists()">✕</button></div></td></tr>`).join('')}</table></div>`:'<div style="color:var(--mut);font-size:13px">No checklists.</div>'}</div></div>`;
  h+=`<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Attachments</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">Images, PDFs, docs. Small files stored in-browser; large ones referenced only (move to cloud when hosted).</div>
@@ -790,7 +788,7 @@ function exRows(){const cat=$('exCat').value,type=$('exType').value,ps=$('exPric
 function updateExCount(){const el=$('exCount');if(el)el.textContent=exRows().count+' items ready';}
 function exportWhatnot(){const {rows,count}=exRows();if(!count){toast('No matching inventory');return;}csvDL('element10_whatnot_inventory.csv',rows);toast(count+' rows exported');}
 function dLists(){const lm=[['characters','Chase characters'],['sets','Sets / products'],['formats','Show formats'],['diff','Trust / hooks']];
- let h=`<div class="card"><h3 style="font-size:15px">Pick-lists</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">Feed every dropdown across the app — auto-fill them from a checklist in the Checklists tab.</div>`;
+ let h=`<div class="card"><h3 style="font-size:15px">Pick-lists</h3>`;
  lm.forEach(([k,label])=>{h+=`<div style="margin-bottom:14px"><div class="lab">${label}</div><div class="chipwrap">${L(k).map(v=>`<span class="pill">${esc(v)} <a onclick="rmList('${k}','${esc(v)}')" style="color:var(--red)">✕</a></span>`).join('')}</div><div class="row"><input id="add_${k}" placeholder="Add…" style="max-width:260px" onkeydown="if(event.key==='Enter')addList('${k}')"><button class="btn sm" onclick="addList('${k}')">+</button></div></div>`;});
  h+=`<div><div class="lab">Streamers</div><div class="chipwrap">${S.streamers.map(v=>`<span class="pill">${esc(v)} <a onclick="rmStreamer('${esc(v)}')" style="color:var(--red)">✕</a></span>`).join('')}</div><div class="row"><input id="add_str" placeholder="Add streamer…" style="max-width:260px" onkeydown="if(event.key==='Enter')addStreamer()"><button class="btn sm" onclick="addStreamer()">+</button></div></div></div>`;
  $('dtc').innerHTML=h;}
@@ -837,7 +835,7 @@ async function setTeamRole(uid,role){if(!confirm('Set this member’s role to '+
 /* ---------- REPACK STUDIO ---------- */
 let REPEDIT=null;
 function renderRepack(){if(REPEDIT&&(S.repacks||[]).find(x=>x.id===REPEDIT))return renderRepackEditor();REPEDIT=null;
- let h=`<div class="hero"><div><h1>Repack Studio</h1><div class="sub">Build cases, boxes &amp; packs · assign cards + odds · launch the live on-stream opener (full-screen, OBS-ready).</div></div><button class="btn v" onclick="newRepack()">+ New product</button></div>`;
+ let h=`<div class="hero"><div><h1>Repack Studio</h1></div><button class="btn v" onclick="newRepack()">+ New product</button></div>`;
  if(!(S.repacks||[]).length){h+=`<div class="card" style="color:var(--mut)">No products yet. Create a pack, pull cards from your inventory or add them manually, set preset or random odds, then hit <b>▶ Open on stream</b> to launch the full-screen opener. Point OBS at that browser tab/window as a source.</div>`;}
  else{h+=`<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(250px,1fr))">`+S.repacks.map(p=>{const cnt=p.mode==='random'?((p.pool||[]).length+' in pool'):((p.cards||[]).length+' cards');const val=(p.cards||[]).reduce((s,c)=>s+(+c.marketValue||0),0);
    return `<div class="card"><div class="row" style="justify-content:space-between"><h3 style="font-size:16px">${esc(p.name)}</h3><span class="pill" style="margin:0">${esc(p.kind)}</span></div>
@@ -855,7 +853,7 @@ function rpAddBlank(){rpList().push({name:'',category:'Pokémon',grade:'Raw',ser
 function rpAddFromInv(){const ix=$('rpInv').value;if(ix==='')return;const it=S.inventory[+ix];if(!it)return;rpList().push({name:it.name,category:'',grade:it.cond||'Raw',serial:'',year:'',set:it.set||'',era:'',img:it.img||'',marketValue:+it.value||0,buyback:0,tier:'B',weight:1});save();renderRepackEditor();}
 function rpDelCard(i){rpList().splice(i,1);save();renderRepackEditor();}
 function renderRepackEditor(){const p=rpCur();if(!p){REPEDIT=null;return renderRepack();}const list=rpList();const rnd=p.mode==='random';const span=rnd?10:9;
- let h=`<div class="hero"><div><h1>${esc(p.name||'Product')}</h1><div class="sub">Configure the product · add cards (from inventory or manual) · launch the opener.</div></div><div class="row" style="gap:6px"><button class="btn v" onclick="launchOpen('${p.id}')">▶ Open on stream</button><button class="btn sm" onclick="REPEDIT=null;renderRepack()">← All products</button></div></div>`;
+ let h=`<div class="hero"><div><h1>${esc(p.name||'Product')}</h1></div><div class="row" style="gap:6px"><button class="btn v" onclick="launchOpen('${p.id}')">▶ Open on stream</button><button class="btn sm" onclick="REPEDIT=null;renderRepack()">← All products</button></div></div>`;
  h+=`<div class="card"><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
    <div><label>Name</label><input value="${esc(p.name)}" oninput="rpSet('name',this.value)"></div>
    <div><label>Type</label><select onchange="rpSet('kind',this.value)">${['pack','box','case'].map(k=>`<option ${p.kind===k?'selected':''}>${k}</option>`).join('')}</select></div>
@@ -1002,7 +1000,7 @@ async function copyWeekToUniversal(){
 function renderScopebar(){let el=$('scopebar');if(!el){el=document.createElement('div');el.id='scopebar';el.style.cssText='display:flex;flex-direction:column;align-items:flex-end;gap:2px;margin-left:auto';const who=$('who');who.style.marginLeft='10px';who.parentNode.insertBefore(el,who);}
  let opts=`<option value="mine">My space</option><option value="universal">Universal</option>`;
  if(ROLE==='admin')opts+=MEMBERS.filter(m=>m.user_id!==MEID).map(m=>`<option value="${m.user_id}">${esc(m.display_name||m.email)}’s space</option>`).join('');
- el.innerHTML=`<div style="display:flex;align-items:center;gap:6px"><span class="lab" style="font-size:11px">Viewing</span><select id="scopeSel" style="padding:6px 9px;font-size:12.5px;max-width:170px" onchange="setScope(this.value)">${opts}</select>${canEditScoped()?'':'<span class="pill" style="margin:0">read-only</span>'}</div><div class="lab" style="font-size:9.5px;max-width:250px;text-align:right;line-height:1.25;text-transform:none;letter-spacing:0">My space = your personal schedules, breaks &amp; dashboards. Universal = the team baseline everyone sees.</div>`;
+ el.innerHTML=`<div style="display:flex;align-items:center;gap:6px"><span class="lab" style="font-size:11px">Viewing</span><select id="scopeSel" style="padding:6px 9px;font-size:12.5px;max-width:170px" onchange="setScope(this.value)">${opts}</select>${canEditScoped()?'':'<span class="pill" style="margin:0">read-only</span>'}</div>`;
  const sel=$('scopeSel');if(sel)sel.value=SCOPE;}
 
 function subscribeRealtime(){sb.channel('e10ws').on('postgres_changes',{event:'*',schema:'public',table:'e10_workspace'},p=>{const n=p.new;if(!n||!n.id)return;
@@ -1099,7 +1097,7 @@ async function liveCaseHit(){if(!LIVE.session)return;const v=!LIVE.session.case_
 }
 function liveDirUrl(){return location.href.replace(/[?#].*$/,'').replace(/\/[^\/]*$/,'/');}
 function liveStartHTML(){const models=(S.breaks||[]);const seed=LIVE_SEED;const defName=(seed&&seed.show)?(seed.show+' — live break'):'';
- return `<div class="hero"><div><h1>Live Break</h1><div class="sub">Run a live break — spots, stash-or-pass &amp; case hits push straight to your OBS overlay and viewers' companion.</div></div></div>
+ return `<div class="hero"><div><h1>Live Break</h1></div></div>
  <div class="card" style="max-width:560px"><h3 style="font-size:15px">Start a session</h3>
   ${seed?`<div class="out" style="margin-top:10px">Seeding from show <b>${esc(seed.show||'')}</b>${seed.model?` · model <b>${esc(seed.model.name)}</b> (${seed.model.slots} slots)`:' · no model attached — add spots manually'}</div>`:''}
   <div style="margin-top:12px"><label>Session name</label><input id="liveName" value="${esc(defName)}" placeholder="e.g. Friday Ascended Heroes Case Break"></div>
