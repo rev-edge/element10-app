@@ -737,10 +737,11 @@ function dbCardFilters(q,o){const f=o.filters||{};const s=(o.search||'').trim().
 async function dbCards(scopeCol,scopeId,o){o=o||{};try{
  let q=sb.from('e10_cards').select('id,num,name,set_name,rarity,value,parallel,card_type,serial,color,rookie,chase,player_id,player:player_id(id,name)').eq(scopeCol,scopeId);
  q=dbCardFilters(q,o);
- /* Unfiltered browse: order by the chosen column (btree index, no sort). Filtered/search:
-    stream matches straight from the trigram index (no ORDER) so results return in <150ms even
-    on 55k+ rows — the sort would otherwise materialize every match first. */
- if(!dbCardFiltered(o)){const col=CARD_COL[(o.sort&&o.sort.col)]||'name';q=q.order(col,{ascending:(o.sort?o.sort.dir:1)>=0,nullsFirst:false}).order('id',{ascending:true});}
+ /* Always apply the user's sort — filtered OR not. Measured server-side: broad filter + order
+    by an indexed column (checklist_id,name,id / ,value,id) returns in ~1ms via index scan;
+    the worst case (broad filter + a non-index-matching order) is a seq scan + top-N heapsort,
+    still well under a second on 55k rows. The planner picks the path. */
+ const col=CARD_COL[(o.sort&&o.sort.col)]||'name';q=q.order(col,{ascending:(o.sort?o.sort.dir:1)>=0,nullsFirst:false}).order('id',{ascending:true});
  q=q.range(o.offset||0,(o.offset||0)+(o.limit||CARD_PAGE)-1);
  const{data,error}=await q;if(error)throw error;return{rows:data||[]};
 }catch(e){toast('Load cards: '+e.message);return{rows:[]};}}
