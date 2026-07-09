@@ -164,6 +164,38 @@ async function signIn(email) {
   // cleanup the session we created (teardown of auth users handled via MCP)
   if (sess) { try { await ca.from('e10_break_sessions').delete().eq('id', sess.id); } catch (e) {} }
 
+  // ── CARD TABLES: shared team data (member read/write, INSERT...RETURNING, non-member none) ──
+  console.log('\n[card tables]');
+  {
+    const { data, error } = await cb.from('e10_cards').select('id').limit(1);
+    ok('member can READ shared cards', !error && Array.isArray(data), error && error.message);
+  }
+  {
+    const { data, error } = await cb.from('e10_players').select('id').limit(1);
+    ok('member can READ shared players', !error && Array.isArray(data), error && error.message);
+  }
+  let probeCl = null;
+  {
+    // member INSERT ... RETURNING on e10_checklists (the trap: RETURNING is subject to SELECT policy)
+    const { data, error } = await cb.from('e10_checklists')
+      .insert({ name: '__rls_probe_' + B.slice(0, 6), source: 'test' }).select().maybeSingle();
+    ok('member .insert().select() checklist RETURNS the row (INSERT...RETURNING)', !error && data && data.id, error && error.message);
+    probeCl = data && data.id;
+  }
+  if (probeCl) {
+    const { data, error } = await cb.from('e10_cards')
+      .insert({ checklist_id: probeCl, name: 'Probe Card', value: 1 }).select().maybeSingle();
+    ok('member .insert().select() card RETURNS the row', !error && data && data.id, error && error.message);
+  }
+  {
+    // viewer (C) is NOT an e10_members row -> e10_is_member() false -> zero cards, no insert
+    const { data } = await cc.from('e10_cards').select('id').limit(5);
+    ok('non-member (viewer) reads ZERO cards', Array.isArray(data) && data.length === 0, 'got ' + (data ? data.length : '?'));
+    const w = await cc.from('e10_cards').insert({ checklist_id: probeCl || '00000000-0000-0000-0000-000000000000', name: 'hack' }).select();
+    ok('non-member (viewer) CANNOT insert a card', !!w.error && (w.data === null || w.data.length === 0), 'unexpectedly succeeded');
+  }
+  if (probeCl) { try { await cb.from('e10_checklists').delete().eq('id', probeCl); } catch (e) {} } // cascade removes the probe card
+
   console.log('\n──────────────────────────────');
   console.log('RESULT: ' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

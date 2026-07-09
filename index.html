@@ -429,7 +429,7 @@ function renderBreak(target){target=target||'dtc';const el=$(target);if(!el)retu
    <div style="margin-top:8px;padding:12px;border:1px solid var(--line);border-radius:10px">
      <div class="lab">Chase pool (checklist cards)</div><div id="chaseList"></div>
      <div class="row" style="margin-top:6px"><input id="cbName" placeholder="Chase card" style="flex:2"><input id="cbVal" type="number" placeholder="$" style="flex:1"><button class="btn sm" onclick="addChase()">+</button></div>
-     ${S.checklists.length?`<div class="row" style="margin-top:8px"><select id="clSel" style="flex:2"><option value="">— load chases from checklist —</option>${S.checklists.map((c,i)=>`<option value="${i}">${esc(c.name)} (${(c.cards||c.rows||[]).length})</option>`).join('')}</select><button class="btn sm" onclick="loadChecklistToBreak()">Load</button></div>`:''}
+     <div class="row" style="margin-top:8px"><button class="btn sm" onclick="loadChecklistPicker()">＋ Load chases from a checklist…</button></div>
      <div class="lab" style="margin-top:12px">Extra products (split into spots)</div><div id="prodList"></div>
      <div class="row" style="margin-top:6px"><input id="pName" placeholder="Product" style="flex:2"><input id="pSpots" type="number" placeholder="spots" style="flex:1"><input id="pVal" type="number" placeholder="pool $" style="flex:1"><button class="btn sm" onclick="addProd()">+</button></div>
      <div class="lab" style="margin-top:12px">Solo auctions</div><div id="aucList"></div>
@@ -447,7 +447,8 @@ function renderBreak(target){target=target||'dtc';const el=$(target);if(!el)retu
 function dModeler(){renderBreak('dtc');}
 function openModeler(){dataTab='modeler';go('data');}
 function newBlankModel(){BK={products:[],chases:[],auctions:[],invItems:[],cost:0,_last:null};BK._preloadNote='';openModeler();}
-function checklistsForSet(set){return (S.checklists||[]).filter(c=>c.set&&set&&c.set===set);}
+async function checklistsForSet(set){if(!(set||'').trim())return[];try{const{data:sets}=await sb.from('e10_sets').select('id').ilike('name',set.trim());const ids=(sets||[]).map(s=>s.id);if(!ids.length)return[];const{data}=await sb.from('e10_checklists').select('id,name,card_count').in('set_id',ids);(data||[]).forEach(c=>{window._clCache=window._clCache||{};window._clCache[c.id]=c.name;});return data||[];}catch(e){return[];}}
+async function dbPreloadCards(clId){try{let{data}=await sb.from('e10_cards').select('name,value,chase').eq('checklist_id',clId).eq('chase',true).gt('value',0).order('value',{ascending:false}).limit(300);if(!data||!data.length){const r=await sb.from('e10_cards').select('name,value,chase').eq('checklist_id',clId).gt('value',0).order('value',{ascending:false}).limit(300);data=r.data||[];}return (data||[]).map(c=>({name:c.name,value:+c.value||0,chase:!!c.chase}));}catch(e){toast(e.message);return[];}}
 function preloadBreak(it,cl){BK={products:[],chases:[],auctions:[],invItems:[],cost:0,_last:null};
  if(it){BK.cost=+it.cost||0;BK.invItems.push({itemId:it.id,name:it.name,qty:1,cost:+it.cost||0,value:+it.value||0,cat:it.cat,set:it.set});}
  let n=0;if(cl){const flagged=(cl.cards||[]).filter(c=>c.chase&&(+c.value||0)>0);const pool=flagged.length?flagged:(cl.cards||[]).filter(c=>(+c.value||0)>0);pool.forEach(c=>{BK.chases.push({name:c.name,val:+c.value||0});n++;});}
@@ -455,12 +456,12 @@ function preloadBreak(it,cl){BK={products:[],chases:[],auctions:[],invItems:[],c
  openModeler();
  toast(cl?(n+' chase cards loaded from '+cl.name):(it?('No checklist matched set “'+(it.set||'—')+'” — model preloaded blank, add chases'):'New model'));
 }
-function preloadBreakById(itemId,clId){preloadBreak(itemId?S.inventory.find(x=>x.id===itemId):null, clId?(S.checklists||[]).find(c=>c.id===clId):null);}
-function buildBreakFromProduct(itemId){const it=S.inventory.find(x=>x.id===itemId);if(!it)return;const cls=checklistsForSet(it.set);
- if(cls.length>1){$('modal').innerHTML=`<h3 style="font-size:18px">Build a break — ${esc(it.name)}</h3><div class="lab" style="margin:6px 0 10px;text-transform:none;letter-spacing:0">Multiple checklists match set “${esc(it.set)}”. Pick one:</div>${cls.map(c=>`<div class="row" style="margin-bottom:6px"><button class="btn" style="flex:1;text-align:left" onclick="closeM();preloadBreakById('${it.id}','${c.id}')">📄 ${esc(c.name)} · ${(c.cards||[]).length} cards</button></div>`).join('')}<div class="row" style="margin-top:8px"><button class="btn sm" onclick="closeM();preloadBreakById('${it.id}','')">No checklist (manual)</button><button class="btn sm" onclick="closeM()">Cancel</button></div>`;$('ov').style.display='flex';return;}
- preloadBreak(it,cls[0]||null);
+async function preloadBreakById(itemId,clId){const it=itemId?S.inventory.find(x=>x.id===itemId):null;let cl=null;if(clId){const cards=await dbPreloadCards(clId);cl={name:(window._clCache&&window._clCache[clId])||'Checklist',set:it?it.set:'',cards};}preloadBreak(it,cl);}
+async function buildBreakFromProduct(itemId){const it=S.inventory.find(x=>x.id===itemId);if(!it)return;const cls=await checklistsForSet(it.set);
+ if(cls.length>1){$('modal').innerHTML=`<h3 style="font-size:18px">Build a break — ${esc(it.name)}</h3><div class="lab" style="margin:6px 0 10px;text-transform:none;letter-spacing:0">Multiple checklists match set “${esc(it.set)}”. Pick one:</div>${cls.map(c=>`<div class="row" style="margin-bottom:6px"><button class="btn" style="flex:1;text-align:left" onclick="closeM();preloadBreakById('${it.id}','${c.id}')">📄 ${esc(c.name)} · ${(c.card_count||0).toLocaleString()} cards</button></div>`).join('')}<div class="row" style="margin-top:8px"><button class="btn sm" onclick="closeM();preloadBreakById('${it.id}','')">No checklist (manual)</button><button class="btn sm" onclick="closeM()">Cancel</button></div>`;$('ov').style.display='flex';return;}
+ if(cls[0]){const cards=await dbPreloadCards(cls[0].id);preloadBreak(it,{name:cls[0].name,set:it.set,cards});}else preloadBreak(it,null);
 }
-function buildBreakFromChecklist(clId){const cl=(S.checklists||[]).find(c=>c.id===clId);if(!cl)return;preloadBreak(null,cl);}
+async function buildBreakFromChecklist(clId){const name=(window._clCache&&window._clCache[clId])||'Checklist';const cards=await dbPreloadCards(clId);preloadBreak(null,{name,set:'',cards});}
 function renderBKlists(){
  $('prodList').innerHTML=BK.products.map((p,i)=>`<div class="row" style="justify-content:space-between;font-size:13px;padding:3px 0"><span>${esc(p.name)} · ${p.spots} spots · ${money(p.val)}</span><button class="btn x" onclick="BK.products.splice(${i},1);renderBKlists();calcBreak()">✕</button></div>`).join('');
  $('chaseList').innerHTML=BK.chases.map((c,i)=>`<div class="row" style="justify-content:space-between;font-size:13px;padding:3px 0"><span>${esc(c.name)} · ${money(c.val)}</span><button class="btn x" onclick="BK.chases.splice(${i},1);renderBKlists();calcBreak()">✕</button></div>`).join('');
@@ -482,11 +483,8 @@ function bkDelInv(i){const it=BK.invItems[i];if(!it)return;BK.invItems.splice(i,
 function addProd(){const n=$('pName').value.trim(),s=+$('pSpots').value,v=+$('pVal').value;if(!n||!s)return;BK.products.push({name:n,spots:s,val:v||0});$('pName').value=$('pSpots').value=$('pVal').value='';renderBKlists();calcBreak();}
 function addChase(){const n=$('cbName').value.trim(),v=+$('cbVal').value;if(!n||!v)return;BK.chases.push({name:n,val:v});$('cbName').value=$('cbVal').value='';renderBKlists();calcBreak();}
 function addAuc(){const n=$('aName').value.trim(),v=+$('aVal').value;if(!n||!v)return;BK.auctions.push({name:n,val:v});$('aName').value=$('aVal').value='';renderBKlists();calcBreak();}
-function loadChecklistToBreak(){const idx=$('clSel').value;if(idx==='')return;const cl=S.checklists[+idx];let n=0;
- if(Array.isArray(cl.cards)&&cl.cards.length){cl.cards.forEach(c=>{const v=+c.value||0;if(c.name&&v>0){BK.chases.push({name:c.name,val:v});n++;}});}
- else{const vcol=cl.columns.findIndex(c=>/value|price|\$|market/i.test(c)),ncol=cl.columns.findIndex(c=>/name|card|title|chase|item/i.test(c)),nc=ncol<0?0:ncol,vc=vcol<0?1:vcol;
-  cl.rows.forEach(r=>{const nm=r[nc],val=parseFloat((r[vc]||'').toString().replace(/[^0-9.]/g,''));if(nm&&val>0){BK.chases.push({name:nm,val:val});n++;}});}
- renderBKlists();calcBreak();toast(n+' chases loaded from '+cl.name);}
+async function loadChecklistPicker(){const cls=await dbChecklists();$('modal').innerHTML=`<h3 style="font-size:16px">Load chases from a checklist</h3><div style="max-height:340px;overflow:auto;margin-top:8px">${cls.map(c=>`<div class="row" style="margin-bottom:6px"><button class="btn" style="flex:1;text-align:left" onclick="loadChecklistToBreak('${c.id}')">📄 ${esc(c.name)} · ${(c.card_count||0).toLocaleString()} cards</button></div>`).join('')||'<div class="lab">No checklists.</div>'}</div><div class="row" style="margin-top:8px"><button class="btn sm" onclick="closeM()">Cancel</button></div>`;$('ov').style.display='flex';}
+async function loadChecklistToBreak(clId){closeM();const cards=await dbPreloadCards(clId);let n=0;cards.forEach(c=>{if(c.name&&(+c.value||0)>0){BK.chases.push({name:c.name,val:+c.value||0});n++;}});renderBKlists();calcBreak();toast(n+' chases loaded');}
 function balance(items,n){const bins=Array.from({length:n},()=>({sum:0,items:[]}));items.slice().sort((a,b)=>b.val-a.val).forEach(it=>{bins.sort((a,b)=>a.sum-b.sum);bins[0].items.push(it);bins[0].sum+=it.val;});return bins;}
 function bkCharGroups(pool){const chars=(S.lists&&S.lists.characters)||[];const groups={};
  pool.forEach(c=>{const nm=(c.name||'');let key=chars.find(ch=>new RegExp('\\b'+ch.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b','i').test(nm));
@@ -685,7 +683,7 @@ function clStageDirect(headers,rows,name){
  clStage(applied.cards,{name:name,set:applied.setName||clDeriveSet(applied.cards),summary:applied.summary,flags:applied.flags,unmapped:applied.unmapped,confidence:'high',notes:'Direct import — matched template headers.',mode:'direct'});}
 function clStage(cards,meta){
  cards.forEach(c=>{c.value=(c.value===''||c.value==null)?'':(+c.value||0);c.chase=!!c.chase;c.cardType=c.cardType||'base';c.parallel=c.parallel||'';});
- PENDING_CL={id:'__pending__',name:meta.name||'Imported checklist',set:meta.set||clDeriveSet(cards),cards,columns:[],_pending:true,_meta:meta};
+ PENDING_CL={id:'__pending__',name:meta.name||'Imported checklist',set:meta.set||clDeriveSet(cards),cards,columns:[],_pending:true,_meta:meta,_resolve:!/pok[eé]mon|magic|mtg|lorcana|yu-?gi/i.test((meta.name||'')+' '+(meta.set||''))};
  clReviewMode=true;clOpenId=null;if(GRIDS['cl:__review__'])delete GRIDS['cl:__review__'];makeGrid('cl:__review__',clReviewGridCfg());renderChecklistReview();}
 function clReviewGridCfg(){return {sk:'e10_clrev',cols:CL_COLS,defaultCols:['num','name','parallel','cardType','rarity','value','chase','actions'],defaultSort:{col:'name',dir:1},
  defaultFilters:{search:'',rarity:'',cardType:'',valueMin:''},listBoxId:'clRevListBox',colsMenuId:'clRevColsMenu',viewPrompt:'Name this view',
@@ -706,7 +704,7 @@ function renderChecklistReview(){const cl=PENDING_CL;if(!cl){clReviewMode=false;
    <div class="lab" style="text-transform:none;letter-spacing:0;margin-top:8px;font-size:12.5px"><b>${cds.length}</b> cards · ${nBase} base · ${nPar} parallel · ${nIns} insert.${m.summary?` <b>Mapped:</b> ${esc(m.summary)}.`:''}${m.notes?` <span style="color:var(--mut)">${esc(m.notes)}</span>`:''}</div>
    ${(m.unmapped&&m.unmapped.length)?`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:4px;color:var(--mut)">Unmapped columns kept in “extra”: ${m.unmapped.map(esc).join(', ')}.</div>`:''}
    ${(m.flags&&m.flags.length)?`<div class="out" style="margin-top:8px">⚠ ${m.flags.length} row(s) to check: ${m.flags.slice(0,6).map(f=>'row '+f.row+' — '+esc(f.msg)).join('; ')}${m.flags.length>6?' …':''}</div>`:''}
-   <div class="row" style="margin-top:12px;gap:8px;align-items:center;flex-wrap:wrap"><span class="lab">Name</span><input value="${esc(cl.name||'')}" style="max-width:240px" oninput="PENDING_CL.name=this.value"><span class="lab">Set</span><input value="${esc(cl.set||'')}" style="max-width:180px" oninput="PENDING_CL.set=this.value"><span class="lab">Commit as</span><select id="clCommitAs" style="max-width:220px"><option value="">New checklist</option>${existing}</select></div>
+   <div class="row" style="margin-top:12px;gap:8px;align-items:center;flex-wrap:wrap"><span class="lab">Name</span><input value="${esc(cl.name||'')}" style="max-width:240px" oninput="PENDING_CL.name=this.value"><span class="lab">Set</span><input value="${esc(cl.set||'')}" style="max-width:180px" oninput="PENDING_CL.set=this.value"><label style="display:flex;align-items:center;gap:5px;margin:0"><input type="checkbox" style="width:auto" ${cl._resolve!==false?'checked':''} onchange="PENDING_CL._resolve=this.checked"> <span class="lab">Resolve player entities (sports)</span></label></div>
    <div class="etool" style="margin-top:12px">
      <div style="flex:2;min-width:140px"><label>Search</label><input value="${esc(F.search||'')}" placeholder="name / # / parallel…" oninput="clRevSet('search',this.value)"></div>
      <div><label>Rarity</label><select onchange="clRevSet('rarity',this.value)"><option value="">All</option>${rarities.map(r=>`<option ${F.rarity===r?'selected':''}>${esc(r)}</option>`).join('')}</select></div>
@@ -717,12 +715,134 @@ function renderChecklistReview(){const cl=PENDING_CL;if(!cl){clReviewMode=false;
    <div class="etool" style="margin-top:8px;align-items:center">${gColsBtn(G)}${gViewsHTML(G)}</div>
    <div id="clRevListBox"></div></div>`;
  $('dtc').innerHTML=h;gRenderCols(G);gRenderList(G);}
-function clApproveReview(){if(!canEditScoped())return roGuard();const cl=PENDING_CL;if(!cl)return;const tgt=$('clCommitAs')?$('clCommitAs').value:'';
- cl.cards.forEach(c=>{if(!c.id)c.id='cc'+Math.random().toString(36).slice(2);c.chase=!!c.chase;c.cardType=c.cardType||'base';c.parallel=c.parallel||'';if(c.value!==''&&c.value!=null)c.value=+c.value||0;});
- if(tgt){const ex=(S.checklists||[]).find(c=>c.id===tgt);if(ex){ex.cards=(ex.cards||[]).concat(cl.cards);save();toast('Merged '+cl.cards.length+' cards into '+ex.name);}}
- else{S.checklists.push({id:'cl'+Date.now(),name:cl.name||'Imported checklist',set:cl.set||clDeriveSet(cl.cards),cards:cl.cards,columns:[]});save();toast('Checklist added ('+cl.cards.length+' cards)');}
- clReviewMode=false;PENDING_CL=null;delete GRIDS['cl:__review__'];dChecklists();}
+async function clApproveReview(){if(!canEditScoped())return roGuard();const cl=PENDING_CL;if(!cl)return;
+ cl.cards.forEach(c=>{c.chase=!!c.chase;c.cardType=c.cardType||'base';c.parallel=c.parallel||'';if(c.value!==''&&c.value!=null)c.value=+c.value||0;});
+ const isTCG=/pok[eé]mon|magic|mtg|lorcana|yu-?gi/i.test((cl.name||'')+' '+(cl.set||''));
+ const setId=await dbEnsureSet(cl.set,isTCG?'Pokémon':null);
+ if(cl._resolve!==false){toast('Resolving players…');const plan=await planResolution(cl.cards);if(plan.prompts.length){openResolveModal(cl,setId,plan);return;}commitImport(cl,setId,plan.linked);}
+ else commitImport(cl,setId,{});}
 function clCancelReview(){clReviewMode=false;PENDING_CL=null;delete GRIDS['cl:__review__'];toast('Import discarded');dChecklists();}
+/* ===================== CARD TABLES — server-backed data layer + grid (Phase B/C) =====================
+   Cards/checklists/players/sets live in Postgres (e10_cards etc.), queried a page at a time.
+   Nothing here loads a whole card table into the browser. */
+const CARD_PAGE=100;const CARD_COL={num:'num',name:'name',set:'set_name',rarity:'rarity',value:'value',parallel:'parallel',card_type:'card_type',serial:'serial',color:'color',rookie:'rookie',chase:'chase'};
+async function dbChecklists(){try{const{data,error}=await sb.from('e10_checklists').select('id,name,source,card_count,updated_at,set:set_id(name,sport)').order('updated_at',{ascending:false});if(error)throw error;return data||[];}catch(e){toast('Load checklists: '+e.message);return[];}}
+function dbCardFiltered(o){const f=(o&&o.filters)||{};return !!((o&&o.search&&o.search.trim())||(f.set||'').trim()||(f.rarity||'').trim()||(f.parallel||'').trim()||(f.card_type||'').trim());}
+function dbCardFilters(q,o){const f=o.filters||{};const s=(o.search||'').trim().toLowerCase();if(s)q=q.like('search','%'+s+'%'); /* search col is pre-lowercased -> LIKE hits the trigram index */
+ if((f.set||'').trim())q=q.ilike('set_name','%'+f.set.trim()+'%');
+ if((f.rarity||'').trim())q=q.ilike('rarity','%'+f.rarity.trim()+'%');
+ if((f.parallel||'').trim())q=q.ilike('parallel','%'+f.parallel.trim()+'%');
+ if((f.card_type||'').trim())q=q.ilike('card_type','%'+f.card_type.trim()+'%');
+ return q;}
+async function dbCards(scopeCol,scopeId,o){o=o||{};try{
+ let q=sb.from('e10_cards').select('id,num,name,set_name,rarity,value,parallel,card_type,serial,color,rookie,chase,player_id,player:player_id(id,name)').eq(scopeCol,scopeId);
+ q=dbCardFilters(q,o);
+ /* Unfiltered browse: order by the chosen column (btree index, no sort). Filtered/search:
+    stream matches straight from the trigram index (no ORDER) so results return in <150ms even
+    on 55k+ rows — the sort would otherwise materialize every match first. */
+ if(!dbCardFiltered(o)){const col=CARD_COL[(o.sort&&o.sort.col)]||'name';q=q.order(col,{ascending:(o.sort?o.sort.dir:1)>=0,nullsFirst:false}).order('id',{ascending:true});}
+ q=q.range(o.offset||0,(o.offset||0)+(o.limit||CARD_PAGE)-1);
+ const{data,error}=await q;if(error)throw error;return{rows:data||[]};
+}catch(e){toast('Load cards: '+e.message);return{rows:[]};}}
+async function dbCardCount(scopeCol,scopeId,o){try{let q=sb.from('e10_cards').select('id',{count:'exact',head:true}).eq(scopeCol,scopeId);q=dbCardFilters(q,o);const{count,error}=await q;if(error)throw error;return count||0;}catch(e){return null;}}
+async function scEdit(id,field,val){const col=CARD_COL[field];if(!col)return;let v=val;if(field==='value'){const c=(''+val).replace(/[^0-9.\-]/g,'');v=c===''?null:+c;}else if(field==='chase'||field==='rookie')v=!!val;else v=(v===''?null:v);
+ const row=SRV&&SRV.rows.find(r=>r.id===id);if(row)row[col]=v;try{const{error}=await sb.from('e10_cards').update({[col]:v}).eq('id',id);if(error)toast(error.message);}catch(e){toast(e.message);}}
+async function scDel(id){if(!confirm('Delete this card?'))return;try{await sb.from('e10_cards').delete().eq('id',id);}catch(e){toast(e.message);return;}if(SRV){SRV.rows=SRV.rows.filter(r=>r.id!==id);SRV.count=Math.max(0,SRV.count-1);gRenderList(SRV.G);scPager();}}
+async function scAddCard(){if(!SRV||SRV.scopeCol!=='checklist_id')return;try{const{error}=await sb.from('e10_cards').insert({checklist_id:SRV.scopeId,name:'New card',card_type:'base'});if(error){toast(error.message);return;}}catch(e){toast(e.message);return;}SRV.page=0;scFetch();}
+const SC_COLS=[
+ {key:'num',label:'Card #',sortable:true,sortVal:c=>c.num||'',cell:c=>`<td class="mono"><input value="${esc(c.num||'')}" style="width:78px;font-size:12px" onchange="scEdit('${c.id}','num',this.value)"></td>`},
+ {key:'name',label:'Name',core:true,first:true,sortable:true,sortVal:c=>(c.name||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.name||'')}" style="min-width:150px" onchange="scEdit('${c.id}','name',this.value)"></td>`},
+ {key:'player',label:'Player',sortable:false,cell:c=>`<td>${c.player?`<a style="cursor:pointer;color:#2563eb;text-decoration:underline" onclick="openPlayer('${c.player.id}')">${esc(c.player.name)}</a>`:'<span class="lab">—</span>'}</td>`},
+ {key:'set',label:'Set',sortable:true,sortVal:c=>(c.set_name||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.set_name||'')}" style="min-width:130px;font-size:12px" onchange="scEdit('${c.id}','set',this.value)"></td>`},
+ {key:'parallel',label:'Parallel',sortable:true,sortVal:c=>(c.parallel||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.parallel||'')}" style="min-width:100px;font-size:12px" placeholder="Base" onchange="scEdit('${c.id}','parallel',this.value)"></td>`},
+ {key:'card_type',label:'Type',sortable:true,sortVal:c=>c.card_type||'',cell:c=>`<td><select style="font-size:12px" onchange="scEdit('${c.id}','card_type',this.value)">${['base','parallel','insert','SSP'].map(t=>`<option ${((c.card_type||'base')===t)?'selected':''}>${t}</option>`).join('')}</select></td>`},
+ {key:'serial',label:'Serial',sortable:true,sortVal:c=>c.serial||'',cell:c=>`<td class="mono"><input value="${esc(c.serial||'')}" style="width:60px;font-size:12px" placeholder="/99" onchange="scEdit('${c.id}','serial',this.value)"></td>`},
+ {key:'color',label:'Color',sortable:true,sortVal:c=>(c.color||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.color||'')}" style="width:88px;font-size:12px" onchange="scEdit('${c.id}','color',this.value)"></td>`},
+ {key:'rarity',label:'Rarity',sortable:true,sortVal:c=>(c.rarity||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.rarity||'')}" style="min-width:110px;font-size:12px" onchange="scEdit('${c.id}','rarity',this.value)"></td>`},
+ {key:'value',label:'Value',sortable:true,sortVal:c=>+c.value||0,cell:c=>`<td class="mono"><input type="number" value="${c.value==null?'':esc(''+c.value)}" style="width:74px" onchange="scEdit('${c.id}','value',this.value)"></td>`},
+ {key:'rookie',label:'RC',sortable:true,sortVal:c=>c.rookie?1:0,cell:c=>`<td style="text-align:center"><input type="checkbox" style="width:auto" ${c.rookie?'checked':''} onchange="scEdit('${c.id}','rookie',this.checked)"></td>`},
+ {key:'chase',label:'Chase',sortable:true,sortVal:c=>c.chase?1:0,cell:c=>`<td style="text-align:center"><input type="checkbox" style="width:auto" ${c.chase?'checked':''} onchange="scEdit('${c.id}','chase',this.checked)"></td>`},
+ {key:'actions',label:'',core:true,sortable:false,cell:c=>`<td><button class="btn x" onclick="scDel('${c.id}')">✕</button></td>`},
+];
+const SC_DEFAULT=['num','name','player','set','parallel','card_type','value','chase','actions'];
+let SRV=null,_scT=null;
+function scGridCfg(){return {sk:'e10_sc',cols:SC_COLS,defaultCols:SC_DEFAULT,defaultSort:{col:'name',dir:1},
+ defaultFilters:{search:'',set:'',rarity:'',parallel:'',card_type:''},listBoxId:'scListBox',colsMenuId:'scColsMenu',viewPrompt:'Name this view (e.g. "Rookies", "/99 parallels")',
+ base:()=>SRV?SRV.rows:[],searchFn:null,filter:null,onSort:()=>{SRV.page=0;scFetch();},render:()=>{renderCardGridShell();scFetch();}};}
+function openCardGrid(scopeCol,scopeId,name,mode){SRV={scopeCol,scopeId,name:name||'',mode:mode||'checklist',page:0,rows:null,count:0};if(!GRIDS['sc'])makeGrid('sc',scGridCfg());SRV.G=GRIDS['sc'];clOpenId='sc';renderCardGridShell();scFetch();}
+function openServerChecklist(clId,name){openCardGrid('checklist_id',clId,name||(window._clCache&&window._clCache[clId])||'Checklist','checklist');}
+async function openPlayer(pid){let nm='Player';try{const{data}=await sb.from('e10_players').select('name,team,nationality').eq('id',pid).single();if(data)nm=data.name;window._plMeta=data;}catch(e){}openCardGrid('player_id',pid,nm,'player');}
+function closeCardGrid(){const m=SRV?SRV.mode:'checklist';SRV=null;clOpenId=null;if(m==='player')dPlayers();else dChecklists();}
+function scFilter(field,val){if(!SRV)return;SRV.G.state.filters[field]=val;SRV.G.state.activeView=-1;SRV.page=0;clearTimeout(_scT);_scT=setTimeout(scFetch,250);}
+function scPage(dir){if(!SRV)return;let np=SRV.page+dir;if(np<0)return;if(dir>0){if(SRV.count!=null){if(np>Math.ceil(SRV.count/CARD_PAGE)-1)return;}else if((SRV.rows||[]).length<CARD_PAGE)return;}SRV.page=np;scFetch();}
+async function scFetch(){if(!SRV)return;const G=SRV.G,F=G.state.filters;const box=$('scListBox');if(box&&SRV.rows==null)box.innerHTML='<div class="lab" style="padding:14px">Loading…</div>';
+ const key=JSON.stringify([F,G.state.sort,SRV.page,SRV.scopeId]);SRV._key=key;const t0=Date.now();
+ const res=await dbCards(SRV.scopeCol,SRV.scopeId,{search:F.search,filters:F,sort:G.state.sort,offset:SRV.page*CARD_PAGE,limit:CARD_PAGE});
+ if(!SRV||SRV._key!==key)return;SRV.rows=res.rows;SRV.count=null;SRV.ms=Date.now()-t0;gRenderList(G);scPager();
+ dbCardCount(SRV.scopeCol,SRV.scopeId,{search:F.search,filters:F}).then(c=>{if(SRV&&SRV._key===key){SRV.count=c;scPager();}});}
+function scPager(){const el=$('scPager');if(!el||!SRV)return;const known=SRV.count!=null;const from=(SRV.rows&&SRV.rows.length)?SRV.page*CARD_PAGE+1:0,to=SRV.page*CARD_PAGE+((SRV.rows||[]).length);const pages=known?Math.max(1,Math.ceil(SRV.count/CARD_PAGE)):null;
+ el.innerHTML=`<span>${from.toLocaleString()}–${to.toLocaleString()} of <b>${known?SRV.count.toLocaleString():'…'}</b>${SRV.ms!=null?' · '+SRV.ms+'ms':''}</span> <button class="btn x sm" ${SRV.page<=0?'disabled':''} onclick="scPage(-1)">‹ Prev</button> <span class="mono">${SRV.page+1}${pages?'/'+pages:''}</span> <button class="btn x sm" ${(known?SRV.page>=pages-1:(SRV.rows||[]).length<CARD_PAGE)?'disabled':''} onclick="scPage(1)">Next ›</button>`;}
+function renderCardGridShell(){const G=SRV.G,F=G.state.filters;const player=SRV.mode==='player';
+ let h=`<div class="card"><div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+   <div class="row" style="gap:8px;align-items:center"><button class="btn sm" onclick="closeCardGrid()">← ${player?'Players':'Checklists'}</button><h3 style="font-size:15px">${player?'👤 ':''}${esc(SRV.name)}</h3>${player&&window._plMeta&&window._plMeta.team?`<span class="lab">${esc(window._plMeta.team||'')}${window._plMeta.nationality?' · '+esc(window._plMeta.nationality):''}</span>`:''}</div>
+   <div class="row" style="gap:6px">${player?'':`<button class="btn sm" onclick="buildBreakFromChecklist('${SRV.scopeId}')" title="Preload the break modeler with chase cards">⚡ Model a break</button><button class="btn v sm" onclick="scAddCard()">+ Add card</button>`}</div></div>
+   <div class="etool" style="margin-top:12px">
+     <div style="flex:2;min-width:160px"><label>Search all fields</label><input value="${esc(F.search||'')}" placeholder="name / set / parallel / color / #…" oninput="scFilter('search',this.value)"></div>
+     <div><label>Set</label><input value="${esc(F.set||'')}" placeholder="type…" style="max-width:130px" oninput="scFilter('set',this.value)"></div>
+     <div><label>Rarity</label><input value="${esc(F.rarity||'')}" placeholder="type…" style="max-width:110px" oninput="scFilter('rarity',this.value)"></div>
+     <div><label>Parallel</label><input value="${esc(F.parallel||'')}" placeholder="type…" style="max-width:110px" oninput="scFilter('parallel',this.value)"></div>
+     <div><label>Type</label><input value="${esc(F.card_type||'')}" placeholder="type…" style="max-width:90px" oninput="scFilter('card_type',this.value)"></div>
+   </div>
+   <div class="etool" style="margin-top:8px;align-items:center;gap:10px">${gColsBtn(G)}${gViewsHTML(G)}<div id="scPager" class="lab" style="margin-left:auto;text-transform:none;letter-spacing:0"></div></div>
+   <div id="scListBox"></div></div>`;
+ $('dtc').innerHTML=h;gRenderCols(G);}
+/* ---------- Players view ---------- */
+let PLR={search:'',page:0,rows:null,count:0,ms:null},_plT=null;
+async function dPlayers(){$('dtc').innerHTML=`<div class="card"><div class="row" style="justify-content:space-between;align-items:center"><h3 style="font-size:15px">Players</h3><div class="lab">Master records — every card of a player across all sets/years</div></div>
+   <div class="etool" style="margin-top:12px"><div style="flex:2;min-width:180px"><label>Search players</label><input value="${esc(PLR.search||'')}" placeholder="e.g. Messi" oninput="plSearch(this.value)"></div><div id="plPager" class="lab" style="margin-left:auto;align-self:flex-end;text-transform:none;letter-spacing:0"></div></div>
+   <div id="plListBox" style="margin-top:10px"></div></div>`;
+ plFetch();}
+function plSearch(v){PLR.search=v;PLR.page=0;clearTimeout(_plT);_plT=setTimeout(plFetch,250);}
+function plPage(d){const max=Math.max(0,Math.ceil(PLR.count/50)-1);const np=Math.min(max,Math.max(0,PLR.page+d));if(np===PLR.page)return;PLR.page=np;plFetch();}
+async function plFetch(){const box=$('plListBox');if(box&&PLR.rows==null)box.innerHTML='<div class="lab" style="padding:12px">Loading…</div>';
+ const t0=Date.now();let rows=[],count=0;try{let q=sb.from('e10_players').select('id,name,team,nationality,sport',{count:'exact'});const s=(PLR.search||'').trim();if(s)q=q.ilike('name','%'+s+'%');q=q.order('name').range(PLR.page*50,PLR.page*50+49);const r=await q;rows=r.data||[];count=r.count||0;}catch(e){toast(e.message);}
+ PLR.rows=rows;PLR.count=count;PLR.ms=Date.now()-t0;const bx=$('plListBox');if(!bx)return;
+ bx.innerHTML=`<div class="egrid wide"><table><tr><th>Player</th><th>Team</th><th>Nationality</th><th>Sport</th><th></th></tr>${rows.map(p=>`<tr><td><a style="cursor:pointer;color:#2563eb;text-decoration:underline;font-weight:600" onclick="openPlayer('${p.id}')">${esc(p.name)}</a></td><td>${esc(p.team||'—')}</td><td>${esc(p.nationality||'—')}</td><td>${esc(p.sport||'—')}</td><td><button class="btn sm" onclick="openPlayer('${p.id}')">All cards ↗</button></td></tr>`).join('')||`<tr><td colspan="5" style="color:var(--mut)">No players match.</td></tr>`}</table></div>`;
+ const pg=$('plPager');if(pg){const pages=Math.max(1,Math.ceil(count/50));pg.innerHTML=`${count.toLocaleString()} players${PLR.ms!=null?' · '+PLR.ms+'ms':''} · <button class="btn x sm" ${PLR.page<=0?'disabled':''} onclick="plPage(-1)">‹</button> ${PLR.page+1}/${pages} <button class="btn x sm" ${PLR.page>=pages-1?'disabled':''} onclick="plPage(1)">›</button>`;}}
+/* ---------- Import commit → tables (chunked) + player resolution ---------- */
+async function dbEnsureSet(name,sport){name=(name||'').trim();if(!name)return null;try{
+ const{data:ex}=await sb.from('e10_sets').select('id').ilike('name',name).limit(1);if(ex&&ex.length)return ex[0].id;
+ const yr=(name.match(/\d{4}/)||[null])[0];const{data,error}=await sb.from('e10_sets').insert({name,year:yr?+yr:null,sport:sport||null}).select('id').single();if(error)throw error;return data.id;
+}catch(e){return null;}}
+async function dbInsertCards(clId,setId,cards,onProgress){let done=0;const B=500;for(let i=0;i<cards.length;i+=B){const chunk=cards.slice(i,i+B).map(c=>({checklist_id:clId,set_id:setId||null,player_id:c.player_id||null,num:c.num||null,name:c.name||null,set_name:c.set_name||c.set||null,rarity:c.rarity||null,value:(c.value===''||c.value==null)?null:+c.value,parallel:c.parallel||null,card_type:c.cardType||c.card_type||'base',serial:c.serial||null,color:c.color||null,rookie:c.rookie==null?null:!!c.rookie,chase:!!c.chase,attrs:c.extra||{}}));const{error}=await sb.from('e10_cards').insert(chunk);if(error)throw error;done+=chunk.length;if(onProgress)onProgress(done,cards.length);}return done;}
+/* Resolution: match distinct card names to existing players (case-insensitive exact = confident auto-link);
+   surface likely-but-uncertain matches (a player whose name shares the last token) for the user to confirm. */
+async function planResolution(cards){const names=[...new Set(cards.map(c=>(c.name||'').trim()).filter(Boolean))];const exact={};
+ for(let i=0;i<names.length;i+=150){const batch=names.slice(i,i+150);try{const{data}=await sb.from('e10_players').select('id,name').in('name',batch);(data||[]).forEach(p=>exact[p.name.toLowerCase()]=p);}catch(e){}}
+ const linked={},unresolved=[];names.forEach(n=>{const hit=exact[n.toLowerCase()];if(hit)linked[n.toLowerCase()]=hit.id;else unresolved.push(n);});
+ const prompts=[];for(const n of unresolved.slice(0,40)){const last=n.split(/[ ,]+/).filter(Boolean).pop();if(!last||last.length<3)continue;try{const{data}=await sb.from('e10_players').select('id,name').ilike('name','%'+last+'%').limit(3);if(data&&data.length)prompts.push({name:n,candidates:data});}catch(e){}}
+ return {names,linked,unresolved,prompts};}
+async function commitImport(cl,setId,linkMap){toast('Committing '+cl.cards.length+' cards…');
+ if(cl._resolve!==false){
+   // create new players for names not linked, in bulk
+   const linked=Object.assign({},linkMap);const need=[...new Set(cl.cards.map(c=>(c.name||'').trim()).filter(n=>n&&!(n.toLowerCase() in linked)))];
+   const sport=(/soccer|nfl|nba|mlb|sport|prizm|topps|panini|football|basketball|baseball|world cup/i.test((cl.name||'')+' '+(cl.set||'')))?'Soccer':null;
+   for(let i=0;i<need.length;i+=200){const batch=need.slice(i,i+200).map(nm=>({name:nm,sport:sport}));try{const{data}=await sb.from('e10_players').insert(batch).select('id,name');(data||[]).forEach(p=>linked[p.name.toLowerCase()]=p.id);}catch(e){try{const{data}=await sb.from('e10_players').select('id,name').in('name',need.slice(i,i+200));(data||[]).forEach(p=>linked[p.name.toLowerCase()]=p.id);}catch(_){}}}
+   cl.cards.forEach(c=>{c.player_id=linked[(c.name||'').trim().toLowerCase()]||null;});
+ } else cl.cards.forEach(c=>{c.player_id=null;});
+ // checklist row
+ let clId;try{const{data,error}=await sb.from('e10_checklists').insert({name:cl.name||'Imported checklist',set_id:setId,source:(cl._meta&&cl._meta.mode)||'import'}).select('id').single();if(error)throw error;clId=data.id;}catch(e){toast('Create checklist failed: '+e.message);return;}
+ try{await dbInsertCards(clId,setId,cl.cards,(d,t)=>{if(d%2000===0||d===t)toast('Inserted '+d.toLocaleString()+'/'+t.toLocaleString());});}catch(e){toast('Insert failed: '+e.message);return;}
+ try{await sb.from('e10_checklists').update({card_count:cl.cards.length}).eq('id',clId);}catch(e){}
+ clReviewMode=false;PENDING_CL=null;delete GRIDS['cl:__review__'];toast('Checklist added ('+cl.cards.length.toLocaleString()+' cards)');openServerChecklist(clId,cl.name);}
+function openResolveModal(cl,setId,plan){const P=plan;window._resolveState={cl,setId,linked:Object.assign({},plan.linked),plan};
+ $('modal').innerHTML=`<h3 style="font-size:17px">Assign players</h3>
+   <div class="lab" style="text-transform:none;letter-spacing:0;margin:6px 0 10px">${Object.keys(plan.linked).length} name(s) match existing players and will link automatically. ${P.prompts.length} look like possible matches — confirm each or create new:</div>
+   <div style="max-height:340px;overflow:auto">${P.prompts.map((pr,i)=>`<div class="row" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding:6px 0"><div><b>${esc(pr.name)}</b></div><div class="row" style="gap:6px">${pr.candidates.map(cd=>`<button class="btn sm" onclick="resolvePick(${i},'${cd.id}')" id="rp_${i}_${cd.id}">Assign → ${esc(cd.name)}</button>`).join('')}<button class="btn sm" onclick="resolvePick(${i},'')" id="rp_${i}_new">Create new</button></div></div>`).join('')||'<div class="lab" style="text-transform:none">No uncertain matches — everything auto-resolves.</div>'}</div>
+   <div class="row" style="margin-top:12px;justify-content:flex-end;gap:8px"><button class="btn sm" onclick="closeM()">Cancel</button><button class="btn v" onclick="resolveCommit()">Commit import</button></div>`;
+ $('ov').style.display='flex';}
+function resolvePick(i,pid){const st=window._resolveState;if(!st)return;const pr=st.plan.prompts[i];pr._pick=pid;document.querySelectorAll('[id^="rp_'+i+'_"]').forEach(b=>b.classList.remove('v'));const el=$('rp_'+i+'_'+(pid||'new'));if(el)el.classList.add('v');}
+function resolveCommit(){const st=window._resolveState;if(!st)return;st.plan.prompts.forEach(pr=>{if(pr._pick)st.linked[pr.name.toLowerCase()]=pr._pick;});closeM();commitImport(st.cl,st.setId,st.linked);}
 function validateChecklist(p){const idx=rx=>p.columns.findIndex(c=>new RegExp(rx,'i').test(c));
  const ni=idx('card ?name|^name$|name|title|card'),vi=idx('value|market|price');
  const missing=[];if(ni<0)missing.push('Card Name');
@@ -774,7 +894,7 @@ function gRows(G){let rows=G.cfg.base(G).slice();const f=G.state.filters;const q
  const sc=gColDef(G,G.state.sort.col)||gVisibleCols(G)[0],d=G.state.sort.dir,key=sc?sc.sortVal:(_=>0);
  return rows.sort((a,b)=>{const ka=key(a),kb=key(b);return (ka<kb?-1:ka>kb?1:0)*d;});}
 function gSortTh(G,c){if(!c.sortable)return `<th></th>`;const on=G.state.sort.col===c.key;return `<th class="srt${on?' on':''}" onclick="gSortSet('${G.id}','${c.key}')">${esc(c.label)}<span class="chev">${on?(G.state.sort.dir>0?'▲':'▼'):'↕'}</span></th>`;}
-function gSortSet(id,key){const G=GRIDS[id];if(!G)return;if(G.state.sort.col===key)G.state.sort.dir*=-1;else G.state.sort={col:key,dir:1};gPersist(G);gRenderList(G);}
+function gSortSet(id,key){const G=GRIDS[id];if(!G)return;if(G.state.sort.col===key)G.state.sort.dir*=-1;else G.state.sort={col:key,dir:1};gPersist(G);if(G.cfg.onSort){G.cfg.onSort(G);return;}gRenderList(G);}
 function gRenderList(G){const box=$(G.cfg.listBoxId);if(!box)return;gPersist(G);const admin=ROLE==='admin';const rows=gRows(G),cols=gVisibleCols(G);
  box.innerHTML=`<div class="egrid wide" style="margin-top:12px"><table><tr>${cols.map(c=>gSortTh(G,c)).join('')}</tr>${rows.map(i=>`<tr>${cols.map(c=>c.cell(i,admin,G)).join('')}</tr>`).join('')||`<tr><td colspan="${cols.length}" style="color:var(--mut)">No rows match.</td></tr>`}</table></div>${G.cfg.footer?G.cfg.footer(rows,admin):''}`;}
 function gColMenuHTML(G){const vis=gVisibleKeys(G),hidden=G.cfg.cols.filter(c=>!vis.includes(c.key));
@@ -792,13 +912,13 @@ function gRenameView(id,idx){const G=GRIDS[id];const v=G.state.views[+idx];if(!v
 function gDeleteView(id,idx){const G=GRIDS[id];const v=G.state.views[+idx];if(!v||!confirm('Delete view “'+v.name+'”?'))return;G.state.views.splice(+idx,1);G.state.activeView=-1;gPersist(G);G.cfg.render();}
 function gResetFilters(id){const G=GRIDS[id];G.state.filters=Object.assign({},G.cfg.defaultFilters||{});G.state.activeView=-1;gPersist(G);if(G.cfg.onApply)G.cfg.onApply(G);G.cfg.render();toast('Filters reset');}
 function dataHub(){
- const tabs=[['overview','Overview'],['inventory','Inventory'],['checklists','Checklists'],['modeler','Break / Format'],['reports','Reports'],['export','Whatnot Export'],['lists','Lists & Settings']];
+ const tabs=[['overview','Overview'],['inventory','Inventory'],['checklists','Checklists'],['players','Players'],['modeler','Break / Format'],['reports','Reports'],['export','Whatnot Export'],['lists','Lists & Settings']];
  if(ROLE==='admin')tabs.push(['team','Team']);
  if(dataTab==='team'&&ROLE!=='admin')dataTab='overview';
  let h=`<div class="hero"><div><h1>Inventory &amp; Data</h1></div></div>`;
  h+=`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">${tabs.map(t=>`<button class="tab ${t[0]===dataTab?'on':''}" onclick="dataTab='${t[0]}';dataHub()">${t[1]}</button>`).join('')}</div><div id="dtc"></div>`;
  $('sec-data').innerHTML=h;
- ({overview:dOverview,inventory:dInventory,checklists:dChecklists,modeler:dModeler,reports:dReports,export:dExport,lists:dLists,team:dTeam}[dataTab])();
+ ({overview:dOverview,inventory:dInventory,checklists:dChecklists,players:dPlayers,modeler:dModeler,reports:dReports,export:dExport,lists:dLists,team:dTeam}[dataTab])();
 }
 function invTotals(){let cost=0,val=0,byCat={},qty=0;const view=invView();view.forEach(i=>{const q=+i.qty||1,c=(+i.cost||0)*q,v=(+i.value||0)*q;cost+=c;val+=v;qty+=q;byCat[i.cat]=(byCat[i.cat]||0)+v;});return{cost,val,byCat,qty,cnt:view.length,gain:val-cost};}
 function svgBars(entries){if(!entries.length)return '<div style="color:var(--mut);font-size:13px">No inventory yet.</div>';
@@ -1077,7 +1197,7 @@ function renderChecklistGrid(cl){const G=GRIDS['cl:'+cl.id]||makeGrid('cl:'+cl.i
    <div class="etool" style="margin-top:8px;align-items:center">${gColsBtn(G)}${gViewsHTML(G)}</div>
    <div id="clListBox"></div></div>`;
  $('dtc').innerHTML=h;gRenderCols(G);gRenderList(G);}
-function dChecklists(){if(clReviewMode&&PENDING_CL)return renderChecklistReview();if(clOpenId){const cl=clCur();if(cl)return renderChecklistGrid(cl);clOpenId=null;}
+function dChecklists(){if(clReviewMode&&PENDING_CL)return renderChecklistReview();if(clOpenId==='sc'&&SRV){renderCardGridShell();scFetch();return;}if(clOpenId){const cl=clCur();if(cl)return renderChecklistGrid(cl);clOpenId=null;}
  const lm=[['characters','Chase characters'],['sets','Sets / products'],['formats','Show formats'],['diff','Trust / hooks']];
  let h=`<div class="card"><h3 style="font-size:15px">Checklists</h3>
    <div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px"><b>Smart import</b> uses AI to map any layout (Topps, Beckett, any columns) to the app's fields and infer base / parallel / insert. <b>Direct import</b> is for a file already in the template — no AI. Both accept <b>.xlsx</b> and <b>.csv</b>, and both let you review &amp; edit before anything commits.</div>
@@ -1087,11 +1207,14 @@ function dChecklists(){if(clReviewMode&&PENDING_CL)return renderChecklistReview(
      <div class="drop" onclick="clImportPick('direct')" style="min-height:78px"><b>⬇ Direct import</b><div class="lab" style="text-transform:none;letter-spacing:0;margin-top:4px">Already formatted — commits with no AI</div></div>
    </div>
    <input id="clFile" type="file" accept=".csv,.tsv,.txt,.xlsx,.xls" style="display:none" onchange="clImportFile(this)">
-   <div style="margin-top:12px">${S.checklists.length?`<div class="egrid"><table><tr><th>Checklist</th><th>Set</th><th>Cards</th><th></th></tr>${S.checklists.map((c,i)=>{const cds=c.cards||[];const par=cds.filter(x=>x.cardType==='parallel').length,ins=cds.filter(x=>x.cardType==='insert').length;return `<tr><td>📄 ${esc(c.name)}</td><td>${esc(c.set||'—')}</td><td class="mono">${cds.length}${(par||ins)?` <span class="lab" style="text-transform:none;letter-spacing:0">(${par} par · ${ins} ins)</span>`:''}</td><td><div class="actions"><button class="btn sm" onclick="openChecklist('${c.id}')">Open ↗</button><button class="btn sm" onclick="buildBreakFromChecklist('${c.id}')">⚡ Break</button><button class="btn x" onclick="if(confirm('Delete checklist?')){S.checklists.splice(${i},1);save();dChecklists();}">✕</button></div></td></tr>`;}).join('')}</table></div>`:'<div style="color:var(--mut);font-size:13px">No checklists yet — import one above.</div>'}</div></div>`;
+   <div id="clListArea" style="margin-top:12px"><div class="lab" style="padding:8px 0">Loading checklists…</div></div></div>`;
  h+=`<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Attachments</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">Images, PDFs, docs. Small files stored in-browser; large ones referenced only (move to cloud when hosted).</div>
    <div class="drop" onclick="$('atFile').click()">Click to upload a file</div><input id="atFile" type="file" style="display:none" onchange="uploadAttach(this)">
    <div style="margin-top:12px">${S.attachments.length?`<div class="egrid"><table><tr><th>Attachment</th><th>Size</th><th></th></tr>${S.attachments.map((a,i)=>`<tr><td>📎 ${esc(a.name)}</td><td class="lab" style="text-transform:none;letter-spacing:0">${(a.size/1024).toFixed(0)} KB${a.data?'':' · reference'}</td><td><div class="actions">${a.data?`<a class="btn sm" href="${a.data}" download="${esc(a.name)}">Download</a>`:''}<button class="btn x" onclick="S.attachments.splice(${i},1);save();dChecklists()">✕</button></div></td></tr>`).join('')}</table></div>`:'<div style="color:var(--mut);font-size:13px">No attachments.</div>'}</div></div>`;
- $('dtc').innerHTML=h;}
+ $('dtc').innerHTML=h;dChecklistsList();}
+async function dChecklistsList(){const el=$('clListArea');if(!el)return;const cls=await dbChecklists();if(!$('clListArea'))return;window._clCache={};cls.forEach(c=>window._clCache[c.id]=c.name);
+ el.innerHTML=cls.length?`<div class="egrid"><table><tr><th>Checklist</th><th>Set</th><th>Cards</th><th></th></tr>${cls.map(c=>`<tr><td>📄 ${esc(c.name)}</td><td>${esc((c.set&&c.set.name)||'—')}</td><td class="mono">${(c.card_count||0).toLocaleString()}</td><td><div class="actions"><button class="btn sm" onclick="openServerChecklist('${c.id}')">Open ↗</button><button class="btn sm" onclick="buildBreakFromChecklist('${c.id}')">⚡ Break</button><button class="btn x" onclick="delChecklist('${c.id}')">✕</button></div></td></tr>`).join('')}</table></div>`:'<div style="color:var(--mut);font-size:13px">No checklists yet — import one above.</div>';}
+async function delChecklist(id){if(!confirm('Delete this checklist and all its cards?'))return;try{const{error}=await sb.from('e10_checklists').delete().eq('id',id);if(error)throw error;}catch(e){toast(e.message);return;}toast('Checklist deleted');dChecklists();}
 function dReports(){const t=invTotals();const cat=Object.entries(t.byCat).sort((a,b)=>b[1]-a[1]);const top=invView().slice().sort((a,b)=>((+b.value||0)*(+b.qty||1))-((+a.value||0)*(+a.qty||1))).slice(0,10);
  let h=`<div class="card"><div class="row" style="justify-content:space-between"><h3 style="font-size:15px">Inventory report</h3><div class="row"><button class="btn sm" onclick="exportReport()">Download CSV</button><button class="btn sm" onclick="window.print()">Print</button></div></div>
   <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(138px,1fr));margin-top:12px">

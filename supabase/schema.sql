@@ -112,3 +112,37 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 -- functionality (owner .insert().select() = INSERT ... RETURNING returns the row), isolation
 -- (member cannot read another member's user:<uid> row; viewer gets zero e10_workspace rows and
 -- cannot read unlinked sessions/slots/events), and RPC gating (non-admin calls are rejected).
+
+-- ─────────────────────────────────────────────────────────────
+-- APPLIED (migrations e10_card_tables, e10_cards_pagination_indexes, e10_cards_filter_trgm):
+-- Card/checklist/player/set data moved OUT of the shared JSONB blob into real tables so it
+-- scales to millions of rows, queried a page at a time (never loaded whole into the browser).
+--   e10_sets(id, name, year, sport, brand, attrs jsonb, created_by, ts)          -- unique(lower(name),coalesce(year,0))
+--   e10_players(id, name, aliases text[], sport, team, position, nationality,     -- master record; unique(lower(name))
+--               attrs jsonb, created_by, ts)                                       --   trigram GIN on name
+--   e10_checklists(id, name, set_id→e10_sets, source, card_count, attrs, ...)     -- the named uploads/collections
+--   e10_cards(id, checklist_id→e10_checklists ON DELETE CASCADE, set_id, player_id,-- HIGH VOLUME
+--             num, name, set_name (denormalized), rarity, value numeric, parallel,
+--             card_type, serial, color, rookie bool, chase bool, attrs jsonb,
+--             card_id_ref uuid (future: inventory→card link), created_by, ts,
+--             search text GENERATED (lower name|num|set|rarity|parallel|type|color|serial|value))
+-- Indexes on e10_cards: (checklist_id), (set_id), (player_id); btree (checklist_id,name,id),
+--   (checklist_id,value,id), (player_id,name,id) for indexed ordered pagination; trigram GIN on
+--   search, name, set_name, parallel, rarity for open-ended ILIKE search in single-digit ms.
+-- Query approach: .eq(scope) + server ILIKE filters + .range(off,off+99); unfiltered browse
+--   orders by an indexed column (no sort), filtered/search streams straight from the trigram
+--   index with NO order (materializing every match to sort is what made it slow); the row count
+--   is fetched separately (count exact, head) so the grid opens without waiting on it.
+-- RLS: ALL FOUR tables are SHARED TEAM DATA — authenticated members read + write, viewers none.
+--   Each policy uses public.e10_is_member() (checks e10_members, a DIFFERENT table, so the
+--   INSERT ... RETURNING self-read works; NOT a self-referential subquery). Schema-qualified.
+--     <t>_sel  for select using (public.e10_is_member())
+--     <t>_ins  for insert with check (public.e10_is_member())
+--     <t>_upd  for update using/with check (public.e10_is_member())
+--     <t>_del  for delete using (public.e10_is_member())
+-- Bulk import = chunked client-side inserts (batches of 500 under RLS) with progress; the
+--   one-time 55,677-row Prizm backfill was done server-side (data already lived in Postgres).
+-- Also enabled RLS (no policies = server-only) on e10_seed_backup + e10_bigimport_backup,
+--   which were public/anon-readable (migration e10_secure_backup_tables). Backup DATA untouched.
+-- Verified in tests/rls_test.js: member reads shared cards/players, member INSERT...RETURNING
+--   works, a non-member gets ZERO cards and is denied inserts.
