@@ -147,7 +147,7 @@ function money(n){return '$'+Math.round(n).toLocaleString();}
 const L=k=>S.lists[k];
 
 /* ---------- nav ---------- */
-const SECTIONS=[['home','Home'],['schedule','Schedule'],['copy','Copy Studio'],['gen','Schedule Gen'],['break','Break Calculator'],['live','Live Break'],['repack','Repack Studio'],['data','Data & Lists']];
+const SECTIONS=[['home','Home'],['schedule','Schedule'],['copy','Copy Studio'],['gen','Schedule Gen'],['live','Live Break'],['repack','Repack Studio'],['data','Data & Lists']];
 $('nav').innerHTML=SECTIONS.map((s,i)=>`<button class="tab ${i===0?'on':''}" data-s="${s[0]}" onclick="go('${s[0]}')">${s[1]}</button>`).join('');
 function go(s){document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.s===s));document.querySelectorAll('.sec').forEach(x=>x.classList.remove('on'));$('sec-'+s).classList.add('on');window.scrollTo(0,0);({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData,repack:renderRepack,live:renderLive}[s])();}
 $('foot').textContent='Element 10 · Command · shared team workspace · synced live';
@@ -195,7 +195,7 @@ function showDetail(id){const r=showById(id);if(!r){closeM();return;}const s=r.s
    :`<div class="lab">No copy attached.</div>${ro?'':`<div class="row" style="margin-top:6px"><select onchange="showPickCopy('${id}',this.value)" style="flex:2"><option value="">— attach a saved copy set —</option>${(S.copySets||[]).map(c=>`<option value="${c.id}">${esc(c.name)} · ${esc(c.type)}</option>`).join('')}</select><button class="btn sm" onclick="closeM();go('copy')">Generate ↗</button></div>`}`;
  const eco=s.breakModel&&s.breakModel.economics;
  const breakBox=s.breakModel?`<div class="out"><div class="row" style="justify-content:space-between"><span class="lab">${esc(s.breakModel.name)} · ${s.breakModel.slots} slots · ${s.breakModel.tiers} tiers</span>${ro?'':`<button class="btn x" onclick="showDetach('${id}','breakModel')">detach</button>`}</div>${eco?`<div style="font-size:12.5px;margin-top:6px">Exp. gross ${money(eco.grossAvg)} · proj. profit ${money(eco.profit)} · cost ${money(eco.cost)} · card value ${money(eco.totVal)}</div>`:''}${(s.inventoryAlloc&&s.inventoryAlloc.length)?`<div style="margin-top:6px"><span class="lab">Inventory allocation</span>${s.inventoryAlloc.map(a=>`<div style="font-size:12.5px;padding:1px 0">📦 ${esc(a.name)} · cost ${money(a.cost)} · val ${money(a.value)}</div>`).join('')}</div>`:''}${ro?'':`<div class="row" style="margin-top:8px"><button class="btn v sm" onclick="showStartLive('${id}')">▶ Start Live Break for this show</button></div>`}</div>`
-   :`<div class="lab">No break model attached.</div>${ro?'':`<div class="row" style="margin-top:6px"><select onchange="showPickBreak('${id}',this.value)" style="flex:2"><option value="">— attach a saved break model —</option>${(S.breaks||[]).map(b=>`<option value="${b.id}">${esc(b.name)} · ${b.slots} slots</option>`).join('')}</select><button class="btn sm" onclick="closeM();go('break')">Build ↗</button></div><div class="row" style="margin-top:6px"><button class="btn sm" onclick="showStartLive('${id}')">▶ Start Live Break (no model)</button></div>`}`;
+   :`<div class="lab">No break model attached.</div>${ro?'':`<div class="row" style="margin-top:6px"><select onchange="showPickBreak('${id}',this.value)" style="flex:2"><option value="">— attach a saved break model —</option>${(S.breaks||[]).map(b=>`<option value="${b.id}">${esc(b.name)} · ${b.slots} slots</option>`).join('')}</select><button class="btn sm" onclick="closeM();openModeler()">Build ↗</button></div><div class="row" style="margin-top:6px"><button class="btn sm" onclick="showStartLive('${id}')">▶ Start Live Break (no model)</button></div>`}`;
  const repackBox=s.repackRef?`<div class="out"><div class="row" style="justify-content:space-between"><span>🎁 ${esc(s.repackRef.name)}</span>${ro?'':`<button class="btn x" onclick="showDetach('${id}','repackRef')">detach</button>`}</div></div>`
    :`<div class="lab">No repack attached.</div>${ro?'':`<div class="row" style="margin-top:6px"><select onchange="showPickRepack('${id}',this.value)" style="flex:2"><option value="">— attach a repack —</option>${(S.repacks||[]).map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select><button class="btn sm" onclick="closeM();go('repack')">Studio ↗</button></div>`}`;
  const reslist=[];S.inventory.forEach(it=>{(it.reservations||[]).forEach(x=>{if(x.showId===s.id)reslist.push({itemId:it.id,name:it.name,qty:x.qty,streamerUid:x.streamerUid});});});
@@ -301,7 +301,7 @@ function addTodoCmt(id){const v=$('tdCin').value.trim();if(!v)return;const t=S.t
 function addNote(){const v=$('cmtin').value.trim();if(!v)return;const kind=$('noteKind')?$('noteKind').value:'Note';requireUser(()=>{S.comments.push({who:S.user,when:Date.now(),text:v,kind});save();renderHome();});}
 function planHTML(){return `<p style="color:var(--mut);font-size:13px">Each show carries its format, duration and streamer — set them in the <a onclick="go('schedule')">Schedule</a>. Manage your streamer roster in <a onclick="go('data')">Data &amp; Lists</a>.</p>
  <div style="margin-top:8px">${S.streamers.map(s=>`<span class="pill">${esc(s)}</span>`).join('')}</div>`;}
-function breaksListHTML(){if(!S.breaks.length)return '<div style="color:var(--mut)">No saved models. Build one in the Break Calculator.</div>';
+function breaksListHTML(){if(!S.breaks.length)return '<div style="color:var(--mut)">No saved models. Build one under <a onclick="openModeler()">Data &amp; Lists → Break / Format</a>.</div>';
  return S.breaks.map((b,i)=>`<div class="row" style="justify-content:space-between;border-bottom:1px solid var(--line);padding:8px 0"><div><b>${esc(b.name)}</b> · ${b.slots} slots · exp ${money(b.gross)} <span class="pill">${b.tiers} tiers</span></div><button class="btn x" onclick="delBreak(${i})">✕</button></div>`).join('');}
 function delBreak(i){S.breaks.splice(i,1);save();renderHome();}
 
@@ -411,8 +411,8 @@ function genSchedule(){if(!canEditScoped())return roGuard();if(Object.values(S.s
 
 /* ---------- BREAK CALCULATOR ---------- */
 let BK={products:[],chases:[],auctions:[],invItems:[],cost:0,_last:null};
-function renderBreak(){
- $('sec-break').innerHTML=`<div class="hero"><div><h1>Break Calculator</h1></div></div>
+function renderBreak(target){target=target||'dtc';const el=$(target);if(!el)return;
+ el.innerHTML=`<div class="hero"><div><h1>Break / format model</h1>${BK._preloadNote?`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:4px">${esc(BK._preloadNote)}</div>`:''}</div><button class="btn sm" onclick="newBlankModel()">+ New blank model</button></div>
  <div class="split"><div class="card"><h3 style="font-size:15px">Inputs</h3>
   <div class="lab" style="margin-top:14px">Product breaks (split into spots)</div><div id="prodList"></div>
   <div class="row" style="margin-top:6px"><input id="pName" placeholder="Product" style="flex:2"><input id="pSpots" type="number" placeholder="spots" style="flex:1"><input id="pVal" type="number" placeholder="pool $" style="flex:1"><button class="btn sm" onclick="addProd()">+</button></div>
@@ -435,6 +435,25 @@ function renderBreak(){
  $('lSlots').textContent='5';$('lTiers').textContent='3';$('lEven').textContent='30% disparity';$('lMk').textContent='25%';
  renderBKlists();calcBreak();renderBreakHist();
 }
+/* ===== Break/format modeling now lives under Data & Lists → "Break / Format", entered from a
+   product or a checklist (Phase 2). The modeler engine (BK/calcBreak/saveBreak/attach) is unchanged. */
+function dModeler(){renderBreak('dtc');}
+function openModeler(){dataTab='modeler';go('data');}
+function newBlankModel(){BK={products:[],chases:[],auctions:[],invItems:[],cost:0,_last:null};BK._preloadNote='';openModeler();}
+function checklistsForSet(set){return (S.checklists||[]).filter(c=>c.set&&set&&c.set===set);}
+function preloadBreak(it,cl){BK={products:[],chases:[],auctions:[],invItems:[],cost:0,_last:null};
+ if(it){BK.cost=+it.cost||0;BK.invItems.push({itemId:it.id,name:it.name,qty:1,cost:+it.cost||0,value:+it.value||0,cat:it.cat,set:it.set});}
+ let n=0;if(cl){const flagged=(cl.cards||[]).filter(c=>c.chase&&(+c.value||0)>0);const pool=flagged.length?flagged:(cl.cards||[]).filter(c=>(+c.value||0)>0);pool.forEach(c=>{BK.chases.push({name:c.name,val:+c.value||0});n++;});}
+ BK._preloadNote=(it?('From '+it.name+' · cost '+money(+it.cost||0)):'')+(cl?((it?' + ':'From ')+cl.name+' · '+n+' chase cards'):(it?(' · no checklist for set “'+(it.set||'—')+'” — add chases manually'):''));
+ openModeler();
+ toast(cl?(n+' chase cards loaded from '+cl.name):(it?('No checklist matched set “'+(it.set||'—')+'” — model preloaded blank, add chases'):'New model'));
+}
+function preloadBreakById(itemId,clId){preloadBreak(itemId?S.inventory.find(x=>x.id===itemId):null, clId?(S.checklists||[]).find(c=>c.id===clId):null);}
+function buildBreakFromProduct(itemId){const it=S.inventory.find(x=>x.id===itemId);if(!it)return;const cls=checklistsForSet(it.set);
+ if(cls.length>1){$('modal').innerHTML=`<h3 style="font-size:18px">Build a break — ${esc(it.name)}</h3><div class="lab" style="margin:6px 0 10px;text-transform:none;letter-spacing:0">Multiple checklists match set “${esc(it.set)}”. Pick one:</div>${cls.map(c=>`<div class="row" style="margin-bottom:6px"><button class="btn" style="flex:1;text-align:left" onclick="closeM();preloadBreakById('${it.id}','${c.id}')">📄 ${esc(c.name)} · ${(c.cards||[]).length} cards</button></div>`).join('')}<div class="row" style="margin-top:8px"><button class="btn sm" onclick="closeM();preloadBreakById('${it.id}','')">No checklist (manual)</button><button class="btn sm" onclick="closeM()">Cancel</button></div>`;$('ov').style.display='flex';return;}
+ preloadBreak(it,cls[0]||null);
+}
+function buildBreakFromChecklist(clId){const cl=(S.checklists||[]).find(c=>c.id===clId);if(!cl)return;preloadBreak(null,cl);}
 function renderBKlists(){
  $('prodList').innerHTML=BK.products.map((p,i)=>`<div class="row" style="justify-content:space-between;font-size:13px;padding:3px 0"><span>${esc(p.name)} · ${p.spots} spots · ${money(p.val)}</span><button class="btn x" onclick="BK.products.splice(${i},1);renderBKlists();calcBreak()">✕</button></div>`).join('');
  $('chaseList').innerHTML=BK.chases.map((c,i)=>`<div class="row" style="justify-content:space-between;font-size:13px;padding:3px 0"><span>${esc(c.name)} · ${money(c.val)}</span><button class="btn x" onclick="BK.chases.splice(${i},1);renderBKlists();calcBreak()">✕</button></div>`).join('');
@@ -503,7 +522,7 @@ function renderBreakHist(){const el=$('bkHist');if(!el)return;
 function reopenBreak(id){const b=(S.breaks||[]).find(x=>x.id===id);if(!b)return;
  if(b.inputs){BK.products=(b.inputs.products||[]).slice();BK.chases=(b.inputs.chases||[]).slice();BK.auctions=(b.inputs.auctions||[]).slice();BK.cost=+b.inputs.cost||0;}
  else{BK.products=[];BK.chases=[];BK.auctions=[];BK.cost=0;}
- BK.invItems=(b.invItems||[]).slice();renderBreak();toast('Reopened '+b.name);}
+ BK.invItems=(b.invItems||[]).slice();BK._preloadNote='Reopened “'+b.name+'”';dModeler();toast('Reopened '+b.name);}
 function dupBreak(id){if(!canEditScoped())return roGuard();const b=(S.breaks||[]).find(x=>x.id===id);if(!b)return;const c=JSON.parse(JSON.stringify(b));c.id='bk'+Date.now();c.name=b.name+' (copy)';c.ts=Date.now();S.breaks.unshift(c);save();renderBreakHist();}
 function renameBreak(id){if(!canEditScoped())return roGuard();const b=(S.breaks||[]).find(x=>x.id===id);if(!b)return;const v=prompt('Rename break model',b.name);if(v==null)return;b.name=v.trim()||b.name;save();renderBreakHist();}
 function delBreakById(id){if(!canEditScoped())return roGuard();S.breaks=(S.breaks||[]).filter(x=>x.id!==id);save();renderBreakHist();}
@@ -591,13 +610,13 @@ function gRenameView(id,idx){const G=GRIDS[id];const v=G.state.views[+idx];if(!v
 function gDeleteView(id,idx){const G=GRIDS[id];const v=G.state.views[+idx];if(!v||!confirm('Delete view “'+v.name+'”?'))return;G.state.views.splice(+idx,1);G.state.activeView=-1;gPersist(G);G.cfg.render();}
 function gResetFilters(id){const G=GRIDS[id];G.state.filters=Object.assign({},G.cfg.defaultFilters||{});G.state.activeView=-1;gPersist(G);if(G.cfg.onApply)G.cfg.onApply(G);G.cfg.render();toast('Filters reset');}
 function dataHub(){
- const tabs=[['overview','Overview'],['inventory','Inventory'],['checklists','Checklists'],['reports','Reports'],['export','Whatnot Export'],['lists','Lists & Settings']];
+ const tabs=[['overview','Overview'],['inventory','Inventory'],['checklists','Checklists'],['modeler','Break / Format'],['reports','Reports'],['export','Whatnot Export'],['lists','Lists & Settings']];
  if(ROLE==='admin')tabs.push(['team','Team']);
  if(dataTab==='team'&&ROLE!=='admin')dataTab='overview';
  let h=`<div class="hero"><div><h1>Inventory &amp; Data</h1></div></div>`;
  h+=`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">${tabs.map(t=>`<button class="tab ${t[0]===dataTab?'on':''}" onclick="dataTab='${t[0]}';dataHub()">${t[1]}</button>`).join('')}</div><div id="dtc"></div>`;
  $('sec-data').innerHTML=h;
- ({overview:dOverview,inventory:dInventory,checklists:dChecklists,reports:dReports,export:dExport,lists:dLists,team:dTeam}[dataTab])();
+ ({overview:dOverview,inventory:dInventory,checklists:dChecklists,modeler:dModeler,reports:dReports,export:dExport,lists:dLists,team:dTeam}[dataTab])();
 }
 function invTotals(){let cost=0,val=0,byCat={},qty=0;const view=invView();view.forEach(i=>{const q=+i.qty||1,c=(+i.cost||0)*q,v=(+i.value||0)*q;cost+=c;val+=v;qty+=q;byCat[i.cat]=(byCat[i.cat]||0)+v;});return{cost,val,byCat,qty,cnt:view.length,gain:val-cost};}
 function svgBars(entries){if(!entries.length)return '<div style="color:var(--mut);font-size:13px">No inventory yet.</div>';
@@ -645,7 +664,7 @@ const INV_COLS=[
  {key:'age',label:'Age',type:'num',sortable:true,sortVal:i=>invAge(i),cell:i=>{const age=invAge(i);return `<td class="mono" style="${age>30?'color:var(--red)':''}">${age}d${age>30?' ⚠':''}</td>`;}},
  {key:'owner',label:'Owner',type:'text',sortable:true,sortVal:i=>ownerName(i.owner).toLowerCase(),cell:i=>`<td>${esc(ownerName(i.owner))}</td>`},
  {key:'status',label:'Status',type:'text',sortable:true,sortVal:i=>{const av=invAvailable(i);return av>0?'0free':(invReserved(i)>0?'1reserved':((+i.soldQty||0)>0?'2sold':'3none'));},cell:i=>{const av=invAvailable(i),rsv=invReserved(i),sold=(+i.soldQty||0)>0;return `<td><span class="lab">${av>0?'Free':(rsv>0?'Reserved':(sold?'Sold':'—'))}</span></td>`;}},
- {key:'actions',label:'',core:true,sortable:false,cell:(i,admin)=>`<td style="white-space:nowrap"><button class="btn sm" onclick="reserveModal('${i.id}')">Reserve</button> <button class="btn sm" onclick="sellModal('${i.id}')">Sold</button>${admin?` <select style="max-width:110px;font-size:11px" onchange="reassignInv('${i.id}',this.value)">${ownerOpts(i.owner)}</select>`:''} <button class="btn x" onclick="delInv('${i.id}')">✕</button></td>`},
+ {key:'actions',label:'',core:true,sortable:false,cell:(i,admin)=>`<td style="white-space:nowrap">${/box|case|etb|pack|sealed/i.test(i.cat||'')?`<button class="btn sm" title="Model a break from this product + its checklist" onclick="buildBreakFromProduct('${i.id}')">⚡ Break</button> `:''}<button class="btn sm" onclick="reserveModal('${i.id}')">Reserve</button> <button class="btn sm" onclick="sellModal('${i.id}')">Sold</button>${admin?` <select style="max-width:110px;font-size:11px" onchange="reassignInv('${i.id}',this.value)">${ownerOpts(i.owner)}</select>`:''} <button class="btn x" onclick="delInv('${i.id}')">✕</button></td>`},
 ];
 const INV_DEFAULT_COLS=['name','cat','set','gradingCompany','grade','onhand','cost','market','gain','alloc','age','actions'];
 const invGridCfg={sk:'e10_inv',cols:INV_COLS,defaultCols:INV_DEFAULT_COLS,defaultSort:{col:'name',dir:1},
@@ -711,7 +730,7 @@ function buyListHTML(){
    (s.inventoryAlloc||[]).forEach(a=>bump(setOfItem(a.itemId)||a.set,+a.qty||1,label,+a.cost||0));
    (s.needs||[]).forEach(n=>bump(n.set,+n.qty||1,label,+n.approxCost||0));});
  const names=Object.keys(demand);
- if(!names.length)return `<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Buy list from the schedule</h3><div class="lab" style="margin-top:8px;text-transform:none;letter-spacing:0">No demand yet. Attach a break model to a show (Break Calculator → attach to show) or add a “needs” line in a show’s detail, and this fills with exactly what to buy.</div></div>`;
+ if(!names.length)return `<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Buy list from the schedule</h3><div class="lab" style="margin-top:8px;text-transform:none;letter-spacing:0">No demand yet. Attach a break model to a show (Data → Break / Format → attach to show) or add a “needs” line in a show’s detail, and this fills with exactly what to buy.</div></div>`;
  const freeOf=set=>S.inventory.filter(i=>(i.set||'(unspecified)')===set).reduce((a,i)=>a+invAvailable(i),0);
  const avgCostOf=set=>{const arr=S.inventory.filter(i=>(i.set||'(unspecified)')===set&&(+i.cost||0)>0);return arr.length?arr.reduce((a,i)=>a+(+i.cost||0),0)/arr.length:0;};
  let projected=0;
@@ -860,7 +879,7 @@ function clSetField(field,val){const cl=clCur();if(!cl)return;cl[field]=val;save
 function clGridSet(field,val){const G=GRIDS['cl:'+clOpenId];if(!G)return;G.state.filters[field]=val;gRenderList(G);}
 function renderChecklistGrid(cl){const G=GRIDS['cl:'+cl.id]||makeGrid('cl:'+cl.id,checklistGridCfg(cl));const F=G.state.filters;
  const sets=[...new Set((cl.cards||[]).map(c=>c.set).filter(Boolean))].sort(),rarities=[...new Set((cl.cards||[]).map(c=>c.rarity).filter(Boolean))].sort();
- let h=`<div class="card"><div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><div class="row" style="gap:8px;align-items:center"><button class="btn sm" onclick="closeChecklist()">← Checklists</button><h3 style="font-size:15px">${esc(cl.name)}</h3></div><div class="row" style="gap:6px;align-items:center"><span class="lab">Set</span><input value="${esc(cl.set||'')}" placeholder="set (join key for Phase 2)" style="max-width:200px" oninput="clSetField('set',this.value)"><button class="btn v sm" onclick="clAddCard()">+ Add card</button></div></div>
+ let h=`<div class="card"><div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><div class="row" style="gap:8px;align-items:center"><button class="btn sm" onclick="closeChecklist()">← Checklists</button><h3 style="font-size:15px">${esc(cl.name)}</h3></div><div class="row" style="gap:6px;align-items:center"><span class="lab">Set</span><input value="${esc(cl.set||'')}" placeholder="set (join key for Phase 2)" style="max-width:200px" oninput="clSetField('set',this.value)"><button class="btn sm" onclick="buildBreakFromChecklist('${cl.id}')" title="Preload the break/format modeler with these cards">⚡ Model a break</button><button class="btn v sm" onclick="clAddCard()">+ Add card</button></div></div>
    <div class="etool" style="margin-top:12px">
      <div style="flex:2;min-width:140px"><label>Search</label><input value="${esc(F.search||'')}" placeholder="card name / #…" oninput="clGridSet('search',this.value)"></div>
      <div><label>Rarity</label><select onchange="clGridSet('rarity',this.value)"><option value="">All</option>${rarities.map(r=>`<option ${F.rarity===r?'selected':''}>${esc(r)}</option>`).join('')}</select></div>
@@ -875,7 +894,7 @@ function dChecklists(){if(clOpenId){const cl=clCur();if(cl)return renderChecklis
  const lm=[['characters','Chase characters'],['sets','Sets / products'],['formats','Show formats'],['diff','Trust / hooks']];
  let h=`<div class="card"><h3 style="font-size:15px">Checklists (CSV)</h3>   <div class="row" style="margin-bottom:8px"><button class="btn sm" onclick="downloadChecklistTemplate()">↓ CSV template</button><span class="lab" style="align-self:center">Required column: <b>Card Name</b> · optional: Card Number, Set, Rarity, Market Value</span></div>
    <div class="drop" onclick="$('clFile').click()">Click to upload a .csv checklist</div><input id="clFile" type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="uploadChecklist(this)">
-   <div style="margin-top:12px">${S.checklists.length?`<div class="egrid"><table><tr><th>Checklist</th><th>Set</th><th>Cards</th><th></th></tr>${S.checklists.map((c,i)=>`<tr><td>📄 ${esc(c.name)}</td><td>${esc(c.set||'—')}</td><td class="mono">${(c.cards||[]).length}</td><td><div class="actions"><button class="btn sm" onclick="openChecklist('${c.id}')">Open ↗</button><button class="btn x" onclick="if(confirm('Delete checklist?')){S.checklists.splice(${i},1);save();dChecklists();}">✕</button></div></td></tr>`).join('')}</table></div>`:'<div style="color:var(--mut);font-size:13px">No checklists.</div>'}</div></div>`;
+   <div style="margin-top:12px">${S.checklists.length?`<div class="egrid"><table><tr><th>Checklist</th><th>Set</th><th>Cards</th><th></th></tr>${S.checklists.map((c,i)=>`<tr><td>📄 ${esc(c.name)}</td><td>${esc(c.set||'—')}</td><td class="mono">${(c.cards||[]).length}</td><td><div class="actions"><button class="btn sm" onclick="openChecklist('${c.id}')">Open ↗</button><button class="btn sm" onclick="buildBreakFromChecklist('${c.id}')">⚡ Break</button><button class="btn x" onclick="if(confirm('Delete checklist?')){S.checklists.splice(${i},1);save();dChecklists();}">✕</button></div></td></tr>`).join('')}</table></div>`:'<div style="color:var(--mut);font-size:13px">No checklists.</div>'}</div></div>`;
  h+=`<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Attachments</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">Images, PDFs, docs. Small files stored in-browser; large ones referenced only (move to cloud when hosted).</div>
    <div class="drop" onclick="$('atFile').click()">Click to upload a file</div><input id="atFile" type="file" style="display:none" onchange="uploadAttach(this)">
    <div style="margin-top:12px">${S.attachments.length?`<div class="egrid"><table><tr><th>Attachment</th><th>Size</th><th></th></tr>${S.attachments.map((a,i)=>`<tr><td>📎 ${esc(a.name)}</td><td class="lab" style="text-transform:none;letter-spacing:0">${(a.size/1024).toFixed(0)} KB${a.data?'':' · reference'}</td><td><div class="actions">${a.data?`<a class="btn sm" href="${a.data}" download="${esc(a.name)}">Download</a>`:''}<button class="btn x" onclick="S.attachments.splice(${i},1);save();dChecklists()">✕</button></div></td></tr>`).join('')}</table></div>`:'<div style="color:var(--mut);font-size:13px">No attachments.</div>'}</div></div>`;
