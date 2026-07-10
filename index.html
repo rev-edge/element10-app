@@ -67,6 +67,8 @@ td{padding:8px 10px;border-bottom:1px solid var(--line)}
 .egrid td{border:0.5px solid var(--line);vertical-align:middle}
 .egrid tr:nth-child(even) td{background:var(--bg)}
 .egrid th.srt{cursor:pointer;user-select:none}
+.colgrip{position:absolute;top:0;right:-2px;width:8px;height:100%;cursor:col-resize;user-select:none;z-index:4;touch-action:none}
+.colgrip:hover{box-shadow:inset -3px 0 0 var(--mut2)}
 .egrid th.srt .chev{color:var(--mut2);margin-left:5px;font-size:9px}
 .egrid th.srt.on .chev{color:var(--ink)}
 .egrid td .actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-end}
@@ -957,34 +959,60 @@ let exCopyRef=''; // Whatnot Export: which show's attached copy to prefill
    onApply(G), migrate(G), viewPrompt. Column: {key,label,type,core,first,sortable,sortVal(row),cell(row,admin,G)}. */
 const GRIDS={};
 function gLoad(k,def){try{const v=JSON.parse(localStorage.getItem(k));return v==null?def:v;}catch(e){return def;}}
-function makeGrid(id,cfg){const sk=cfg.sk;const G={id,sk,cfg,state:{cols:gLoad(sk+'_cols',null),sort:gLoad(sk+'_sort',cfg.defaultSort||{col:cfg.defaultCols[0],dir:1}),filters:Object.assign({},cfg.defaultFilters||{},gLoad(sk+'_filters',{})),views:gLoad(sk+'_views',[]),activeView:-1}};if(cfg.migrate)cfg.migrate(G);GRIDS[id]=G;return G;}
+function makeGrid(id,cfg){const sk=cfg.sk;const G={id,sk,cfg,state:{cols:gLoad(sk+'_cols',null),sort:gLoad(sk+'_sort',cfg.defaultSort||{col:cfg.defaultCols[0],dir:1}),filters:Object.assign({},cfg.defaultFilters||{},gLoad(sk+'_filters',{})),views:gLoad(sk+'_views',[]),widths:gLoad(sk+'_widths',{})||{},activeView:-1}};if(cfg.migrate)cfg.migrate(G);GRIDS[id]=G;return G;}
 function gColDef(G,k){return G.cfg.cols.find(c=>c.key===k);}
 function gVisibleKeys(G){let keys=(Array.isArray(G.state.cols)&&G.state.cols.length?G.state.cols:G.cfg.defaultCols).filter(k=>gColDef(G,k));G.cfg.cols.filter(c=>c.core).forEach(c=>{if(!keys.includes(c.key)){if(c.first)keys.unshift(c.key);else keys.push(c.key);}});return keys;}
 function gVisibleCols(G){return gVisibleKeys(G).map(k=>gColDef(G,k));}
-function gPersist(G){try{const s=G.sk;localStorage.setItem(s+'_cols',JSON.stringify(gVisibleKeys(G)));localStorage.setItem(s+'_sort',JSON.stringify(G.state.sort));localStorage.setItem(s+'_filters',JSON.stringify(G.state.filters));localStorage.setItem(s+'_views',JSON.stringify(G.state.views));}catch(e){}}
+function gPersist(G){try{const s=G.sk;localStorage.setItem(s+'_cols',JSON.stringify(gVisibleKeys(G)));localStorage.setItem(s+'_sort',JSON.stringify(G.state.sort));localStorage.setItem(s+'_filters',JSON.stringify(G.state.filters));localStorage.setItem(s+'_views',JSON.stringify(G.state.views));localStorage.setItem(s+'_widths',JSON.stringify(G.state.widths||{}));}catch(e){}}
 function gRows(G){let rows=G.cfg.base(G).slice();const f=G.state.filters;const q=(f.search||'').trim().toLowerCase();
  if(q&&G.cfg.searchFn)rows=rows.filter(r=>G.cfg.searchFn(r,q));
  if(G.cfg.filter)rows=rows.filter(r=>G.cfg.filter(r,f));
  const sc=gColDef(G,G.state.sort.col)||gVisibleCols(G)[0],d=G.state.sort.dir,key=sc?sc.sortVal:(_=>0);
  return rows.sort((a,b)=>{const ka=key(a),kb=key(b);return (ka<kb?-1:ka>kb?1:0)*d;});}
-function gSortTh(G,c){if(!c.sortable)return `<th></th>`;const on=G.state.sort.col===c.key;return `<th class="srt${on?' on':''}" onclick="gSortSet('${G.id}','${c.key}')">${esc(c.label)}<span class="chev">${on?(G.state.sort.dir>0?'▲':'▼'):'↕'}</span></th>`;}
-function gSortSet(id,key){const G=GRIDS[id];if(!G)return;if(G.state.sort.col===key)G.state.sort.dir*=-1;else G.state.sort={col:key,dir:1};gPersist(G);if(G.cfg.onSort){G.cfg.onSort(G);return;}gRenderList(G);}
+/* ===== drag-to-resize columns (shared: every grid built on this engine inherits it) =====
+   Widths live in G.state.widths keyed by column key, persisted next to cols/sort/filters/views and
+   captured by saved views. Until the user drags a column the grid renders exactly as before (auto
+   table layout); the first drag freezes current widths and switches that grid to fixed layout so
+   widths hold. Min width 48px. */
+let _gResizing=false;
+function gWidthsActive(G){return !!(G.state.widths&&Object.keys(G.state.widths).length);}
+function gGrip(G,c){return `<span class="colgrip" onmousedown="gResizeStart(event,'${G.id}','${c.key}')" onclick="event.stopPropagation()" title="Drag to resize column"></span>`;}
+function gSortTh(G,c){const wa=gWidthsActive(G);const w=(G.state.widths&&G.state.widths[c.key])||(wa?130:0);const wst=w?` style="width:${w}px"`:'';const grip=gGrip(G,c);
+ if(!c.sortable)return `<th${wst}>${grip}</th>`;
+ const on=G.state.sort.col===c.key;return `<th class="srt${on?' on':''}"${wst} onclick="gSortSet('${G.id}','${c.key}')">${esc(c.label)}<span class="chev">${on?(G.state.sort.dir>0?'▲':'▼'):'↕'}</span>${grip}</th>`;}
+function gApplyWidths(G){const box=$(G.cfg.listBoxId);if(!box)return;const table=box.querySelector('table');if(!table)return;const wa=gWidthsActive(G);const cols=gVisibleCols(G);const sum=gSumWidths(G,cols);
+ table.style.tableLayout=wa?'fixed':'';table.style.width=wa?(sum+'px'):'';table.style.minWidth=wa?(sum+'px'):'';
+ const ths=[...table.querySelectorAll('tr:first-child > th')];
+ ths.forEach((t,idx)=>{const ck=cols[idx]&&cols[idx].key;const w=(ck&&G.state.widths&&G.state.widths[ck])||(wa?130:0);t.style.width=w?w+'px':'';});}
+function gResizeStart(ev,id,key){ev.preventDefault();ev.stopPropagation();const G=GRIDS[id];if(!G)return;const box=$(G.cfg.listBoxId);const table=box&&box.querySelector('table');if(!table)return;
+ _gResizing=true;const cols=gVisibleCols(G),ths=[...table.querySelectorAll('tr:first-child > th')];
+ G.state.widths=G.state.widths||{};
+ ths.forEach((t,idx)=>{const ck=cols[idx]&&cols[idx].key;if(ck&&!(ck in G.state.widths))G.state.widths[ck]=Math.round(t.getBoundingClientRect().width);}); /* freeze current widths so switching to fixed doesn't jump */
+ gApplyWidths(G);
+ const startX=ev.clientX,startW=G.state.widths[key]||Math.round((ev.target.closest('th')||{getBoundingClientRect:()=>({width:120})}).getBoundingClientRect().width);
+ const move=e=>{G.state.widths[key]=Math.max(48,Math.round(startW+(e.clientX-startX)));gApplyWidths(G);};
+ const up=()=>{document.removeEventListener('mousemove',move,true);document.removeEventListener('mouseup',up,true);document.body.style.cursor='';document.body.style.userSelect='';gPersist(G);setTimeout(()=>{_gResizing=false;},0);};
+ document.body.style.cursor='col-resize';document.body.style.userSelect='none';
+ document.addEventListener('mousemove',move,true);document.addEventListener('mouseup',up,true);}
+function gSortSet(id,key){if(_gResizing)return;const G=GRIDS[id];if(!G)return;if(G.state.sort.col===key)G.state.sort.dir*=-1;else G.state.sort={col:key,dir:1};gPersist(G);if(G.cfg.onSort){G.cfg.onSort(G);return;}gRenderList(G);}
 function gRenderList(G){const box=$(G.cfg.listBoxId);if(!box)return;gPersist(G);const admin=ROLE==='admin';const rows=gRows(G),cols=gVisibleCols(G);
- box.innerHTML=`<div class="egrid wide" style="margin-top:12px"><table><tr>${cols.map(c=>gSortTh(G,c)).join('')}</tr>${rows.map(i=>`<tr>${cols.map(c=>c.cell(i,admin,G)).join('')}</tr>`).join('')||`<tr><td colspan="${cols.length}" style="color:var(--mut)">No rows match.</td></tr>`}</table></div>${G.cfg.footer?G.cfg.footer(rows,admin):''}`;}
+ const wa=gWidthsActive(G);const sumW=wa?gSumWidths(G,cols):0;
+ box.innerHTML=`<div class="egrid wide" style="margin-top:12px"><table${wa?` style="table-layout:fixed;width:${sumW}px;min-width:${sumW}px"`:''}><tr>${cols.map(c=>gSortTh(G,c)).join('')}</tr>${rows.map(i=>`<tr>${cols.map(c=>c.cell(i,admin,G)).join('')}</tr>`).join('')||`<tr><td colspan="${cols.length}" style="color:var(--mut)">No rows match.</td></tr>`}</table></div>${G.cfg.footer?G.cfg.footer(rows,admin):''}`;}
+function gSumWidths(G,cols){cols=cols||gVisibleCols(G);const wa=gWidthsActive(G);return cols.reduce((a,c)=>a+((G.state.widths&&G.state.widths[c.key])||(wa?130:0)),0);}
 function gColMenuHTML(G){const vis=gVisibleKeys(G),hidden=G.cfg.cols.filter(c=>!vis.includes(c.key));
  const row=(c,idx,shown)=>`<div class="grow"><label style="flex:1;display:flex;align-items:center;gap:6px;margin:0"><input type="checkbox" style="width:auto" ${shown?'checked':''} ${c.core?'disabled':''} onchange="gToggleCol('${G.id}','${c.key}',this.checked)"> ${esc(c.label||'Actions')}${c.core?' <span class="lab">core</span>':''}</label>${(shown&&!c.core)?`<button class="btn x sm" ${idx===0?'disabled':''} onclick="gMoveCol('${G.id}','${c.key}',-1)">▲</button><button class="btn x sm" onclick="gMoveCol('${G.id}','${c.key}',1)">▼</button>`:''}</div>`;
  return `<div class="lab" style="margin-bottom:4px">Shown (order with ▲▼)</div>${vis.map((k,idx)=>row(gColDef(G,k),idx,true)).join('')}${hidden.length?`<div class="lab" style="margin:8px 0 4px">Add column</div>${hidden.map(c=>row(c,0,false)).join('')}`:''}<div class="row" style="margin-top:8px"><button class="btn x sm" onclick="gResetCols('${G.id}')">Reset to default</button></div>`;}
 function gRenderCols(G){const el=$(G.cfg.colsMenuId);if(el)el.innerHTML=gColMenuHTML(G);}
 function gToggleCol(id,key,on){const G=GRIDS[id];const c=gColDef(G,key);if(!c||c.core)return;let keys=gVisibleKeys(G);if(on){if(!keys.includes(key)){const li=keys.findIndex(k=>gColDef(G,k).core&&!gColDef(G,k).first);keys.splice(li>=0?li:keys.length,0,key);}}else keys=keys.filter(k=>k!==key);G.state.cols=keys;gPersist(G);gRenderCols(G);gRenderList(G);}
 function gMoveCol(id,key,dir){const G=GRIDS[id];let keys=gVisibleKeys(G);const i=keys.indexOf(key),j=i+dir;if(i<0||j<0||j>=keys.length||gColDef(G,key).core||gColDef(G,keys[j]).core)return;[keys[i],keys[j]]=[keys[j],keys[i]];G.state.cols=keys;gPersist(G);gRenderCols(G);gRenderList(G);}
-function gResetCols(id){const G=GRIDS[id];G.state.cols=null;try{localStorage.removeItem(G.sk+'_cols');}catch(e){}gRenderCols(G);gRenderList(G);}
+function gResetCols(id){const G=GRIDS[id];G.state.cols=null;G.state.widths={};try{localStorage.removeItem(G.sk+'_cols');localStorage.removeItem(G.sk+'_widths');}catch(e){}gRenderCols(G);gRenderList(G);}
 function gColsBtn(G){return `<details class="gcfg"><summary class="btn sm">⚙ Columns</summary><div class="gpop" id="${G.cfg.colsMenuId}"></div></details>`;}
 function gViewsHTML(G){return `<div><label>Views</label><div class="row" style="gap:6px;align-items:center"><select onchange="gApplyView('${G.id}',this.value)" style="max-width:150px"><option value="">— saved views —</option>${G.state.views.map((v,i)=>`<option value="${i}" ${G.state.activeView===i?'selected':''}>${esc(v.name)}</option>`).join('')}</select><button class="btn sm" onclick="gSaveView('${G.id}')">Save view</button><button class="btn sm" onclick="gResetFilters('${G.id}')">Reset</button>${G.state.views.length?`<button class="btn x sm" title="Rename selected" onclick="var G=GRIDS['${G.id}'];G.state.activeView>=0?gRenameView('${G.id}',G.state.activeView):toast('Select a view first')">✎</button><button class="btn x sm" title="Delete selected" onclick="var G=GRIDS['${G.id}'];G.state.activeView>=0?gDeleteView('${G.id}',G.state.activeView):toast('Select a view first')">✕</button>`:''}</div></div>`;}
-function gSaveView(id){const G=GRIDS[id];const name=prompt(G.cfg.viewPrompt||'Name this view');if(name==null||!name.trim())return;G.state.views.push({name:name.trim(),filters:Object.assign({},G.state.filters),cols:gVisibleKeys(G),sort:Object.assign({},G.state.sort)});G.state.activeView=G.state.views.length-1;gPersist(G);G.cfg.render();toast('View saved');}
-function gApplyView(id,idx){const G=GRIDS[id];const v=G.state.views[+idx];if(!v)return;G.state.activeView=+idx;G.state.filters=Object.assign({},G.cfg.defaultFilters||{},v.filters||{});if(Array.isArray(v.cols)&&v.cols.length)G.state.cols=v.cols.slice();if(v.sort)G.state.sort=Object.assign({},v.sort);gPersist(G);if(G.cfg.onApply)G.cfg.onApply(G);G.cfg.render();toast('Applied “'+v.name+'”');}
+function gSaveView(id){const G=GRIDS[id];const name=prompt(G.cfg.viewPrompt||'Name this view');if(name==null||!name.trim())return;G.state.views.push({name:name.trim(),filters:Object.assign({},G.state.filters),cols:gVisibleKeys(G),sort:Object.assign({},G.state.sort),widths:Object.assign({},G.state.widths||{})});G.state.activeView=G.state.views.length-1;gPersist(G);G.cfg.render();toast('View saved');}
+function gApplyView(id,idx){const G=GRIDS[id];const v=G.state.views[+idx];if(!v)return;G.state.activeView=+idx;G.state.filters=Object.assign({},G.cfg.defaultFilters||{},v.filters||{});if(Array.isArray(v.cols)&&v.cols.length)G.state.cols=v.cols.slice();if(v.sort)G.state.sort=Object.assign({},v.sort);G.state.widths=v.widths?Object.assign({},v.widths):{};gPersist(G);if(G.cfg.onApply)G.cfg.onApply(G);G.cfg.render();toast('Applied “'+v.name+'”');}
 function gRenameView(id,idx){const G=GRIDS[id];const v=G.state.views[+idx];if(!v)return;const n=prompt('Rename view',v.name);if(n==null)return;v.name=n.trim()||v.name;gPersist(G);G.cfg.render();}
 function gDeleteView(id,idx){const G=GRIDS[id];const v=G.state.views[+idx];if(!v||!confirm('Delete view “'+v.name+'”?'))return;G.state.views.splice(+idx,1);G.state.activeView=-1;gPersist(G);G.cfg.render();}
-function gResetFilters(id){const G=GRIDS[id];G.state.filters=Object.assign({},G.cfg.defaultFilters||{});G.state.activeView=-1;gPersist(G);if(G.cfg.onApply)G.cfg.onApply(G);G.cfg.render();toast('Filters reset');}
+function gResetFilters(id){const G=GRIDS[id];G.state.filters=Object.assign({},G.cfg.defaultFilters||{});G.state.widths={};G.state.activeView=-1;try{localStorage.removeItem(G.sk+'_widths');}catch(e){}gPersist(G);if(G.cfg.onApply)G.cfg.onApply(G);G.cfg.render();toast('Reset — filters & column widths');}
 function dataHub(){
  const tabs=[['overview','Overview'],['inventory','Inventory'],['checklists','Checklists'],['players','Players'],['modeler','Break / Format'],['reports','Reports'],['export','Whatnot Export'],['lists','Lists & Settings']];
  if(ROLE==='admin')tabs.push(['team','Team']);
