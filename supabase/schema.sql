@@ -136,10 +136,18 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 -- RLS: ALL FOUR tables are SHARED TEAM DATA — authenticated members read + write, viewers none.
 --   Each policy uses public.e10_is_member() (checks e10_members, a DIFFERENT table, so the
 --   INSERT ... RETURNING self-read works; NOT a self-referential subquery). Schema-qualified.
---     <t>_sel  for select using (public.e10_is_member())
---     <t>_ins  for insert with check (public.e10_is_member())
---     <t>_upd  for update using/with check (public.e10_is_member())
---     <t>_del  for delete using (public.e10_is_member())
+--     <t>_sel  for select using ((select public.e10_is_member()))
+--     <t>_ins  for insert with check ((select public.e10_is_member()))
+--     <t>_upd  for update using/with check ((select public.e10_is_member()))
+--     <t>_del  for delete using ((select public.e10_is_member()))
+--   PERF (migrations e10_cards_rls_initplan_sel + e10_card_tables_rls_initplan_all): the check is
+--   wrapped as (select public.e10_is_member()) so Postgres evaluates it ONCE per statement as an
+--   InitPlan constant instead of once PER ROW. Semantically identical. Before the wrap, an
+--   authenticated search scanned all rows of a checklist and ran e10_is_member() per row (55k
+--   times) => 2.4–5.7s per request; after, ~30ms server-side. (The trigram index still isn't used
+--   under RLS because LIKE isn't leakproof, so the search filter can't be pushed below the security
+--   qual — a full scan of the checklist's rows, fine at 55k; a SECURITY DEFINER search RPC would
+--   restore trigram usage if a single checklist ever reaches millions of rows.)
 -- Bulk import = chunked client-side inserts (batches of 500 under RLS) with progress; the
 --   one-time 55,677-row Prizm backfill was done server-side (data already lived in Postgres).
 -- Also enabled RLS (no policies = server-only) on e10_seed_backup + e10_bigimport_backup,

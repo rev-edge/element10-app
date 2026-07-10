@@ -752,10 +752,10 @@ async function dbCards(scopeCol,scopeId,o){o=o||{};try{
 }catch(e){toast('Load cards: '+e.message);return{rows:[]};}}
 async function dbCardCount(scopeCol,scopeId,o){try{let q=sb.from('e10_cards').select('id',{count:'exact',head:true}).eq(scopeCol,scopeId);q=dbCardFilters(q,o);const{count,error}=await q;if(error)throw error;return count||0;}catch(e){return null;}}
 async function scEdit(id,field,val){const col=CARD_COL[field];if(!col)return;let v=val;if(field==='value'){const c=(''+val).replace(/[^0-9.\-]/g,'');v=c===''?null:+c;}else if(field==='chase'||field==='rookie')v=!!val;else v=(v===''?null:v);
- const row=SRV&&SRV.rows.find(r=>r.id===id);if(row)row[col]=v;try{const{error}=await sb.from('e10_cards').update({[col]:v}).eq('id',id);if(error)toast(error.message);}catch(e){toast(e.message);}}
+ const row=SRV&&SRV.rows.find(r=>r.id===id);if(row)row[col]=v;scCacheClear();try{const{error}=await sb.from('e10_cards').update({[col]:v}).eq('id',id);if(error)toast(error.message);}catch(e){toast(e.message);}}
 function scBumpTotal(d){if(!SRV)return;if(SRV.knownTotal!=null)SRV.knownTotal=Math.max(0,SRV.knownTotal+d);if(SRV.count!=null)SRV.count=Math.max(0,SRV.count+d);if(SRV.scopeCol==='checklist_id'&&window._clCount&&window._clCount[SRV.scopeId]!=null)window._clCount[SRV.scopeId]=Math.max(0,window._clCount[SRV.scopeId]+d);}
-async function scDel(id){if(!confirm('Delete this card?'))return;try{await sb.from('e10_cards').delete().eq('id',id);}catch(e){toast(e.message);return;}if(SRV){SRV.rows=SRV.rows.filter(r=>r.id!==id);scBumpTotal(-1);gRenderList(SRV.G);scPager();}}
-async function scAddCard(){if(!SRV||SRV.scopeCol!=='checklist_id')return;try{const{error}=await sb.from('e10_cards').insert({checklist_id:SRV.scopeId,name:'New card',card_type:'base'});if(error){toast(error.message);return;}}catch(e){toast(e.message);return;}scBumpTotal(1);SRV.page=0;scFetch();}
+async function scDel(id){if(!confirm('Delete this card?'))return;try{await sb.from('e10_cards').delete().eq('id',id);}catch(e){toast(e.message);return;}scCacheClear();if(SRV){SRV.rows=SRV.rows.filter(r=>r.id!==id);scBumpTotal(-1);gRenderList(SRV.G);scPager();}}
+async function scAddCard(){if(!SRV||SRV.scopeCol!=='checklist_id')return;try{const{error}=await sb.from('e10_cards').insert({checklist_id:SRV.scopeId,name:'New card',card_type:'base'});if(error){toast(error.message);return;}}catch(e){toast(e.message);return;}scCacheClear();scBumpTotal(1);SRV.page=0;scFetch();}
 const SC_COLS=[
  {key:'num',label:'Card #',sortable:true,sortVal:c=>c.num||'',cell:c=>`<td class="mono"><input value="${esc(c.num||'')}" style="width:78px;font-size:12px" onchange="scEdit('${c.id}','num',this.value)"></td>`},
  {key:'name',label:'Name',core:true,first:true,sortable:true,sortVal:c=>(c.name||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.name||'')}" style="min-width:150px" onchange="scEdit('${c.id}','name',this.value)"></td>`},
@@ -773,6 +773,12 @@ const SC_COLS=[
 ];
 const SC_DEFAULT=['num','name','player','set','parallel','card_type','value','chase','actions'];
 let SRV=null,_scT=null;
+/* Perceived-latency polish: cache the last N page results so backspacing / repeating a query
+   (or flipping back a page) returns instantly with no request. Cleared on any card mutation. */
+const _scCache=new Map();const SC_CACHE_MAX=24;
+function scCacheGet(k){if(_scCache.has(k)){const v=_scCache.get(k);_scCache.delete(k);_scCache.set(k,v);return v;}return null;}
+function scCacheSet(k,v){_scCache.set(k,v);while(_scCache.size>SC_CACHE_MAX)_scCache.delete(_scCache.keys().next().value);}
+function scCacheClear(){_scCache.clear();}
 function scGridCfg(){return {sk:'e10_sc',cols:SC_COLS,defaultCols:SC_DEFAULT,defaultSort:{col:'name',dir:1},
  defaultFilters:{search:'',set:'',rarity:'',parallel:'',card_type:''},listBoxId:'scListBox',colsMenuId:'scColsMenu',viewPrompt:'Name this view (e.g. "Rookies", "/99 parallels")',
  base:()=>SRV?SRV.rows:[],searchFn:null,filter:null,onSort:()=>{SRV.page=0;scFetch();},render:()=>{renderCardGridShell();scFetch();}};}
@@ -783,19 +789,30 @@ async function openPlayer(pid){let nm='Player';try{const{data}=await sb.from('e1
 function closeCardGrid(){const m=SRV?SRV.mode:'checklist';SRV=null;clOpenId=null;if(m==='player')dPlayers();else dChecklists();}
 function scFilter(field,val){if(!SRV)return;SRV.G.state.filters[field]=val;SRV.G.state.activeView=-1;SRV.page=0;clearTimeout(_scT);_scT=setTimeout(scFetch,250);}
 function scPage(dir){if(!SRV)return;let np=SRV.page+dir;if(np<0)return;if(dir>0){if(SRV.count!=null){if(np>Math.ceil(SRV.count/CARD_PAGE)-1)return;}else if((SRV.rows||[]).length<CARD_PAGE)return;}SRV.page=np;scFetch();}
-async function scFetch(){if(!SRV)return;const G=SRV.G,F=G.state.filters;const box=$('scListBox');if(box&&SRV.rows==null)box.innerHTML='<div class="lab" style="padding:14px">Loading…</div>';
- const key=JSON.stringify([F,G.state.sort,SRV.page,SRV.scopeId]);SRV._key=key;const t0=Date.now();
- const res=await dbCards(SRV.scopeCol,SRV.scopeId,{search:F.search,filters:F,sort:G.state.sort,offset:SRV.page*CARD_PAGE,limit:CARD_PAGE});
- if(!SRV||SRV._key!==key)return;SRV.rows=res.rows;SRV.ms=Date.now()-t0;
- /* Total: for the UNFILTERED view use the known count (checklist card_count, or a cached scope
-    total) — no count request, so the page + total render instantly. Only a filter/search fires a
-    decoupled count, which is small/fast for selective results and never blocks the row render. */
+async function scFetch(){if(!SRV)return;const G=SRV.G,F=G.state.filters;
+ const key=JSON.stringify([SRV.scopeCol,SRV.scopeId,F,G.state.sort,SRV.page]);SRV._key=key;
  const filtered=dbCardFiltered({search:F.search,filters:F});
- if(!filtered&&SRV.knownTotal!=null){SRV.count=SRV.knownTotal;gRenderList(G);scPager();return;}
- SRV.count=null;gRenderList(G);scPager();
- dbCardCount(SRV.scopeCol,SRV.scopeId,{search:F.search,filters:F}).then(c=>{if(SRV&&SRV._key===key){SRV.count=c;if(!filtered&&c!=null)SRV.knownTotal=c;scPager();}});}
+ const patchCount=k=>c=>{if(SRV&&SRV._key===k){SRV.count=c;if(!filtered&&c!=null)SRV.knownTotal=c;const e=_scCache.get(k);if(e)e.count=c;scPager();}};
+ /* Cache hit: rows render instantly with zero requests (backspace / repeat / page flip). */
+ const cached=scCacheGet(key);
+ if(cached){SRV.rows=cached.rows;SRV.ms=0;SRV.loading=false;
+   SRV.count=cached.count!=null?cached.count:((!filtered&&SRV.knownTotal!=null)?SRV.knownTotal:null);
+   gRenderList(G);scPager();
+   if(SRV.count==null)dbCardCount(SRV.scopeCol,SRV.scopeId,{search:F.search,filters:F}).then(patchCount(key));
+   return;}
+ const box=$('scListBox');if(box){if(SRV.rows==null)box.innerHTML='<div class="lab" style="padding:14px">Loading…</div>';else box.style.opacity='0.5';}
+ SRV.loading=true;scPager();const t0=Date.now();
+ const res=await dbCards(SRV.scopeCol,SRV.scopeId,{search:F.search,filters:F,sort:G.state.sort,offset:SRV.page*CARD_PAGE,limit:CARD_PAGE});
+ if(!SRV||SRV._key!==key)return;SRV.rows=res.rows;SRV.ms=Date.now()-t0;SRV.loading=false;
+ gRenderList(G);const b2=$('scListBox');if(b2)b2.style.opacity='';
+ /* Total: unfiltered uses the known count (no request); a filter fires ONE decoupled count that
+    never blocks the render. Cache the rows immediately; patch the count into the cache when it
+    resolves so a later repeat returns rows AND total with zero requests. */
+ const initCount=(!filtered&&SRV.knownTotal!=null)?SRV.knownTotal:null;
+ SRV.count=initCount;scCacheSet(key,{rows:res.rows,count:initCount});scPager();
+ if(initCount==null)dbCardCount(SRV.scopeCol,SRV.scopeId,{search:F.search,filters:F}).then(patchCount(key));}
 function scPager(){const el=$('scPager');if(!el||!SRV)return;const known=SRV.count!=null;const from=(SRV.rows&&SRV.rows.length)?SRV.page*CARD_PAGE+1:0,to=SRV.page*CARD_PAGE+((SRV.rows||[]).length);const pages=known?Math.max(1,Math.ceil(SRV.count/CARD_PAGE)):null;
- el.innerHTML=`<span>${from.toLocaleString()}–${to.toLocaleString()} of <b>${known?SRV.count.toLocaleString():'…'}</b>${SRV.ms!=null?' · '+SRV.ms+'ms':''}</span> <button class="btn x sm" ${SRV.page<=0?'disabled':''} onclick="scPage(-1)">‹ Prev</button> <span class="mono">${SRV.page+1}${pages?'/'+pages:''}</span> <button class="btn x sm" ${(known?SRV.page>=pages-1:(SRV.rows||[]).length<CARD_PAGE)?'disabled':''} onclick="scPage(1)">Next ›</button>`;}
+ el.innerHTML=`${SRV.loading?'<span style="color:#0a8a4a;font-weight:600">⟳ searching…</span> ':''}<span>${from.toLocaleString()}–${to.toLocaleString()} of <b>${known?SRV.count.toLocaleString():'…'}</b>${(SRV.ms!=null&&!SRV.loading)?' · '+SRV.ms+'ms':''}</span> <button class="btn x sm" ${SRV.page<=0?'disabled':''} onclick="scPage(-1)">‹ Prev</button> <span class="mono">${SRV.page+1}${pages?'/'+pages:''}</span> <button class="btn x sm" ${(known?SRV.page>=pages-1:(SRV.rows||[]).length<CARD_PAGE)?'disabled':''} onclick="scPage(1)">Next ›</button>`;}
 function renderCardGridShell(){const G=SRV.G,F=G.state.filters;const player=SRV.mode==='player';
  let h=`<div class="card"><div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
    <div class="row" style="gap:8px;align-items:center"><button class="btn sm" onclick="closeCardGrid()">← ${player?'Players':'Checklists'}</button><h3 style="font-size:15px">${player?'👤 ':''}${esc(SRV.name)}</h3>${player&&window._plMeta&&window._plMeta.team?`<span class="lab">${esc(window._plMeta.team||'')}${window._plMeta.nationality?' · '+esc(window._plMeta.nationality):''}</span>`:''}</div>
