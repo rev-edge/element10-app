@@ -154,3 +154,28 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --   which were public/anon-readable (migration e10_secure_backup_tables). Backup DATA untouched.
 -- Verified in tests/rls_test.js: member reads shared cards/players, member INSERT...RETURNING
 --   works, a non-member gets ZERO cards and is denied inserts.
+
+-- ─────────────────────────────────────────────────────────────
+-- APPLIED (migrations e10_teams_and_card_team, e10_slot_partition_rpc, e10_slot_partition_remainder):
+-- Break-format rebuild phase 1 — team entity + team field + the rule-based slot slicing primitive.
+--   e10_teams(id, name, aliases text[], sport, nationality, attrs, created_by, ts)
+--     - unique lower(name); trigram GIN on name (mirrors e10_players' search path -> dbTeamSearch,
+--       a copy of dbPlayerSearch pointed at e10_teams via the existing entityPicker).
+--     - RLS (InitPlan-wrapped, no per-row call): read = (select public.e10_is_member());
+--       insert/update/delete = (select public.e10_is_admin())  [member read, admin write].
+--   e10_cards += team_id uuid (FK e10_teams on delete set null, indexed) + team text. No backfill —
+--     cards without a team are valid (Pokémon has no team). The generated `search` column was
+--     dropped+recreated to include team (its trigram GIN rebuilt) so open search matches team.
+-- Slot rule shape (persisted on the break model in the workspace as ruleSlots, NOT materialized
+--   card lists): [{ id, name, include:[{field,value,valueId?}], exclude:[{...}], remainder? }].
+--   field ∈ team|player|set|parallel|type; include conditions are AND'd, exclude carves them out;
+--   team/player prefer the linked id, others match text. A {remainder:true} slot is the Field
+--   catch-all (claims cards no other slot took).
+-- Partition check is server-side: public.e10_slot_partition(p_checklist uuid, p_slots jsonb) (SECURITY
+--   INVOKER so RLS applies; EXECUTE authenticated, revoked anon). e10_slot_pred builds an index-
+--   friendly WHERE per slot (team_id/player_id use the indexes; set_name/parallel/card_type ILIKE),
+--   inserts matches into a temp map, then returns per-slot matched count + summed value, COVER
+--   (unassigned count + sample) and DISJOINT (double-claimed count + colliding slot names + sample).
+--   Only counts + bounded samples leave the DB — no pulling the whole checklist to the client
+--   (measured ~150ms over the 55k Prizm checklist). Phase 2 (pricing/tiers/method/projection) will
+--   build on these slot definitions; not built here.

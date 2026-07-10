@@ -165,6 +165,7 @@ function epSetValue(id,value){const e=EP[id];if(!e)return;e.value=value||null;ep
 /* server search adapters (RLS-wrapped, fast) */
 async function dbSetSearch(q){q=(q||'').trim();if(!q)return[];try{const{data}=await sb.from('e10_sets').select('id,name,year,sport').ilike('name','%'+q+'%').order('name').limit(20);return (data||[]).map(s=>({id:s.id,label:s.name,sub:[s.year,s.sport].filter(Boolean).join(' · ')}));}catch(e){return[];}}
 async function dbPlayerSearch(q){q=(q||'').trim();if(!q)return[];try{const{data}=await sb.from('e10_players').select('id,name,team,nationality').ilike('name','%'+q+'%').order('name').limit(20);return (data||[]).map(p=>({id:p.id,label:p.name,sub:[p.team,p.nationality].filter(Boolean).join(' · ')}));}catch(e){return[];}}
+async function dbTeamSearch(q){q=(q||'').trim();if(!q)return[];try{const{data}=await sb.from('e10_teams').select('id,name,nationality,sport').ilike('name','%'+q+'%').order('name').limit(20);return (data||[]).map(p=>({id:p.id,label:p.name,sub:[p.nationality,p.sport].filter(Boolean).join(' · ')}));}catch(e){return[];}}
 function invItemSearch(q){q=(q||'').toLowerCase();return (S.inventory||[]).filter(x=>(x.name||'').toLowerCase().includes(q)).slice(0,24).map(x=>({id:x.id,label:x.name,sub:[x.cat,x.set,'cost '+money(+x.cost||0)].filter(Boolean).join(' · ')}));}
 /* pickInput: type-to-filter combobox from a Lists & Settings pick-list (or a fixed array) */
 function pickOpts(list){const arr=Array.isArray(list)?list:L(list);return (arr||[]).map(v=>`<option value="${esc(v)}"></option>`).join('');}
@@ -483,29 +484,79 @@ function renderBreak(target){target=target||'dtc';const el=$(target);if(!el)retu
    </div></details>
  <div class="row" style="margin-top:12px"><input id="bName" placeholder="Name this model" style="flex:2;max-width:280px"><button class="btn d sm" onclick="saveBreak()">Save model</button></div></div>
  <div id="bkPlan"></div>
+ <div id="bkSlots"></div>
  <div class="card" style="margin-top:16px"><h3 style="font-size:15px">Saved break models — history</h3><div id="bkHist" style="margin-top:8px"></div></div>`;
- renderBKlists();calcBreak();renderBreakHist();
+ renderBKlists();calcBreak();renderBreakHist();renderSlotBuilder();bkEvalSlots();
 }
 /* ===== Break/format modeling now lives under Data & Lists → "Break / Format", entered from a
    product or a checklist (Phase 2). The modeler engine (BK/calcBreak/saveBreak/attach) is unchanged. */
 function dModeler(){renderBreak('dtc');}
 function openModeler(){dataTab='modeler';go('data');}
-function newBlankModel(){BK={products:[],chases:[],auctions:[],invItems:[],cost:0,_last:null};BK._preloadNote='';openModeler();}
+function newBlankModel(){BK={products:[],chases:[],auctions:[],invItems:[],cost:0,_last:null,slots:[],checklistId:null,_slotEval:null};BK._preloadNote='';openModeler();}
+/* ===== Rule-based slot builder (phase 1 slicing primitive) — rules evaluated server-side ===== */
+let _bkEvalT=null;
+function bkSlotById(sid){return (BK.slots||[]).find(s=>s.id===sid);}
+function bkAddSlot(){BK.slots=BK.slots||[];BK.slots.push({id:'sl'+Math.random().toString(36).slice(2),name:'Slot '+(BK.slots.length+1),include:[{field:'team',value:'',valueId:null}],exclude:[]});renderSlotBuilder();bkEvalSlots();}
+function bkAddFieldSlot(){BK.slots=BK.slots||[];if(BK.slots.some(s=>s.remainder)){toast('Field slot already added');return;}BK.slots.push({id:'sl'+Math.random().toString(36).slice(2),name:'Field / remainder',remainder:true,include:[],exclude:[]});renderSlotBuilder();bkEvalSlots();}
+function bkDelSlot(sid){BK.slots=(BK.slots||[]).filter(s=>s.id!==sid);renderSlotBuilder();bkEvalSlots();}
+function bkSlotName(sid,v){const s=bkSlotById(sid);if(s){s.name=v;clearTimeout(_bkEvalT);_bkEvalT=setTimeout(bkEvalSlots,400);}}
+function bkAddCond(sid,kind){const s=bkSlotById(sid);if(!s)return;(s[kind]=s[kind]||[]).push({field:kind==='include'?'player':'player',value:'',valueId:null});renderSlotBuilder();}
+function bkDelCond(sid,kind,idx){const s=bkSlotById(sid);if(!s||!s[kind])return;s[kind].splice(idx,1);renderSlotBuilder();bkEvalSlots();}
+function bkCondField(sid,kind,idx,field){const s=bkSlotById(sid);if(!s||!s[kind]||!s[kind][idx])return;s[kind][idx].field=field;s[kind][idx].value='';s[kind][idx].valueId=null;renderSlotBuilder();bkEvalSlots();}
+function bkCondVal(sid,kind,idx,value,valueId){const s=bkSlotById(sid);if(!s||!s[kind]||!s[kind][idx])return;s[kind][idx].value=value;s[kind][idx].valueId=valueId||null;clearTimeout(_bkEvalT);_bkEvalT=setTimeout(bkEvalSlots,400);}
+async function bkEvalSlots(){const status=()=>renderSlotStatus();
+ if(!BK.checklistId){BK._slotEval={noChecklist:true};status();return;}
+ if(!(BK.slots&&BK.slots.length)){BK._slotEval=null;status();return;}
+ const payload=BK.slots.map(s=>({name:s.name||'',include:s.include||[],exclude:s.exclude||[],remainder:!!s.remainder}));
+ try{const{data,error}=await sb.rpc('e10_slot_partition',{p_checklist:BK.checklistId,p_slots:payload});if(error)throw error;BK._slotEval=data;}catch(e){BK._slotEval={error:e.message};}
+ (BK.slots||[]).forEach((s,i)=>{const el=$('slcount_'+s.id);if(el&&BK._slotEval&&BK._slotEval.slots){const sv=BK._slotEval.slots.find(x=>x.i===i);if(sv)el.textContent=sv.matched.toLocaleString()+' cards'+(sv.value>0?(' · '+money(sv.value)):'');}});
+ status();}
+function bkCondPicker(sid,kind,idx,c){return entityPicker('slv_'+sid+'_'+kind+'_'+idx,{icon:c.field==='team'?'🏳':'👤',server:true,minChars:2,freeText:true,placeholder:'search '+c.field+'…',value:(c.value?{id:c.valueId||null,label:c.value}:null),search:c.field==='team'?dbTeamSearch:dbPlayerSearch,onpick:(id,label)=>bkCondVal(sid,kind,idx,label,id),onclear:()=>bkCondVal(sid,kind,idx,'',null)});}
+function bkRuleHTML(s,kind,label){const conds=s[kind]||[];const FF=[['team','Team'],['player','Player'],['set','Set'],['parallel','Parallel'],['type','Type']];
+ let h=`<div style="margin-top:8px"><div class="lab" style="text-transform:none;letter-spacing:0">${label} <button class="btn x sm" onclick="bkAddCond('${s.id}','${kind}')">+ condition</button></div>`;
+ conds.forEach((c,idx)=>{h+=`<div class="row" style="gap:6px;margin-top:4px;align-items:center;flex-wrap:wrap"><select style="font-size:12px;max-width:96px" onchange="bkCondField('${s.id}','${kind}',${idx},this.value)">${FF.map(f=>`<option value="${f[0]}" ${c.field===f[0]?'selected':''}>${f[1]}</option>`).join('')}</select>`;
+   if(c.field==='team'||c.field==='player')h+=`<div style="min-width:170px;flex:1">${bkCondPicker(s.id,kind,idx,c)}</div>`;
+   else h+=`<input value="${esc(c.value||'')}" placeholder="exact value…" style="min-width:150px;flex:1;font-size:12px" oninput="bkCondVal('${s.id}','${kind}',${idx},this.value,null)">`;
+   h+=`<button class="btn x sm" onclick="bkDelCond('${s.id}','${kind}',${idx})">✕</button></div>`;});
+ return h+`</div>`;}
+function renderSlotBuilder(){const box=$('bkSlots');if(!box)return;
+ if(!BK.checklistId){box.innerHTML=`<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Slots</h3><div class="lab" style="text-transform:none;letter-spacing:0;margin-top:6px">Load a product + checklist first — slots slice that checklist into breakable groups (team / player / set rules with carve-outs).</div></div>`;return;}
+ const slots=BK.slots||[];
+ let h=`<div class="card" style="margin-top:16px"><div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="font-size:15px">Slots — slice the checklist into groups</h3><div class="row" style="gap:6px"><button class="btn v sm" onclick="bkAddSlot()">+ Add slot</button><button class="btn sm" onclick="bkAddFieldSlot()">+ Field / remainder</button></div></div>
+   <div id="slBanner" style="margin-top:10px"></div>`;
+ if(!slots.length)h+=`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:8px">No slots yet. Add a slot and define an include rule (e.g. Team = Liverpool), optionally an exclude (e.g. Player = Rio → “Liverpool no Rio”). Include conditions are AND’d; exclude carves them out.</div>`;
+ slots.forEach(s=>{h+=`<div class="out" style="margin-top:10px"><div class="row" style="justify-content:space-between;align-items:center;gap:8px"><input value="${esc(s.name||'')}" placeholder="Slot name" style="max-width:230px;font-weight:600" oninput="bkSlotName('${s.id}',this.value)"><div class="row" style="gap:8px;align-items:center"><span class="lab" id="slcount_${s.id}" style="text-transform:none;letter-spacing:0">…</span><button class="btn x sm" onclick="bkDelSlot('${s.id}')">✕</button></div></div>`;
+   if(s.remainder)h+=`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:6px">🧺 Catch-all — claims every card not taken by another slot.</div>`;
+   else h+=bkRuleHTML(s,'include','Include — match ALL of:')+bkRuleHTML(s,'exclude','Exclude — carve out:');
+   h+=`</div>`;});
+ box.innerHTML=h+`</div>`;renderSlotStatus();}
+function renderSlotStatus(){const el=$('slBanner');if(!el)return;const ev=BK._slotEval;
+ if(!ev||ev.noChecklist){el.innerHTML='';return;}
+ if(ev.error){el.innerHTML=`<div class="out" style="border-color:#e8332b">Partition check error: ${esc(ev.error)}</div>`;return;}
+ const un=(ev.cover&&ev.cover.unassigned)||0,dbl=(ev.disjoint&&ev.disjoint.doubled)||0,total=ev.total||0,coverOk=un===0,disjOk=dbl===0;
+ el.innerHTML=`<div class="out" style="border-color:${(coverOk&&disjOk)?'#0a8a4a':(disjOk?'#b8860b':'#e8332b')}">
+   <div class="row" style="gap:14px;flex-wrap:wrap;align-items:center"><b>Partition of ${total.toLocaleString()} cards</b>
+     <span style="color:${coverOk?'#0a8a4a':'#b8860b'};font-weight:600">${coverOk?'✓ COVER — all claimed':'⚠ '+un.toLocaleString()+' unassigned'}</span>
+     <span style="color:${disjOk?'#0a8a4a':'#e8332b'};font-weight:600">${disjOk?'✓ DISJOINT — no overlap':'✕ '+dbl.toLocaleString()+' double-claimed'}</span>
+     ${!coverOk?`<button class="btn sm" onclick="bkAddFieldSlot()">+ Add Field slot (${un.toLocaleString()})</button>`:''}</div>
+   ${(!coverOk&&ev.cover.sample&&ev.cover.sample.length)?`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:5px">Unassigned e.g.: ${ev.cover.sample.slice(0,6).map(esc).join(', ')} …</div>`:''}
+   ${(!disjOk&&ev.disjoint.sample&&ev.disjoint.sample.length)?`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:5px;color:#e8332b">Collisions e.g.: ${ev.disjoint.sample.slice(0,4).map(x=>esc(x.name)+' ('+(x.slots||[]).map(esc).join(' + ')+')').join('; ')}</div>`:''}
+ </div>`;}
 async function checklistsForSet(set){if(!(set||'').trim())return[];try{const{data:sets}=await sb.from('e10_sets').select('id').ilike('name',set.trim());const ids=(sets||[]).map(s=>s.id);if(!ids.length)return[];const{data}=await sb.from('e10_checklists').select('id,name,card_count').in('set_id',ids);(data||[]).forEach(c=>{window._clCache=window._clCache||{};window._clCache[c.id]=c.name;});return data||[];}catch(e){return[];}}
 async function dbPreloadCards(clId){try{let{data}=await sb.from('e10_cards').select('name,value,chase').eq('checklist_id',clId).eq('chase',true).gt('value',0).order('value',{ascending:false}).limit(300);if(!data||!data.length){const r=await sb.from('e10_cards').select('name,value,chase').eq('checklist_id',clId).gt('value',0).order('value',{ascending:false}).limit(300);data=r.data||[];}return (data||[]).map(c=>({name:c.name,value:+c.value||0,chase:!!c.chase}));}catch(e){toast(e.message);return[];}}
-function preloadBreak(it,cl){BK={products:[],chases:[],auctions:[],invItems:[],cost:0,_last:null};
+function preloadBreak(it,cl){BK={products:[],chases:[],auctions:[],invItems:[],cost:0,_last:null,slots:[],checklistId:(cl&&cl._clId)||null,_slotEval:null};
  if(it){BK.cost=+it.cost||0;BK.invItems.push({itemId:it.id,name:it.name,qty:1,cost:+it.cost||0,value:+it.value||0,cat:it.cat,set:it.set});}
  let n=0;if(cl){const flagged=(cl.cards||[]).filter(c=>c.chase&&(+c.value||0)>0);const pool=flagged.length?flagged:(cl.cards||[]).filter(c=>(+c.value||0)>0);pool.forEach(c=>{BK.chases.push({name:c.name,val:+c.value||0});n++;});}
  BK._preloadNote=(it?('From '+it.name+' · cost '+money(+it.cost||0)):'')+(cl?((it?' + ':'From ')+cl.name+' · '+n+' chase cards'):(it?(' · no checklist for set “'+(it.set||'—')+'” — add chases manually'):''));
  openModeler();
  toast(cl?(n+' chase cards loaded from '+cl.name):(it?('No checklist matched set “'+(it.set||'—')+'” — model preloaded blank, add chases'):'New model'));
 }
-async function preloadBreakById(itemId,clId){const it=itemId?S.inventory.find(x=>x.id===itemId):null;let cl=null;if(clId){const cards=await dbPreloadCards(clId);cl={name:(window._clCache&&window._clCache[clId])||'Checklist',set:it?it.set:'',cards};}preloadBreak(it,cl);}
+async function preloadBreakById(itemId,clId){const it=itemId?S.inventory.find(x=>x.id===itemId):null;let cl=null;if(clId){const cards=await dbPreloadCards(clId);cl={name:(window._clCache&&window._clCache[clId])||'Checklist',set:it?it.set:'',cards,_clId:clId};}preloadBreak(it,cl);}
 async function buildBreakFromProduct(itemId){const it=S.inventory.find(x=>x.id===itemId);if(!it)return;const cls=await checklistsForSet(it.set);
  if(cls.length>1){$('modal').innerHTML=`<h3 style="font-size:18px">Build a break — ${esc(it.name)}</h3><div class="lab" style="margin:6px 0 10px;text-transform:none;letter-spacing:0">Multiple checklists match set “${esc(it.set)}”. Pick one:</div>${cls.map(c=>`<div class="row" style="margin-bottom:6px"><button class="btn" style="flex:1;text-align:left" onclick="closeM();preloadBreakById('${it.id}','${c.id}')">📄 ${esc(c.name)} · ${(c.card_count||0).toLocaleString()} cards</button></div>`).join('')}<div class="row" style="margin-top:8px"><button class="btn sm" onclick="closeM();preloadBreakById('${it.id}','')">No checklist (manual)</button><button class="btn sm" onclick="closeM()">Cancel</button></div>`;$('ov').style.display='flex';return;}
- if(cls[0]){const cards=await dbPreloadCards(cls[0].id);preloadBreak(it,{name:cls[0].name,set:it.set,cards});}else preloadBreak(it,null);
+ if(cls[0]){const cards=await dbPreloadCards(cls[0].id);preloadBreak(it,{name:cls[0].name,set:it.set,cards,_clId:cls[0].id});}else preloadBreak(it,null);
 }
-async function buildBreakFromChecklist(clId){const name=(window._clCache&&window._clCache[clId])||'Checklist';const cards=await dbPreloadCards(clId);preloadBreak(null,{name,set:'',cards});}
+async function buildBreakFromChecklist(clId){const name=(window._clCache&&window._clCache[clId])||'Checklist';const cards=await dbPreloadCards(clId);preloadBreak(null,{name,set:'',cards,_clId:clId});}
 function renderBKlists(){
  $('prodList').innerHTML=BK.products.map((p,i)=>`<div class="row" style="justify-content:space-between;font-size:13px;padding:3px 0"><span>${esc(p.name)} · ${p.spots} spots · ${money(p.val)}</span><button class="btn x" onclick="BK.products.splice(${i},1);renderBKlists();calcBreak()">✕</button></div>`).join('');
  $('chaseList').innerHTML=BK.chases.map((c,i)=>`<div class="row" style="justify-content:space-between;font-size:13px;padding:3px 0"><span>${esc(c.name)} · ${money(c.val)}</span><button class="btn x" onclick="BK.chases.splice(${i},1);renderBKlists();calcBreak()">✕</button></div>`).join('');
@@ -624,6 +675,7 @@ function saveBreak(){if(!BK._last)return;if(!canEditScoped())return roGuard();
    economics:BK._last.economics,rows:BK._last.rows,
    inputs:{products:BK.products.slice(),chases:BK.chases.slice(),auctions:BK.auctions.slice(),cost:BK.cost,
      format:BK.format,spots:BK.spots,feesPct:BK.feesPct,shipPer:BK.shipPer,targetMargin:BK.targetMargin,spotPrice:BK.spotPrice,priceMode:BK.priceMode},
+   ruleSlots:JSON.parse(JSON.stringify(BK.slots||[])),checklistId:BK.checklistId||null,
    invItems:BK.invItems.slice()});
  save();renderBreakHist();const nm=$('bName');if(nm)nm.value='';toast('Saved break model');}
 function renderBreakHist(){const el=$('bkHist');if(!el)return;
@@ -631,7 +683,7 @@ function renderBreakHist(){const el=$('bkHist');if(!el)return;
 function reopenBreak(id){const b=(S.breaks||[]).find(x=>x.id===id);if(!b)return;const q=b.inputs||{};
  BK.products=(q.products||[]).slice();BK.chases=(q.chases||[]).slice();BK.auctions=(q.auctions||[]).slice();BK.cost=+q.cost||0;
  BK.format=q.format||'tiered';BK.spots=q.spots!=null?q.spots:null;BK.feesPct=q.feesPct!=null?q.feesPct:9;BK.shipPer=q.shipPer!=null?q.shipPer:0;BK.targetMargin=q.targetMargin!=null?q.targetMargin:35;BK.spotPrice=q.spotPrice!=null?q.spotPrice:null;BK.priceMode=q.priceMode||'margin';
- BK.invItems=(b.invItems||[]).slice();BK._modelId=id;BK._preloadNote='Reopened “'+b.name+'”';dModeler();toast('Reopened '+b.name);}
+ BK.invItems=(b.invItems||[]).slice();BK.slots=JSON.parse(JSON.stringify(b.ruleSlots||[]));BK.checklistId=b.checklistId||null;BK._slotEval=null;BK._modelId=id;BK._preloadNote='Reopened “'+b.name+'”';dModeler();toast('Reopened '+b.name);}
 function dupBreak(id){if(!canEditScoped())return roGuard();const b=(S.breaks||[]).find(x=>x.id===id);if(!b)return;const c=JSON.parse(JSON.stringify(b));c.id='bk'+Date.now();c.name=b.name+' (copy)';c.ts=Date.now();S.breaks.unshift(c);save();renderBreakHist();}
 function renameBreak(id){if(!canEditScoped())return roGuard();const b=(S.breaks||[]).find(x=>x.id===id);if(!b)return;const v=prompt('Rename break model',b.name);if(v==null)return;b.name=v.trim()||b.name;save();renderBreakHist();}
 function delBreakById(id){if(!canEditScoped())return roGuard();S.breaks=(S.breaks||[]).filter(x=>x.id!==id);save();renderBreakHist();}
@@ -694,12 +746,12 @@ function clSmartFallback(headers,rows,name,msg){toast(msg);clStageDirect(headers
 function clApplyMapping(headers,rows,mapping,name){
  const cm=(mapping&&mapping.columnMapping)||{};
  const idxOf=field=>{for(let i=0;i<headers.length;i++){if((cm[headers[i]]||'')===field)return i;}return -1;};
- const iNum=idxOf('num'),iName=idxOf('name'),iSet=idxOf('set'),iRar=idxOf('rarity'),iVal=idxOf('value'),iType=idxOf('cardType');
+ const iNum=idxOf('num'),iName=idxOf('name'),iSet=idxOf('set'),iRar=idxOf('rarity'),iVal=idxOf('value'),iType=idxOf('cardType'),iTeam=idxOf('team');
  let iPar=idxOf('parallel');if(iPar<0&&mapping&&mapping.parallelColumn){const p=headers.indexOf(mapping.parallelColumn);if(p>=0)iPar=p;}
  const ctVals=(mapping&&mapping.cardTypeValues)||{};
  const insKw=((mapping&&mapping.insertKeywords)||[]).map(s=>(''+s).toLowerCase()).filter(Boolean);
  const parKw=((mapping&&mapping.parallelKeywords)||[]).map(s=>(''+s).toLowerCase()).filter(Boolean);
- const used=new Set([iNum,iName,iSet,iRar,iVal,iPar,iType].filter(i=>i>=0));
+ const used=new Set([iNum,iName,iSet,iRar,iVal,iPar,iType,iTeam].filter(i=>i>=0));
  const setName=(mapping&&mapping.setName)||'';
  const guess=raw=>{const s=(''+raw).toLowerCase();if(/insert/.test(s))return'insert';if(/parallel|refractor|prizm|holo|foil|variation|numbered|\/\d/.test(s))return'parallel';if(/base/.test(s))return'base';return'';};
  const g=(r,i)=>i>=0?(''+(r[i]==null?'':r[i])).trim():'';const flags=[],cards=[];
@@ -710,7 +762,7 @@ function clApplyMapping(headers,rows,mapping,name){
    else{const lc=(nm+' '+rarity+' '+parallel).toLowerCase();cardType=insKw.some(k=>lc.includes(k))?'insert':((parallel||parKw.some(k=>lc.includes(k)))?'parallel':'base');}
    if(parallel&&cardType==='base')cardType='parallel';
    const extra={};headers.forEach((h,ci)=>{if(!used.has(ci)){const v=g(r,ci);if(v)extra[h]=v;}});
-   const card={id:'cc'+Math.random().toString(36).slice(2),num:g(r,iNum),name:nm,set:g(r,iSet)||setName,rarity,value,parallel,cardType,chase:false};
+   const card={id:'cc'+Math.random().toString(36).slice(2),num:g(r,iNum),name:nm,set:g(r,iSet)||setName,rarity,value,parallel,cardType,team:g(r,iTeam),chase:false};
    if(Object.keys(extra).length)card.extra=extra;
    if(!nm)flags.push({row:ri+2,msg:'no card name'});else if(valRaw&&value==='')flags.push({row:ri+2,msg:'value "'+valRaw+'" is not a number'});
    cards.push(card);});
@@ -769,9 +821,9 @@ function clCancelReview(){clReviewMode=false;PENDING_CL=null;delete GRIDS['cl:__
 /* ===================== CARD TABLES — server-backed data layer + grid (Phase B/C) =====================
    Cards/checklists/players/sets live in Postgres (e10_cards etc.), queried a page at a time.
    Nothing here loads a whole card table into the browser. */
-const CARD_PAGE=100;const CARD_COL={num:'num',name:'name',set:'set_name',rarity:'rarity',value:'value',parallel:'parallel',card_type:'card_type',serial:'serial',color:'color',rookie:'rookie',chase:'chase'};
+const CARD_PAGE=100;const CARD_COL={num:'num',name:'name',set:'set_name',rarity:'rarity',value:'value',parallel:'parallel',card_type:'card_type',serial:'serial',color:'color',rookie:'rookie',chase:'chase',team:'team'};
 async function dbChecklists(){try{const{data,error}=await sb.from('e10_checklists').select('id,name,source,card_count,updated_at,set:set_id(name,sport)').order('updated_at',{ascending:false});if(error)throw error;window._clCount=window._clCount||{};(data||[]).forEach(c=>{window._clCount[c.id]=c.card_count;});return data||[];}catch(e){toast('Load checklists: '+e.message);return[];}}
-function dbCardFiltered(o){const f=(o&&o.filters)||{};return !!((o&&o.search&&o.search.trim())||(f.set||'').trim()||(f.rarity||'').trim()||(f.parallel||'').trim()||(f.card_type||'').trim());}
+function dbCardFiltered(o){const f=(o&&o.filters)||{};return !!((o&&o.search&&o.search.trim())||(f.set||'').trim()||(f.rarity||'').trim()||(f.parallel||'').trim()||(f.card_type||'').trim()||(f.team||'').trim());}
 function dbCardFilters(q,o){const f=o.filters||{};const s=(o.search||'').trim().toLowerCase();
  /* Tokenize on whitespace and require ALL tokens (AND), each as an ILIKE substring. PostgREST
     ANDs chained .like calls; the AND-of-ILIKEs still uses the e10_cards_search_trgm index. This
@@ -782,9 +834,10 @@ function dbCardFilters(q,o){const f=o.filters||{};const s=(o.search||'').trim().
  if((f.rarity||'').trim())q=q.ilike('rarity','%'+f.rarity.trim()+'%');
  if((f.parallel||'').trim())q=q.ilike('parallel','%'+f.parallel.trim()+'%');
  if((f.card_type||'').trim())q=q.ilike('card_type','%'+f.card_type.trim()+'%');
+ if((f.team||'').trim())q=q.ilike('team','%'+f.team.trim()+'%');
  return q;}
 async function dbCards(scopeCol,scopeId,o){o=o||{};try{
- let q=sb.from('e10_cards').select('id,num,name,set_name,rarity,value,parallel,card_type,serial,color,rookie,chase,player_id,player:player_id(id,name)').eq(scopeCol,scopeId);
+ let q=sb.from('e10_cards').select('id,num,name,set_name,rarity,value,parallel,card_type,serial,color,rookie,chase,team,team_id,player_id,player:player_id(id,name)').eq(scopeCol,scopeId);
  q=dbCardFilters(q,o);
  /* Always apply the user's sort — filtered OR not. Measured server-side: broad filter + order
     by an indexed column (checklist_id,name,id / ,value,id) returns in ~1ms via index scan;
@@ -796,7 +849,13 @@ async function dbCards(scopeCol,scopeId,o){o=o||{};try{
 }catch(e){toast('Load cards: '+e.message);return{rows:[]};}}
 async function dbCardCount(scopeCol,scopeId,o){try{let q=sb.from('e10_cards').select('id',{count:'exact',head:true}).eq(scopeCol,scopeId);q=dbCardFilters(q,o);const{count,error}=await q;if(error)throw error;return count||0;}catch(e){return null;}}
 async function scEdit(id,field,val){const col=CARD_COL[field];if(!col)return;let v=val;if(field==='value'){const c=(''+val).replace(/[^0-9.\-]/g,'');v=c===''?null:+c;}else if(field==='chase'||field==='rookie')v=!!val;else v=(v===''?null:v);
- const row=SRV&&SRV.rows.find(r=>r.id===id);if(row)row[col]=v;scCacheClear();try{const{error}=await sb.from('e10_cards').update({[col]:v}).eq('id',id);if(error)toast(error.message);}catch(e){toast(e.message);}}
+ const row=SRV&&SRV.rows.find(r=>r.id===id);if(row)row[col]=v;scCacheClear();
+ const patch=(field==='team')?{team:v,team_id:null}:{[col]:v}; /* typing a team name is free text — drop any stale link */
+ if(field==='team'&&row)row.team_id=null;
+ try{const{error}=await sb.from('e10_cards').update(patch).eq('id',id);if(error)toast(error.message);}catch(e){toast(e.message);}}
+/* Team link: entityPicker over dbTeamSearch → stores {team_id, team} on the card (same UX as player picker). */
+function scTeamLink(id){$('modal').innerHTML=`<h3 style="font-size:16px">Link a team</h3><div class="lab" style="text-transform:none;letter-spacing:0;margin:6px 0 10px">Search teams — picking links this card (stores team_id) and sets the team label. Or type a team name in the cell to keep it as free text.</div><div style="min-height:200px">${entityPicker('scTeamPick',{icon:'🏳',server:true,minChars:2,freeText:true,placeholder:'search teams…',search:dbTeamSearch,onpick:(tid,label)=>{scSetTeam(id,tid,label);closeM();}})}</div><div class="row" style="margin-top:12px"><button class="btn sm" onclick="closeM()">Cancel</button></div>`;$('ov').style.display='flex';setTimeout(()=>{const e=$('epi_scTeamPick');if(e)e.focus();},60);}
+async function scSetTeam(id,teamId,label){const row=SRV&&SRV.rows.find(r=>r.id===id);if(row){row.team=label;row.team_id=teamId||null;}scCacheClear();try{const{error}=await sb.from('e10_cards').update({team:label,team_id:teamId||null}).eq('id',id);if(error){toast(error.message);return;}}catch(e){toast(e.message);return;}if(SRV)gRenderList(SRV.G);toast('Team linked: '+label);}
 function scBumpTotal(d){if(!SRV)return;if(SRV.knownTotal!=null)SRV.knownTotal=Math.max(0,SRV.knownTotal+d);if(SRV.count!=null)SRV.count=Math.max(0,SRV.count+d);if(SRV.scopeCol==='checklist_id'&&window._clCount&&window._clCount[SRV.scopeId]!=null)window._clCount[SRV.scopeId]=Math.max(0,window._clCount[SRV.scopeId]+d);}
 async function scDel(id){if(!confirm('Delete this card?'))return;try{await sb.from('e10_cards').delete().eq('id',id);}catch(e){toast(e.message);return;}scCacheClear();if(SRV){SRV.rows=SRV.rows.filter(r=>r.id!==id);scBumpTotal(-1);gRenderList(SRV.G);scPager();}}
 async function scAddCard(){if(!SRV||SRV.scopeCol!=='checklist_id')return;try{const{error}=await sb.from('e10_cards').insert({checklist_id:SRV.scopeId,name:'New card',card_type:'base'});if(error){toast(error.message);return;}}catch(e){toast(e.message);return;}scCacheClear();scBumpTotal(1);SRV.page=0;scFetch();}
@@ -805,6 +864,7 @@ const SC_COLS=[
  {key:'name',label:'Name',core:true,first:true,sortable:true,sortVal:c=>(c.name||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.name||'')}" style="min-width:150px" onchange="scEdit('${c.id}','name',this.value)"></td>`},
  {key:'player',label:'Player',sortable:false,cell:c=>`<td>${c.player?`<a style="cursor:pointer;color:#2563eb;text-decoration:underline" onclick="openPlayer('${c.player.id}')">${esc(c.player.name)}</a>`:'<span class="lab">—</span>'}</td>`},
  {key:'set',label:'Set',sortable:true,sortVal:c=>(c.set_name||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.set_name||'')}" style="min-width:130px;font-size:12px" onchange="scEdit('${c.id}','set',this.value)"></td>`},
+ {key:'team',label:'Team',sortable:true,sortVal:c=>(c.team||'').toLowerCase(),cell:c=>`<td><div class="row" style="gap:3px;align-items:center;flex-wrap:nowrap"><input value="${esc(c.team||'')}" style="min-width:92px;font-size:12px" placeholder="—" onchange="scEdit('${c.id}','team',this.value)"><button class="btn x sm ${c.team_id?'v':''}" title="Link to a team entity" onclick="scTeamLink('${c.id}')">🔗</button></div></td>`},
  {key:'parallel',label:'Parallel',sortable:true,sortVal:c=>(c.parallel||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.parallel||'')}" style="min-width:100px;font-size:12px" placeholder="Base" onchange="scEdit('${c.id}','parallel',this.value)"></td>`},
  {key:'card_type',label:'Type',sortable:true,sortVal:c=>c.card_type||'',cell:c=>`<td><select style="font-size:12px" onchange="scEdit('${c.id}','card_type',this.value)">${['base','parallel','insert','SSP'].map(t=>`<option ${((c.card_type||'base')===t)?'selected':''}>${t}</option>`).join('')}</select></td>`},
  {key:'serial',label:'Serial',sortable:true,sortVal:c=>c.serial||'',cell:c=>`<td class="mono"><input value="${esc(c.serial||'')}" style="width:60px;font-size:12px" placeholder="/99" onchange="scEdit('${c.id}','serial',this.value)"></td>`},
@@ -824,7 +884,7 @@ function scCacheGet(k){if(_scCache.has(k)){const v=_scCache.get(k);_scCache.dele
 function scCacheSet(k,v){_scCache.set(k,v);while(_scCache.size>SC_CACHE_MAX)_scCache.delete(_scCache.keys().next().value);}
 function scCacheClear(){_scCache.clear();}
 function scGridCfg(){return {sk:'e10_sc',cols:SC_COLS,defaultCols:SC_DEFAULT,defaultSort:{col:'name',dir:1},
- defaultFilters:{search:'',set:'',rarity:'',parallel:'',card_type:''},listBoxId:'scListBox',colsMenuId:'scColsMenu',viewPrompt:'Name this view (e.g. "Rookies", "/99 parallels")',
+ defaultFilters:{search:'',set:'',team:'',rarity:'',parallel:'',card_type:''},listBoxId:'scListBox',colsMenuId:'scColsMenu',viewPrompt:'Name this view (e.g. "Rookies", "/99 parallels")',
  base:()=>SRV?SRV.rows:[],searchFn:null,filter:null,onSort:()=>{SRV.page=0;scFetch();},render:()=>{renderCardGridShell();scFetch();}};}
 function openCardGrid(scopeCol,scopeId,name,mode){const known=(scopeCol==='checklist_id'&&window._clCount&&window._clCount[scopeId]!=null)?window._clCount[scopeId]:null;
  SRV={scopeCol,scopeId,name:name||'',mode:mode||'checklist',page:0,rows:null,count:0,knownTotal:known};if(!GRIDS['sc'])makeGrid('sc',scGridCfg());SRV.G=GRIDS['sc'];clOpenId='sc';renderCardGridShell();scFetch();}
@@ -867,6 +927,7 @@ function renderCardGridShell(){const G=SRV.G,F=G.state.filters;const player=SRV.
      <div><label>Rarity</label><input value="${esc(F.rarity||'')}" placeholder="type…" style="max-width:110px" oninput="scFilter('rarity',this.value)"></div>
      <div><label>Parallel</label><input value="${esc(F.parallel||'')}" placeholder="type…" style="max-width:110px" oninput="scFilter('parallel',this.value)"></div>
      <div><label>Type</label><input value="${esc(F.card_type||'')}" placeholder="type…" style="max-width:90px" oninput="scFilter('card_type',this.value)"></div>
+     <div><label>Team</label><input value="${esc(F.team||'')}" placeholder="type…" style="max-width:110px" oninput="scFilter('team',this.value)"></div>
    </div>
    <div class="etool" style="margin-top:8px;align-items:center;gap:10px">${gColsBtn(G)}${gViewsHTML(G)}<div id="scPager" class="lab" style="margin-left:auto;text-transform:none;letter-spacing:0"></div></div>
    <div id="scListBox"></div></div>`;
@@ -889,7 +950,15 @@ async function dbEnsureSet(name,sport){name=(name||'').trim();if(!name)return nu
  const{data:ex}=await sb.from('e10_sets').select('id').ilike('name',name).limit(1);if(ex&&ex.length)return ex[0].id;
  const yr=(name.match(/\d{4}/)||[null])[0];const{data,error}=await sb.from('e10_sets').insert({name,year:yr?+yr:null,sport:sport||null}).select('id').single();if(error)throw error;return data.id;
 }catch(e){return null;}}
-async function dbInsertCards(clId,setId,cards,onProgress){let done=0;const B=500;for(let i=0;i<cards.length;i+=B){const chunk=cards.slice(i,i+B).map(c=>({checklist_id:clId,set_id:setId||null,player_id:c.player_id||null,num:c.num||null,name:c.name||null,set_name:c.set_name||c.set||null,rarity:c.rarity||null,value:(c.value===''||c.value==null)?null:+c.value,parallel:c.parallel||null,card_type:c.cardType||c.card_type||'base',serial:c.serial||null,color:c.color||null,rookie:c.rookie==null?null:!!c.rookie,chase:!!c.chase,attrs:c.extra||{}}));const{error}=await sb.from('e10_cards').insert(chunk);if(error)throw error;done+=chunk.length;if(onProgress)onProgress(done,cards.length);}return done;}
+async function dbInsertCards(clId,setId,cards,onProgress){let done=0;const B=500;for(let i=0;i<cards.length;i+=B){const chunk=cards.slice(i,i+B).map(c=>({checklist_id:clId,set_id:setId||null,player_id:c.player_id||null,team_id:c.team_id||null,team:c.team||null,num:c.num||null,name:c.name||null,set_name:c.set_name||c.set||null,rarity:c.rarity||null,value:(c.value===''||c.value==null)?null:+c.value,parallel:c.parallel||null,card_type:c.cardType||c.card_type||'base',serial:c.serial||null,color:c.color||null,rookie:c.rookie==null?null:!!c.rookie,chase:!!c.chase,attrs:c.extra||{}}));const{error}=await sb.from('e10_cards').insert(chunk);if(error)throw error;done+=chunk.length;if(onProgress)onProgress(done,cards.length);}return done;}
+/* Team resolution on import: dedup by exact (case-insensitive) name against e10_teams — links
+   team_id to the existing team, or creates one (admin) so no duplicate teams are made. Mirrors the
+   player exact-link/create path; the same lower(name) unique index enforces the dedup server-side. */
+async function resolveTeams(cards){const names=[...new Set(cards.map(c=>(c.team||'').trim()).filter(Boolean))];if(!names.length)return;const map={};
+ for(let i=0;i<names.length;i+=150){const batch=names.slice(i,i+150);try{const{data}=await sb.from('e10_teams').select('id,name').in('name',batch);(data||[]).forEach(t=>map[t.name.toLowerCase()]=t.id);}catch(e){}}
+ const need=names.filter(n=>!(n.toLowerCase() in map));
+ for(let i=0;i<need.length;i+=200){const batch=need.slice(i,i+200).map(nm=>({name:nm}));try{const{data}=await sb.from('e10_teams').insert(batch).select('id,name');(data||[]).forEach(t=>map[t.name.toLowerCase()]=t.id);}catch(e){/* likely non-admin (RLS) or unique conflict → refetch to link existing */try{const{data}=await sb.from('e10_teams').select('id,name').in('name',need.slice(i,i+200));(data||[]).forEach(t=>map[t.name.toLowerCase()]=t.id);}catch(_){}}}
+ cards.forEach(c=>{const k=(c.team||'').trim().toLowerCase();if(k&&map[k])c.team_id=map[k];});}
 /* Resolution: match distinct card names to existing players (case-insensitive exact = confident auto-link);
    surface likely-but-uncertain matches (a player whose name shares the last token) for the user to confirm. */
 async function planResolution(cards){const names=[...new Set(cards.map(c=>(c.name||'').trim()).filter(Boolean))];const exact={};
@@ -905,6 +974,7 @@ async function commitImport(cl,setId,linkMap){toast('Committing '+cl.cards.lengt
    for(let i=0;i<need.length;i+=200){const batch=need.slice(i,i+200).map(nm=>({name:nm,sport:sport}));try{const{data}=await sb.from('e10_players').insert(batch).select('id,name');(data||[]).forEach(p=>linked[p.name.toLowerCase()]=p.id);}catch(e){try{const{data}=await sb.from('e10_players').select('id,name').in('name',need.slice(i,i+200));(data||[]).forEach(p=>linked[p.name.toLowerCase()]=p.id);}catch(_){}}}
    cl.cards.forEach(c=>{c.player_id=linked[(c.name||'').trim().toLowerCase()]||null;});
  } else cl.cards.forEach(c=>{c.player_id=null;});
+ await resolveTeams(cl.cards); // link/create team_id for any mapped team column (dedup by name)
  // checklist row
  let clId;try{const{data,error}=await sb.from('e10_checklists').insert({name:cl.name||'Imported checklist',set_id:setId,source:(cl._meta&&cl._meta.mode)||'import'}).select('id').single();if(error)throw error;clId=data.id;}catch(e){toast('Create checklist failed: '+e.message);return;}
  try{await dbInsertCards(clId,setId,cl.cards,(d,t)=>{if(d%2000===0||d===t)toast('Inserted '+d.toLocaleString()+'/'+t.toLocaleString());});}catch(e){toast('Insert failed: '+e.message);return;}
@@ -1284,13 +1354,13 @@ function importInv(inp){const f=inp.files[0];if(!f)return;const r=new FileReader
  res.valid.forEach(it=>S.inventory.push(it));save();dInventory();toast(res.valid.length+' items imported');
 };r.readAsText(f);inp.value='';}
 /* ===== Checklists as structured, configurable card grids (reuses the grid engine) ===== */
-function clColMap(cols){const idx=rx=>cols.findIndex(c=>new RegExp(rx,'i').test(c));return {num:idx('number|card ?#|^#$|^no\\.?$'),name:idx('card ?name|^name$|name|title'),set:idx('^set$|^set |product'),rarity:idx('rarity|rare'),value:idx('value|market|price|\\$'),chase:idx('chase'),parallel:idx('parallel|variation|variant|finish|^foil$'),cardType:idx('card ?type|^type$')};}
+function clColMap(cols){const idx=rx=>cols.findIndex(c=>new RegExp(rx,'i').test(c));return {num:idx('number|card ?#|^#$|^no\\.?$'),name:idx('card ?name|^name$|name|title'),set:idx('^set$|^set |product'),rarity:idx('rarity|rare'),value:idx('value|market|price|\\$'),chase:idx('chase'),parallel:idx('parallel|variation|variant|finish|^foil$'),cardType:idx('card ?type|^type$'),team:idx('^team$|club|squad')};}
 function clNormType(raw,parallel){const s=(''+(raw||'')).toLowerCase();if(/insert/.test(s))return'insert';if(/parallel/.test(s))return'parallel';if(/base/.test(s))return'base';return parallel?'parallel':'base';}
-function clBuildCards(cl){const cols=cl.columns||[],rows=cl.rows||[],m=clColMap(cols),used=[m.num,m.name,m.set,m.rarity,m.value,m.chase,m.parallel,m.cardType].filter(x=>x>=0);
+function clBuildCards(cl){const cols=cl.columns||[],rows=cl.rows||[],m=clColMap(cols),used=[m.num,m.name,m.set,m.rarity,m.value,m.chase,m.parallel,m.cardType,m.team].filter(x=>x>=0);
  return rows.filter(r=>r&&r.some(c=>(''+(c==null?'':c)).trim())).map(r=>{const g=k=>m[k]>=0?(''+(r[m[k]]==null?'':r[m[k]])).trim():'';
    const extra={};cols.forEach((h,ci)=>{const v=(''+(r[ci]==null?'':r[ci])).trim();if(v&&!used.includes(ci))extra[h]=v;});
    const vv=g('value').replace(/[^0-9.\-]/g,'');let parallel=g('parallel');if(/^base$/i.test(parallel))parallel='';
-   return {id:'cc'+Math.random().toString(36).slice(2),num:g('num'),name:g('name'),set:g('set'),rarity:g('rarity'),value:vv===''?'':(+vv||0),parallel,cardType:clNormType(g('cardType'),parallel),chase:/^(1|true|yes|y|chase|x|✓)$/i.test(g('chase')),extra:Object.keys(extra).length?extra:undefined};});}
+   return {id:'cc'+Math.random().toString(36).slice(2),num:g('num'),name:g('name'),set:g('set'),rarity:g('rarity'),value:vv===''?'':(+vv||0),parallel,cardType:clNormType(g('cardType'),parallel),team:g('team'),chase:/^(1|true|yes|y|chase|x|✓)$/i.test(g('chase')),extra:Object.keys(extra).length?extra:undefined};});}
 function clDeriveSet(cards){const c={};cards.forEach(x=>{if(x.set)c[x.set]=(c[x.set]||0)+1;});let best='',n=0;for(const k in c){if(c[k]>n){n=c[k];best=k;}}return best;}
 function clNormalize(cl){if(!cl.id)cl.id='cl'+Math.random().toString(36).slice(2);if(!Array.isArray(cl.cards))cl.cards=clBuildCards(cl);cl.cards.forEach(cd=>{if(!cd.id)cd.id='cc'+Math.random().toString(36).slice(2);cd.chase=!!cd.chase;if(cd.value!==''&&cd.value!=null)cd.value=+cd.value||0;if(!('parallel'in cd))cd.parallel='';if(!('cardType'in cd)||!cd.cardType)cd.cardType=cd.parallel?'parallel':'base';});if(!('set'in cl)||!cl.set)cl.set=clDeriveSet(cl.cards);return cl;}
 const CL_COLS=[
