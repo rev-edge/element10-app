@@ -179,3 +179,23 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --   Only counts + bounded samples leave the DB — no pulling the whole checklist to the client
 --   (measured ~150ms over the 55k Prizm checklist). Phase 2 (pricing/tiers/method/projection) will
 --   build on these slot definitions; not built here.
+
+-- ─────────────────────────────────────────────────────────────
+-- APPLIED (migration e10_checklist_facet_rpc):
+-- Break-format rebuild phase 2 — break formatter (sale method + tier bands + viability projection).
+--   ONE new DB object (no new tables): public.e10_checklist_facet(p_checklist uuid, p_dim text) jsonb.
+--     - SECURITY INVOKER (default) + STABLE, so RLS on e10_cards applies (member read); adds no new
+--       RLS surface. Index-friendly: filtered by checklist_id (indexed), grouped server-side.
+--     - Returns the distinct team (or player) values of a checklist as
+--       [{label,id,cards,value}] ranked by summed value desc — the input to one-click "Generate
+--       spots" and the tier pre-rank. The client never pulls the row set to enumerate teams/players.
+--   Everything else in phase 2 persists on the break model in the workspace store (no DDL):
+--     - format model  += breakType ('team'|'player'|'hybrid'), tierBands:[{id,name,low,expected,high}].
+--     - each ruleSlot += method ('$1auction'|'auction'|'fixed'), start?/price?, tierId?,
+--       bandOverride?{low,expected,high}, order?  (all optional → old models load unchanged).
+--   ONE band resolver seam (client bkResolveBand): auction slots read {low,expected,high} through it;
+--     phase 2 returns the manual tier band or per-slot override; a future hammer-history source (phase
+--     3) adds a branch returning the SAME shape — the projection math never changes. Fixed slots use
+--     their price at low=expected=high. Projection = Σ slot takes at LOW/EXPECTED/HIGH vs the
+--     cost/(1-marginGoal) clear line, a top-N concentration share + a top-spots-at-LOW downside, and a
+--     fixed-price nudge to close the margin gap. Reuses e10_slot_partition as-is; RLS not weakened.

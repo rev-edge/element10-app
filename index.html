@@ -462,12 +462,12 @@ function renderBreak(target){target=target||'dtc';const el=$(target);if(!el)retu
  el.innerHTML=`<div class="hero"><div><h1>Break / format planner</h1>${BK._preloadNote?`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:4px">${esc(BK._preloadNote)}</div>`:''}</div><button class="btn sm" onclick="newBlankModel()">+ New blank model</button></div>
  <div class="card"><div class="etool" style="align-items:flex-end">
    <div style="min-width:190px;flex:1"><label>Product</label>${entityPicker('bkProd',{icon:'📦',placeholder:'search inventory / product…',value:it?{id:it.itemId,label:it.name}:null,search:invItemSearch,onpick:(iid)=>buildBreakFromProduct(iid),onclear:()=>newBlankModel()})}</div>
-   <div><label>Cost $</label><input id="bCost" type="number" value="${BK.cost}" style="max-width:100px" oninput="BK.cost=+this.value||0;calcBreak()"></div>
+   <div><label>Cost $</label><input id="bCost" type="number" value="${BK.cost}" style="max-width:100px" oninput="BK.cost=+this.value||0;calcBreak();renderProjection()"></div>
    <div><label>Format</label><select onchange="BK.format=this.value;calcBreak()">${[['random','Random spots'],['tiered','Tiered / ranked'],['team','Team / character'],['pick','Pick-your-Pokémon']].map(([v,l])=>`<option value="${v}" ${BK.format===v?'selected':''}>${l}</option>`).join('')}</select></div>
    <div><label>Spots</label><input type="number" min="1" value="${BK.spots}" style="max-width:72px" oninput="BK.spots=Math.max(1,+this.value||1);calcBreak()"></div>
    <div><label>Fees %</label><input type="number" step="0.5" value="${BK.feesPct}" style="max-width:70px" oninput="BK.feesPct=+this.value||0;calcBreak()"></div>
    <div><label>Ship $/spot</label><input type="number" step="0.5" value="${BK.shipPer}" style="max-width:82px" oninput="BK.shipPer=+this.value||0;calcBreak()"></div>
-   <div><label>Target margin %</label><input id="bkMargin" type="number" value="${BK.priceMode==='margin'?BK.targetMargin:''}" placeholder="${BK.targetMargin}" style="max-width:92px" oninput="BK.targetMargin=+this.value||0;BK.priceMode='margin';var pe=document.getElementById('bkPrice');if(pe)pe.value='';calcBreak()"></div>
+   <div><label>Target margin %</label><input id="bkMargin" type="number" value="${BK.priceMode==='margin'?BK.targetMargin:''}" placeholder="${BK.targetMargin}" style="max-width:92px" oninput="BK.targetMargin=+this.value||0;BK.priceMode='margin';var pe=document.getElementById('bkPrice');if(pe)pe.value='';calcBreak();renderProjection()"></div>
    <div><label>or Spot price $</label><input id="bkPrice" type="number" value="${BK.priceMode==='price'?(BK.spotPrice||''):''}" placeholder="set→" style="max-width:88px" oninput="BK.spotPrice=+this.value||0;BK.priceMode='price';calcBreak()"></div>
  </div>
  <details class="gcfg" style="margin-top:8px"><summary class="btn sm">Advanced / add more inputs ▾</summary>
@@ -492,7 +492,7 @@ function renderBreak(target){target=target||'dtc';const el=$(target);if(!el)retu
    product or a checklist (Phase 2). The modeler engine (BK/calcBreak/saveBreak/attach) is unchanged. */
 function dModeler(){renderBreak('dtc');}
 function openModeler(){dataTab='modeler';go('data');}
-function newBlankModel(){BK={products:[],chases:[],auctions:[],invItems:[],cost:0,_last:null,slots:[],checklistId:null,_slotEval:null};BK._preloadNote='';openModeler();}
+function newBlankModel(){BK={products:[],chases:[],auctions:[],invItems:[],cost:0,_last:null,slots:[],checklistId:null,_slotEval:null,tierBands:[],breakType:'team'};BK._preloadNote='';openModeler();}
 /* ===== Rule-based slot builder (phase 1 slicing primitive) — rules evaluated server-side ===== */
 let _bkEvalT=null;
 function bkSlotById(sid){return (BK.slots||[]).find(s=>s.id===sid);}
@@ -521,15 +521,19 @@ function bkRuleHTML(s,kind,label){const conds=s[kind]||[];const FF=[['team','Tea
  return h+`</div>`;}
 function renderSlotBuilder(){const box=$('bkSlots');if(!box)return;
  if(!BK.checklistId){box.innerHTML=`<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Slots</h3><div class="lab" style="text-transform:none;letter-spacing:0;margin-top:6px">Load a product + checklist first — slots slice that checklist into breakable groups (team / player / set rules with carve-outs).</div></div>`;return;}
- const slots=BK.slots||[];
- let h=`<div class="card" style="margin-top:16px"><div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="font-size:15px">Slots — slice the checklist into groups</h3><div class="row" style="gap:6px"><button class="btn v sm" onclick="bkAddSlot()">+ Add slot</button><button class="btn sm" onclick="bkAddFieldSlot()">+ Field / remainder</button></div></div>
+ const slots=BK.slots||[],bt=BK.breakType||'team';
+ let h=`<div class="card" style="margin-top:16px"><div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="font-size:15px">Slots — slice the checklist into groups</h3><div class="row" style="gap:6px;align-items:center;flex-wrap:wrap"><span class="lab" style="text-transform:none;letter-spacing:0">Break type</span><select style="font-size:12px" onchange="bkSetType(this.value)">${[['team','Team'],['player','Player'],['hybrid','Hybrid']].map(o=>`<option value="${o[0]}" ${bt===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select><button class="btn d sm" onclick="bkGenerateSlots()">⚡ Generate spots</button><button class="btn v sm" onclick="bkAddSlot()">+ Add slot</button><button class="btn sm" onclick="bkAddFieldSlot()">+ Field</button></div></div>
    <div id="slBanner" style="margin-top:10px"></div>`;
- if(!slots.length)h+=`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:8px">No slots yet. Add a slot and define an include rule (e.g. Team = Liverpool), optionally an exclude (e.g. Player = Rio → “Liverpool no Rio”). Include conditions are AND’d; exclude carves them out.</div>`;
+ if(!slots.length)h+=`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:8px">No slots yet. <b>Generate spots</b> creates one slot per ${bt==='player'?'player':'team'}${bt==='hybrid'?' (then carve players out)':''} + a Field catch-all, or add a slot manually and define an include rule (e.g. Team = Liverpool), optionally an exclude (e.g. Player = Rio → “Liverpool no Rio”). Include conditions are AND’d; exclude carves them out.</div>`;
  slots.forEach(s=>{h+=`<div class="out" style="margin-top:10px"><div class="row" style="justify-content:space-between;align-items:center;gap:8px"><input value="${esc(s.name||'')}" placeholder="Slot name" style="max-width:230px;font-weight:600" oninput="bkSlotName('${s.id}',this.value)"><div class="row" style="gap:8px;align-items:center"><span class="lab" id="slcount_${s.id}" style="text-transform:none;letter-spacing:0">…</span><button class="btn x sm" onclick="bkDelSlot('${s.id}')">✕</button></div></div>`;
    if(s.remainder)h+=`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:6px">🧺 Catch-all — claims every card not taken by another slot.</div>`;
    else h+=bkRuleHTML(s,'include','Include — match ALL of:')+bkRuleHTML(s,'exclude','Exclude — carve out:');
+   h+=bkSlotSaleHTML(s);
    h+=`</div>`;});
- box.innerHTML=h+`</div>`;renderSlotStatus();}
+ h+=`</div>`;
+ h+=renderTierEditorHTML();
+ h+=`<div id="bkProj"></div>`;
+ box.innerHTML=h;renderSlotStatus();renderProjection();}
 function renderSlotStatus(){const el=$('slBanner');if(!el)return;const ev=BK._slotEval;
  if(!ev||ev.noChecklist){el.innerHTML='';return;}
  if(ev.error){el.innerHTML=`<div class="out" style="border-color:#e8332b">Partition check error: ${esc(ev.error)}</div>`;return;}
@@ -542,9 +546,137 @@ function renderSlotStatus(){const el=$('slBanner');if(!el)return;const ev=BK._sl
    ${(!coverOk&&ev.cover.sample&&ev.cover.sample.length)?`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:5px">Unassigned e.g.: ${ev.cover.sample.slice(0,6).map(esc).join(', ')} …</div>`:''}
    ${(!disjOk&&ev.disjoint.sample&&ev.disjoint.sample.length)?`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:5px;color:#e8332b">Collisions e.g.: ${ev.disjoint.sample.slice(0,4).map(x=>esc(x.name)+' ('+(x.slots||[]).map(esc).join(' + ')+')').join('; ')}</div>`:''}
  </div>`;}
+/* ===== Phase 2 break formatter: generate spots · sale method · tier bands · viability projection ===== */
+function bkSetType(v){BK.breakType=v;renderSlotBuilder();}
+async function bkGenerateSlots(){
+ if(!BK.checklistId){toast('Load a product + checklist first');return;}
+ const dim=(BK.breakType==='player')?'player':'team';
+ let facets=[];
+ try{const{data,error}=await sb.rpc('e10_checklist_facet',{p_checklist:BK.checklistId,p_dim:dim});if(error)throw error;facets=data||[];}
+ catch(e){toast('Generate failed: '+e.message);return;}
+ if(!facets.length){toast('No '+dim+' values on this checklist — its cards may be missing their '+dim+' field.');return;}
+ const CAP=40,top=facets.slice(0,CAP);
+ BK.slots=top.map(f=>({id:'sl'+Math.random().toString(36).slice(2),name:f.label||('('+dim+')'),include:[{field:dim,value:f.label||'',valueId:f.id||null}],exclude:[],method:'$1auction',tierId:null,_modelVal:+f.value||0}));
+ BK.slots.push({id:'sl'+Math.random().toString(36).slice(2),name:'Field / remainder',remainder:true,include:[],exclude:[],method:'$1auction',tierId:null,_modelVal:0});
+ bkPreRankTiers(false);
+ renderSlotBuilder();bkEvalSlots();
+ toast('Generated '+top.length+' '+dim+' slot'+(top.length===1?'':'s')+' + Field'+(facets.length>CAP?(' · '+(facets.length-CAP)+' more '+dim+'s fall into Field'):'')+(BK.breakType==='hybrid'?' — now carve specific players out of the team slots':''));
+}
+function bkDefaultTiers(){return [
+ {id:'tr'+Math.random().toString(36).slice(2),name:'S',low:40,expected:80,high:180},
+ {id:'tr'+Math.random().toString(36).slice(2),name:'A',low:18,expected:40,high:90},
+ {id:'tr'+Math.random().toString(36).slice(2),name:'B',low:7,expected:16,high:38},
+ {id:'tr'+Math.random().toString(36).slice(2),name:'C',low:2,expected:6,high:15}];}
+function bkPreRankTiers(render){
+ if(!(BK.tierBands&&BK.tierBands.length))BK.tierBands=bkDefaultTiers();
+ const tiers=BK.tierBands;
+ const valOf=s=>{if(BK._slotEval&&BK._slotEval.slots){const i=(BK.slots||[]).indexOf(s);const sv=BK._slotEval.slots.find(x=>x.i===i);if(sv&&+sv.value>0)return +sv.value;}return +s._modelVal||0;};
+ const ranked=(BK.slots||[]).filter(s=>(s.method||'$1auction')!=='fixed').slice().sort((a,b)=>valOf(b)-valOf(a));
+ const n=ranked.length||1;
+ ranked.forEach((s,idx)=>{const q=Math.min(tiers.length-1,Math.floor(idx/(n/tiers.length)));s.tierId=tiers[q].id;});
+ if(render!==false){renderSlotBuilder();renderProjection();}
+}
+function bkAddTier(){BK.tierBands=BK.tierBands||[];BK.tierBands.push({id:'tr'+Math.random().toString(36).slice(2),name:'Tier '+(BK.tierBands.length+1),low:0,expected:0,high:0});renderSlotBuilder();renderProjection();}
+function bkDelTier(id){BK.tierBands=(BK.tierBands||[]).filter(t=>t.id!==id);(BK.slots||[]).forEach(s=>{if(s.tierId===id)s.tierId=null;});renderSlotBuilder();renderProjection();}
+function bkTierField(id,field,v){const t=(BK.tierBands||[]).find(x=>x.id===id);if(!t)return;if(field==='name')t.name=v;else t[field]=+v||0;clearTimeout(_bkEvalT);_bkEvalT=setTimeout(renderProjection,300);}
+function bkSlotMethod(sid,v){const s=bkSlotById(sid);if(!s)return;s.method=v;renderSlotBuilder();renderProjection();}
+function bkSlotPrice(sid,v){const s=bkSlotById(sid);if(!s)return;s.price=+v||0;clearTimeout(_bkEvalT);_bkEvalT=setTimeout(renderProjection,300);}
+function bkSlotStart(sid,v){const s=bkSlotById(sid);if(!s)return;s.start=+v||0;}
+function bkSlotTier(sid,v){const s=bkSlotById(sid);if(!s)return;s.tierId=v||null;renderSlotBuilder();renderProjection();}
+function bkSlotOrder(sid,v){const s=bkSlotById(sid);if(!s)return;s.order=(v===''?null:(+v||0));}
+function bkSlotOverride(sid,field,v){const s=bkSlotById(sid);if(!s)return;s.bandOverride=s.bandOverride||{low:0,expected:0,high:0};s.bandOverride[field]=+v||0;clearTimeout(_bkEvalT);_bkEvalT=setTimeout(renderProjection,300);}
+function bkSlotOverrideToggle(sid){const s=bkSlotById(sid);if(!s)return;s.bandOverride=s.bandOverride?null:{low:0,expected:0,high:0};renderSlotBuilder();renderProjection();}
+/* === ONE band resolver seam. Phase 2: manual tier band or per-slot override. Phase 3 (history):
+   add a branch that returns the SAME {low,expected,high} shape from hammer data — no projection rebuild. === */
+function bkResolveBand(slot){
+ const src=slot.bandSource||'manual';
+ if(src==='manual'){
+   const o=slot.bandOverride;
+   if(o&&((+o.low||0)+(+o.expected||0)+(+o.high||0))>0)return {low:+o.low||0,expected:+o.expected||0,high:+o.high||0,src:'override'};
+   const t=(BK.tierBands||[]).find(t=>t.id===slot.tierId);
+   if(t)return {low:+t.low||0,expected:+t.expected||0,high:+t.high||0,src:'tier'};
+   return {low:0,expected:0,high:0,src:'unset'};
+ }
+ /* future history-driven source plugs in here, returning the same {low,expected,high} shape */
+ return {low:0,expected:0,high:0,src:src};
+}
+function bkSlotTake(slot){if((slot.method||'$1auction')==='fixed'){const p=+slot.price||0;return {low:p,expected:p,high:p,src:'fixed'};}return bkResolveBand(slot);}
+function computeProjection(){
+ const slots=(BK.slots||[]);
+ const takes=slots.map(s=>({s,t:bkSlotTake(s)}));
+ const low=takes.reduce((a,x)=>a+x.t.low,0),exp=takes.reduce((a,x)=>a+x.t.expected,0),high=takes.reduce((a,x)=>a+x.t.high,0);
+ const cost=+BK.cost||0,mg=Math.min(0.95,Math.max(0,(+BK.targetMargin||0)/100));
+ const clearRev=mg<1?cost/(1-mg):Infinity;
+ const marginAt=T=>T>0?(T-cost)/T:0;
+ const ranked=takes.slice().sort((a,b)=>b.t.expected-a.t.expected);
+ const topN=Math.min(3,ranked.length);
+ const topExp=ranked.slice(0,topN).reduce((a,x)=>a+x.t.expected,0);
+ const topShare=exp>0?topExp/exp:0;
+ const topIds=new Set(ranked.slice(0,topN).map(x=>x.s.id));
+ const downside=takes.reduce((a,x)=>a+(topIds.has(x.s.id)?x.t.low:x.t.expected),0);
+ const fixed=slots.filter(s=>(s.method||'$1auction')==='fixed'),aucExp=takes.filter(x=>(x.s.method||'$1auction')!=='fixed').reduce((a,x)=>a+x.t.expected,0);
+ const gap=(clearRev===Infinity)?0:Math.max(0,clearRev-aucExp);
+ const suggestFixed=fixed.length?gap/fixed.length:null;
+ const concFlag=slots.length>topN&&topShare>=0.5;
+ return {slots,takes,low,exp,high,cost,mg,clearRev,marginAt,topN,topExp,topShare,topIds,downside,fixedCount:fixed.length,aucExp,gap,suggestFixed,concFlag};
+}
+function renderProjection(){const box=$('bkProj');if(!box)return;
+ const P=computeProjection();
+ if(!P.slots.length){box.innerHTML='';return;}
+ if(!(P.exp>0||P.low>0||P.high>0)){box.innerHTML=`<div class="card" style="margin-top:14px"><h3 style="font-size:15px">Viability projection</h3><div class="lab" style="text-transform:none;letter-spacing:0;margin-top:6px">Set a sale method + tier band (or a fixed price) on the slots to project the break. “Pre-rank &amp; assign tiers” gives a starting point.</div></div>`;return;}
+ const pc=v=>v>=0?'#0a8a4a':'#e8332b';
+ const clears=T=>P.mg<1&&T>=P.clearRev;
+ const mAt=T=>(P.marginAt(T)*100);
+ const cell=(lbl,T,strong)=>{const ok=clears(T),m=mAt(T);return `<div class="metric" style="flex:1;min-width:118px${strong?';border:1px solid '+(ok?'#0a8a4a':'#b8860b'):''}"><div class="n" style="font-size:${strong?20:18}px">${money(Math.round(T))}</div><div class="l">${lbl}</div><div class="lab" style="text-transform:none;letter-spacing:0;font-size:11.5px;color:${ok?'#0a8a4a':(m>=0?'#b8860b':'#e8332b')}">${m>=0?m.toFixed(0):'-'+Math.abs(m).toFixed(0)}% margin ${ok?'✓':'✗'}</div></div>`;};
+ const expClears=clears(P.exp),lowClears=clears(P.low);
+ let h=`<div class="card" style="margin-top:14px;border-left:4px solid ${expClears?'#0a8a4a':(P.clearRev!==Infinity&&P.exp>=P.clearRev*0.85?'#b8860b':'#e8332b')}">
+   <div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="font-size:15px">Viability projection — ${P.slots.length} spots</h3><span class="lab" style="text-transform:none;letter-spacing:0">cost ${money(P.cost)} · margin goal ${(P.mg*100).toFixed(0)}% → clear at <b>${P.clearRev===Infinity?'—':money(Math.round(P.clearRev))}</b></span></div>
+   <div class="row" style="gap:10px;margin-top:12px;flex-wrap:wrap">${cell('Projected LOW',P.low,false)}${cell('EXPECTED',P.exp,true)}${cell('HIGH',P.high,false)}</div>
+   <div class="lab" style="margin-top:10px;text-transform:none;letter-spacing:0;font-size:13px;color:${expClears?'#0a8a4a':'#e8332b'}"><b>${expClears?'✓ Expected clears the '+(P.mg*100).toFixed(0)+'% margin':'✗ Expected does NOT clear the '+(P.mg*100).toFixed(0)+'% margin'}</b>${!expClears&&P.clearRev!==Infinity?' — need '+money(Math.round(P.clearRev-P.exp))+' more at expected':''}. Low ${lowClears?'also clears':'falls short'}.</div>`;
+ const topSlots=P.takes.filter(x=>P.topIds.has(x.s.id)).sort((a,b)=>b.t.expected-a.t.expected);
+ h+=`<div class="out" style="margin-top:12px;border-color:${P.concFlag?'#b8860b':'var(--line)'}">
+   <div class="row" style="gap:12px;flex-wrap:wrap;align-items:center"><b style="font-size:13px">${P.concFlag?'⚠ Concentration risk':'Concentration'}</b>
+     <span class="lab" style="text-transform:none;letter-spacing:0">Top ${P.topN} spot${P.topN===1?'':'s'} carry <b style="color:${P.concFlag?'#b8860b':'inherit'}">${(P.topShare*100).toFixed(0)}%</b> of expected take</span></div>
+   <div class="lab" style="text-transform:none;letter-spacing:0;margin-top:5px;font-size:12.5px">Marquee: ${topSlots.map(x=>esc(x.s.name||'?')+' ('+money(Math.round(x.t.expected))+')').join(', ')||'—'}</div>
+   <div class="lab" style="text-transform:none;letter-spacing:0;margin-top:6px;font-size:13px">Downside — if the top ${P.topN} hammer at their LOW band: take <b>${money(Math.round(P.downside))}</b>, margin <b style="color:${pc(P.marginAt(P.downside))}">${(P.marginAt(P.downside)*100).toFixed(0)}%</b> ${clears(P.downside)?'(still clears)':'(below goal)'}.</div></div>`;
+ if(P.fixedCount&&P.suggestFixed>0)h+=`<div class="lab" style="margin-top:10px;text-transform:none;letter-spacing:0;font-size:12.5px">💡 To close the gap to the margin line, set your ${P.fixedCount} fixed spot${P.fixedCount===1?'':'s'} to ~<b>${money(Math.round(P.suggestFixed))}</b> each (auctions cover ${money(Math.round(P.aucExp))} of the ${money(Math.round(P.clearRev))} target at expected).</div>`;
+ box.innerHTML=h+`</div>`;
+}
+function renderTierEditorHTML(){
+ const tiers=BK.tierBands||[];
+ let h=`<div class="card" style="margin-top:14px"><div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="font-size:15px">Tier bands — expected hammer $</h3><div class="row" style="gap:6px"><button class="btn sm" onclick="bkPreRankTiers()">↕ Pre-rank &amp; assign tiers</button><button class="btn v sm" onclick="bkAddTier()">+ Tier</button></div></div>`;
+ if(!tiers.length)return h+`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:8px">No tiers yet. “Pre-rank &amp; assign tiers” seeds S/A/B/C bands and assigns each auction slot by its modeled card value — then edit the dollars. The projection reads every auction slot’s band through one resolver, so a future hammer-history source can supply the same numbers.</div></div>`;
+ h+=`<div class="egrid" style="margin-top:8px"><table><tr><th>Tier</th><th>Low $</th><th>Expected $</th><th>High $</th><th>Auction slots</th><th></th></tr>`;
+ tiers.forEach(t=>{const nslots=(BK.slots||[]).filter(s=>(s.method||'$1auction')!=='fixed'&&s.tierId===t.id).length;
+  h+=`<tr><td><input value="${esc(t.name||'')}" style="max-width:90px;font-weight:600" oninput="bkTierField('${t.id}','name',this.value)"></td>
+   <td><input type="number" value="${t.low||0}" style="max-width:78px" oninput="bkTierField('${t.id}','low',this.value)"></td>
+   <td><input type="number" value="${t.expected||0}" style="max-width:78px" oninput="bkTierField('${t.id}','expected',this.value)"></td>
+   <td><input type="number" value="${t.high||0}" style="max-width:78px" oninput="bkTierField('${t.id}','high',this.value)"></td>
+   <td class="lab" style="text-transform:none;letter-spacing:0">${nslots}</td>
+   <td><button class="btn x sm" onclick="bkDelTier('${t.id}')">✕</button></td></tr>`;});
+ return h+`</table></div></div>`;
+}
+function bkSlotSaleHTML(s){
+ const m=s.method||'$1auction',tiers=BK.tierBands||[],band=bkSlotTake(s);
+ let h=`<div class="row" style="gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap;padding-top:8px;border-top:1px dashed var(--line)">
+   <span class="lab" style="text-transform:none;letter-spacing:0">Sells as</span>
+   <select style="font-size:12px;max-width:140px" onchange="bkSlotMethod('${s.id}',this.value)">${[['$1auction','$1 auction'],['auction','Auction ($ start)'],['fixed','Fixed price']].map(o=>`<option value="${o[0]}" ${m===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select>`;
+ if(m==='fixed')h+=`<input type="number" placeholder="price $" value="${s.price||''}" style="max-width:100px;font-size:12px" oninput="bkSlotPrice('${s.id}',this.value)">`;
+ else{
+   if(m==='auction')h+=`<input type="number" placeholder="start $" value="${s.start||''}" style="max-width:88px;font-size:12px" oninput="bkSlotStart('${s.id}',this.value)">`;
+   h+=`<select style="font-size:12px;max-width:150px" onchange="bkSlotTier('${s.id}',this.value)"><option value="">— tier band —</option>${tiers.map(t=>`<option value="${t.id}" ${s.tierId===t.id?'selected':''}>${esc(t.name)} · exp ${money(t.expected||0)}</option>`).join('')}</select>
+     <button class="btn x sm" onclick="bkSlotOverrideToggle('${s.id}')">${s.bandOverride?'✕ override':'± override'}</button>`;
+ }
+ h+=`<span class="lab" style="text-transform:none;letter-spacing:0;margin-left:auto;font-size:12px">band ${money(Math.round(band.low))} / <b>${money(Math.round(band.expected))}</b> / ${money(Math.round(band.high))}${(m!=='fixed'&&band.src==='unset')?' <span style="color:#e8332b">· unset</span>':''}</span></div>`;
+ if(m!=='fixed'&&s.bandOverride)h+=`<div class="row" style="gap:6px;margin-top:6px;align-items:center;flex-wrap:wrap"><span class="lab" style="text-transform:none;letter-spacing:0">Override band $</span>
+   <input type="number" placeholder="low" value="${s.bandOverride.low||''}" style="max-width:74px;font-size:12px" oninput="bkSlotOverride('${s.id}','low',this.value)">
+   <input type="number" placeholder="expected" value="${s.bandOverride.expected||''}" style="max-width:90px;font-size:12px" oninput="bkSlotOverride('${s.id}','expected',this.value)">
+   <input type="number" placeholder="high" value="${s.bandOverride.high||''}" style="max-width:74px;font-size:12px" oninput="bkSlotOverride('${s.id}','high',this.value)"></div>`;
+ return h;
+}
 async function checklistsForSet(set){if(!(set||'').trim())return[];try{const{data:sets}=await sb.from('e10_sets').select('id').ilike('name',set.trim());const ids=(sets||[]).map(s=>s.id);if(!ids.length)return[];const{data}=await sb.from('e10_checklists').select('id,name,card_count').in('set_id',ids);(data||[]).forEach(c=>{window._clCache=window._clCache||{};window._clCache[c.id]=c.name;});return data||[];}catch(e){return[];}}
 async function dbPreloadCards(clId){try{let{data}=await sb.from('e10_cards').select('name,value,chase').eq('checklist_id',clId).eq('chase',true).gt('value',0).order('value',{ascending:false}).limit(300);if(!data||!data.length){const r=await sb.from('e10_cards').select('name,value,chase').eq('checklist_id',clId).gt('value',0).order('value',{ascending:false}).limit(300);data=r.data||[];}return (data||[]).map(c=>({name:c.name,value:+c.value||0,chase:!!c.chase}));}catch(e){toast(e.message);return[];}}
-function preloadBreak(it,cl){BK={products:[],chases:[],auctions:[],invItems:[],cost:0,_last:null,slots:[],checklistId:(cl&&cl._clId)||null,_slotEval:null};
+function preloadBreak(it,cl){BK={products:[],chases:[],auctions:[],invItems:[],cost:0,_last:null,slots:[],checklistId:(cl&&cl._clId)||null,_slotEval:null,tierBands:[],breakType:'team'};
  if(it){BK.cost=+it.cost||0;BK.invItems.push({itemId:it.id,name:it.name,qty:1,cost:+it.cost||0,value:+it.value||0,cat:it.cat,set:it.set});}
  let n=0;if(cl){const flagged=(cl.cards||[]).filter(c=>c.chase&&(+c.value||0)>0);const pool=flagged.length?flagged:(cl.cards||[]).filter(c=>(+c.value||0)>0);pool.forEach(c=>{BK.chases.push({name:c.name,val:+c.value||0});n++;});}
  BK._preloadNote=(it?('From '+it.name+' · cost '+money(+it.cost||0)):'')+(cl?((it?' + ':'From ')+cl.name+' · '+n+' chase cards'):(it?(' · no checklist for set “'+(it.set||'—')+'” — add chases manually'):''));
@@ -676,6 +808,7 @@ function saveBreak(){if(!BK._last)return;if(!canEditScoped())return roGuard();
    inputs:{products:BK.products.slice(),chases:BK.chases.slice(),auctions:BK.auctions.slice(),cost:BK.cost,
      format:BK.format,spots:BK.spots,feesPct:BK.feesPct,shipPer:BK.shipPer,targetMargin:BK.targetMargin,spotPrice:BK.spotPrice,priceMode:BK.priceMode},
    ruleSlots:JSON.parse(JSON.stringify(BK.slots||[])),checklistId:BK.checklistId||null,
+   tierBands:JSON.parse(JSON.stringify(BK.tierBands||[])),breakType:BK.breakType||'team',
    invItems:BK.invItems.slice()});
  save();renderBreakHist();const nm=$('bName');if(nm)nm.value='';toast('Saved break model');}
 function renderBreakHist(){const el=$('bkHist');if(!el)return;
@@ -683,7 +816,7 @@ function renderBreakHist(){const el=$('bkHist');if(!el)return;
 function reopenBreak(id){const b=(S.breaks||[]).find(x=>x.id===id);if(!b)return;const q=b.inputs||{};
  BK.products=(q.products||[]).slice();BK.chases=(q.chases||[]).slice();BK.auctions=(q.auctions||[]).slice();BK.cost=+q.cost||0;
  BK.format=q.format||'tiered';BK.spots=q.spots!=null?q.spots:null;BK.feesPct=q.feesPct!=null?q.feesPct:9;BK.shipPer=q.shipPer!=null?q.shipPer:0;BK.targetMargin=q.targetMargin!=null?q.targetMargin:35;BK.spotPrice=q.spotPrice!=null?q.spotPrice:null;BK.priceMode=q.priceMode||'margin';
- BK.invItems=(b.invItems||[]).slice();BK.slots=JSON.parse(JSON.stringify(b.ruleSlots||[]));BK.checklistId=b.checklistId||null;BK._slotEval=null;BK._modelId=id;BK._preloadNote='Reopened “'+b.name+'”';dModeler();toast('Reopened '+b.name);}
+ BK.invItems=(b.invItems||[]).slice();BK.slots=JSON.parse(JSON.stringify(b.ruleSlots||[]));BK.checklistId=b.checklistId||null;BK.tierBands=JSON.parse(JSON.stringify(b.tierBands||[]));BK.breakType=b.breakType||'team';BK._slotEval=null;BK._modelId=id;BK._preloadNote='Reopened “'+b.name+'”';dModeler();toast('Reopened '+b.name);}
 function dupBreak(id){if(!canEditScoped())return roGuard();const b=(S.breaks||[]).find(x=>x.id===id);if(!b)return;const c=JSON.parse(JSON.stringify(b));c.id='bk'+Date.now();c.name=b.name+' (copy)';c.ts=Date.now();S.breaks.unshift(c);save();renderBreakHist();}
 function renameBreak(id){if(!canEditScoped())return roGuard();const b=(S.breaks||[]).find(x=>x.id===id);if(!b)return;const v=prompt('Rename break model',b.name);if(v==null)return;b.name=v.trim()||b.name;save();renderBreakHist();}
 function delBreakById(id){if(!canEditScoped())return roGuard();S.breaks=(S.breaks||[]).filter(x=>x.id!==id);save();renderBreakHist();}
