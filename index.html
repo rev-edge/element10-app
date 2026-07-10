@@ -115,7 +115,10 @@ details.gcfg>summary{list-style:none;cursor:pointer}details.gcfg>summary::-webki
 const DEF_LISTS={characters:['Charizard','Moonbreon','Umbreon','Pikachu','Gengar','Mewtwo','Mew','Rayquaza','Eevee','Greninja','Lugia','Team Rocket'],
  sets:['Pokémon 151','Prismatic Evolutions','Ascended Heroes','Chaos Rising','Destined Rivals','Evolving Skies','Crown Zenith','Surging Sparks','Vintage / WOTC','Mega Dream (JP)'],
  formats:['Ceiling Ladder','Character Break','RTYH','Grail Slab Break','$1 Singles Auction','Box Break (new release)','Pick-Your-Pokémon','Repack','Vintage Rip'],
- diff:['posted odds','free packs','every card ships','ships <1d','no reseals','best wall on Whatnot']};
+ diff:['posted odds','free packs','every card ships','ships <1d','no reseals','best wall on Whatnot'],
+ invcats:['Box','Case','ETB / Sealed','Pack','Raw card','Slab','Other'],
+ grading:['PSA','BGS','SGC','CGC','TAG'],
+ conditions:['Sealed','NM','LP','MP','HP','DMG','Raw','Graded']};
 const DAYPARTS=[['Morning',0.22,'9:00 AM'],['Afternoon',0.55,'2:00 PM'],['Evening',1.0,'8:00 PM'],['Late night',0.7,'11:00 PM']];
 const DAYS=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const TITLE_TPL={curiosity:["$P START — is [SET] worth ripping? [CHAR] chase w/ [HOST]","the [CHAR] nobody's pulling… [SET] RTYH w/ [HOST]","$P [CHAR] chase — [DIFF] — w/ [HOST]"],
@@ -125,6 +128,45 @@ const DESC_TPL=["[SET] on the wall. Every card ships, packaged to protect, fast 
 const SHORT_TPL=["$[LOW] pack → pulled the [CHAR]?! ([SET])","I opened $[X] of [SET] to see if it's WORTH IT","the rarest [CHAR] in [SET] just hit the wall","should I rip it or keep it sealed? [SET] [CHAR]"];
 const rand=a=>a[Math.floor(Math.random()*a.length)]||'';
 const fill=(t,d)=>{const host=(d.host||'').trim();return t.replace(/\[CHAR\]/g,d.char).replace(/\[SET\]/g,d.set).replace(/\[FMT\]/g,d.fmt).replace(/\s*w\/\s*\[HOST\]/gi,host?(' w/ '+host):'').replace(/\[HOST\]/g,host).replace(/\[DIFF\]/g,d.diff).replace(/\[TIME\]/g,d.time||'8:00').replace(/\$P/g,'$'+d.price).replace(/\[LOW\]/g,d.low||'4').replace(/\[X\]/g,d.x||'400').replace(/\s{2,}/g,' ').trim();};
+
+/* ===== Reusable linked-field components (built once, applied from the audit) =====
+   entityPicker(id,cfg): a searchable typeahead over a data source (client array OR server query).
+     On select it stores {id,label} (the LINK) via cfg.onpick and shows the label with a ✕ to
+     change. Server sources (cards/players/sets) use the fast RLS-wrapped search path, debounced
+     ~250ms, with a loading state + a per-picker result cache. cfg.freeText allows using a typed
+     value that isn't in the source (id=null) so new/legacy free-text still works.
+   pickInput(cfg): a type-to-filter combobox (native <datalist>) over a pick-list (user-maintained
+     in Lists & Settings) or a fixed array — the searchable picklist for enumerable values. */
+const EP={};
+function entityPicker(id,cfg){EP[id]=Object.assign({_res:[],_t:null,_q:'',_cache:new Map()},cfg);return `<div id="ep_${id}" class="ep" style="position:relative;min-width:0">${epBody(id)}</div>`;}
+function epBody(id){const e=EP[id];if(!e)return'';
+ if(e.value&&e.value.label){return `<div class="row" style="gap:6px;align-items:center;flex-wrap:nowrap"><span class="pill" style="margin:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.icon||'🔗'} ${esc(e.value.label)}${e.value.id==null?' <span class="lab" style="text-transform:none">(text)</span>':''}</span><button class="btn x sm" title="Change" onclick="epClear('${id}')">✕</button></div>`;}
+ return `<input id="epi_${id}" autocomplete="off" placeholder="${esc(e.placeholder||'search…')}" oninput="epInput('${id}',this.value)" onfocus="epInput('${id}',this.value)" onkeydown="if(event.key==='Escape'){var r=document.getElementById('epr_${id}');if(r)r.innerHTML='';}"><div id="epr_${id}" style="position:absolute;left:0;right:0;z-index:50"></div>`;}
+function epRender(id){const c=$('ep_'+id);if(c)c.innerHTML=epBody(id);}
+function epShell(inner){return `<div style="background:var(--card,#fff);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.16);max-height:300px;overflow:auto">${inner}</div>`;}
+async function epRun(id,q){const e=EP[id];if(!e)return;e._q=q;
+ if(e.server&&e._cache.has(q)){e._res=e._cache.get(q);return epResults(id,e._res);}
+ let list=e.search(q);if(list&&list.then)list=await list;if(EP[id]!==e||e._q!==q)return;list=list||[];
+ if(e.server)e._cache.set(q,list);e._res=list;epResults(id,list);}
+function epInput(id,q){const e=EP[id];if(!e)return;const min=e.minChars||1;const rc=$('epr_'+id);e._q=q;
+ if((q||'').trim().length<min){if(rc)rc.innerHTML='';e._res=[];return;}
+ if(e.server){clearTimeout(e._t);if(rc)rc.innerHTML=epShell('<div style="padding:9px 11px"><span class="lab" style="text-transform:none;letter-spacing:0">⟳ searching…</span></div>');e._t=setTimeout(()=>epRun(id,q),e.debounce||250);}
+ else epRun(id,q);}
+function epResults(id,list){const el=$('epr_'+id);if(!el)return;const e=EP[id];const q=(e._q||'').trim();
+ const free=(e.freeText&&q)?`<div onclick="epPickFree('${id}')" style="padding:7px 10px;cursor:pointer;border-top:1px solid var(--line);color:var(--mut2)">＋ Use “${esc(q)}” as text</div>`:'';
+ const rows=list.map((m,i)=>`<div onclick="epPick('${id}',${i})" style="padding:7px 10px;cursor:pointer;border-bottom:1px solid var(--line)" onmouseover="this.style.background='rgba(0,0,0,.05)'" onmouseout="this.style.background=''"><b>${esc(m.label||'—')}</b>${m.sub?` <span class="lab" style="text-transform:none;letter-spacing:0">${esc(m.sub)}</span>`:''}</div>`).join('');
+ el.innerHTML=epShell((rows||(free?'':'<div style="padding:9px 11px"><span class="lab" style="text-transform:none;letter-spacing:0">No matches.</span></div>'))+free);}
+function epPick(id,i){const e=EP[id];if(!e)return;const m=e._res[i];if(!m)return;e.value={id:m.id,label:m.label};const el=$('epr_'+id);if(el)el.innerHTML='';epRender(id);if(e.onpick)e.onpick(m.id,m.label,m);}
+function epPickFree(id){const e=EP[id];if(!e)return;const label=(e._q||'').trim();if(!label)return;e.value={id:null,label};const el=$('epr_'+id);if(el)el.innerHTML='';epRender(id);if(e.onpick)e.onpick(null,label,null);}
+function epClear(id){const e=EP[id];if(!e)return;e.value=null;epRender(id);if(e.onclear)e.onclear();setTimeout(()=>{const i=$('epi_'+id);if(i)i.focus();},0);}
+function epSetValue(id,value){const e=EP[id];if(!e)return;e.value=value||null;epRender(id);}
+/* server search adapters (RLS-wrapped, fast) */
+async function dbSetSearch(q){q=(q||'').trim();if(!q)return[];try{const{data}=await sb.from('e10_sets').select('id,name,year,sport').ilike('name','%'+q+'%').order('name').limit(20);return (data||[]).map(s=>({id:s.id,label:s.name,sub:[s.year,s.sport].filter(Boolean).join(' · ')}));}catch(e){return[];}}
+async function dbPlayerSearch(q){q=(q||'').trim();if(!q)return[];try{const{data}=await sb.from('e10_players').select('id,name,team,nationality').ilike('name','%'+q+'%').order('name').limit(20);return (data||[]).map(p=>({id:p.id,label:p.name,sub:[p.team,p.nationality].filter(Boolean).join(' · ')}));}catch(e){return[];}}
+function invItemSearch(q){q=(q||'').toLowerCase();return (S.inventory||[]).filter(x=>(x.name||'').toLowerCase().includes(q)).slice(0,24).map(x=>({id:x.id,label:x.name,sub:[x.cat,x.set,'cost '+money(+x.cost||0)].filter(Boolean).join(' · ')}));}
+/* pickInput: type-to-filter combobox from a Lists & Settings pick-list (or a fixed array) */
+function pickOpts(list){const arr=Array.isArray(list)?list:L(list);return (arr||[]).map(v=>`<option value="${esc(v)}"></option>`).join('');}
+function pickInput(cfg){const dl='dl_'+cfg.id;return `<input id="${cfg.id}" list="${dl}" value="${esc(cfg.value==null?'':cfg.value)}" placeholder="${esc(cfg.placeholder||'type or pick…')}" autocomplete="off"${cfg.disabled?' disabled':''}${cfg.style?` style="${cfg.style}"`:''}${cfg.oninput?` oninput="${cfg.oninput}"`:''}${cfg.onchange?` onchange="${cfg.onchange}"`:''}><datalist id="${dl}">${pickOpts(cfg.list)}</datalist>`;}
 
 /* ---------- state ---------- */
 const KEY='element10_v2';
@@ -177,9 +219,9 @@ function showModal(ex,k){ex=ex||{name:'',fmt:L('formats')[0],dur:90,host:S.strea
   <div style="margin-top:12px"><label>Show name</label><input id="mname" value="${esc(ex.name)}" placeholder="e.g. Ascended Heroes Ceiling Ladder"></div>
   <div class="row" style="margin-top:10px"><div style="flex:1"><label>Day</label><select id="mday">${DAYS.map(d=>`<option ${d===day?'selected':''}>${d}</option>`).join('')}</select></div>
   <div style="flex:1"><label>Daypart</label><select id="mdp">${DAYPARTS.map(d=>`<option ${d[0]===dp?'selected':''}>${d[0]}</option>`).join('')}</select></div></div>
-  <div class="row" style="margin-top:10px"><div style="flex:1"><label>Format</label><select id="mfmt">${L('formats').map(f=>`<option ${f===ex.fmt?'selected':''}>${esc(f)}</option>`).join('')}</select></div>
+  <div class="row" style="margin-top:10px"><div style="flex:1"><label>Format</label>${pickInput({id:'mfmt',list:'formats',value:ex.fmt||''})}</div>
   <div style="flex:1"><label>Duration (min)</label><input id="mdur" type="number" value="${ex.dur}"></div></div>
-  <div style="margin-top:10px"><label>Streamer</label><select id="mhost">${S.streamers.map(s=>`<option ${s===ex.host?'selected':''}>${esc(s)}</option>`).join('')}</select></div>
+  <div style="margin-top:10px"><label>Streamer</label>${pickInput({id:'mhost',list:S.streamers,value:ex.host||''})}</div>
   <div class="row" style="margin-top:18px"><button class="btn v" onclick="saveShow(${ex.k!=null?`'${ex.k}',${ex.i}`:'null,null'})">Save</button><button class="btn sm" onclick="closeM()">Cancel</button>${ex.k!=null?`<button class="btn x" style="margin-left:auto" onclick="delShow('${ex.k}',${ex.i})">Delete</button>`:''}</div>`;
  $('ov').style.display='flex';}
 function saveShow(ok,oi){if(!canEditScoped())return roGuard();
@@ -205,9 +247,9 @@ function showDetail(id){const r=showById(id);if(!r){closeM();return;}const s=r.s
   <div class="row" style="margin-top:12px"><div style="flex:2"><label>Show name</label><input id="mname" value="${esc(s.name)}" ${ro?'disabled':''}></div></div>
   <div class="row" style="margin-top:8px"><div style="flex:1"><label>Day</label><select id="mday" ${ro?'disabled':''}>${DAYS.map(d=>`<option ${d===day?'selected':''}>${d}</option>`).join('')}</select></div>
    <div style="flex:1"><label>Daypart</label><select id="mdp" ${ro?'disabled':''}>${DAYPARTS.map(d=>`<option ${d[0]===dp?'selected':''}>${d[0]}</option>`).join('')}</select></div></div>
-  <div class="row" style="margin-top:8px"><div style="flex:1"><label>Format</label><select id="mfmt" ${ro?'disabled':''}>${L('formats').map(f=>`<option ${f===s.fmt?'selected':''}>${esc(f)}</option>`).join('')}</select></div>
+  <div class="row" style="margin-top:8px"><div style="flex:1"><label>Format</label>${pickInput({id:'mfmt',list:'formats',value:s.fmt||'',disabled:ro})}</div>
    <div style="flex:1"><label>Duration (min)</label><input id="mdur" type="number" value="${s.dur}" ${ro?'disabled':''}></div>
-   <div style="flex:1"><label>Streamer</label><select id="mhost" ${ro?'disabled':''}>${S.streamers.map(x=>`<option ${x===s.host?'selected':''}>${esc(x)}</option>`).join('')}</select></div></div>
+   <div style="flex:1"><label>Streamer</label>${pickInput({id:'mhost',list:S.streamers,value:s.host||'',disabled:ro})}</div></div>
   ${ro?'':`<div class="row" style="margin-top:10px"><button class="btn v sm" onclick="saveShowDetail('${id}')">Save details</button><button class="btn x" style="margin-left:auto" onclick="delShowById('${id}')">Delete show</button></div>`}
   <div style="margin-top:16px"><span class="lab">Title / description copy</span>${copyBox}</div>
   <div style="margin-top:14px"><span class="lab">Break / format model</span>${breakBox}</div>
@@ -350,11 +392,11 @@ function renderCopy(){
  $('sec-copy').innerHTML=`<div class="hero"><div><h1>Copy Studio</h1></div></div>
   <div class="card"><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
    <div><label>Type</label><select id="cType">${['Whatnot show title','YouTube title','Short/TikTok hook','Description','Tags'].map(x=>`<option>${x}</option>`).join('')}</select></div>
-   <div><label>Set</label><select id="cSet"><option value="">— random —</option>${L('sets').map(x=>`<option>${esc(x)}</option>`).join('')}</select></div>
-   <div><label>Chase character</label><select id="cChar"><option value="">— random —</option>${L('characters').map(x=>`<option>${esc(x)}</option>`).join('')}</select></div>
-   <div><label>Format</label><select id="cFmt"><option value="">— random —</option>${L('formats').map(x=>`<option>${esc(x)}</option>`).join('')}</select></div>
+   <div><label>Set</label>${pickInput({id:'cSet',list:'sets',value:'',placeholder:'— random —'})}</div>
+   <div><label>Chase character</label>${pickInput({id:'cChar',list:'characters',value:'',placeholder:'— random —'})}</div>
+   <div><label>Format</label>${pickInput({id:'cFmt',list:'formats',value:'',placeholder:'— random —'})}</div>
    <div><label>Price anchor</label><select id="cPrice"><option>1</option><option>2</option></select></div>
-   <div><label>Streamer</label><select id="cHost"><option value="">—</option>${S.streamers.map(x=>`<option>${esc(x)}</option>`).join('')}</select></div>
+   <div><label>Streamer</label>${pickInput({id:'cHost',list:S.streamers,value:'',placeholder:'—'})}</div>
    </div><div class="row" style="margin-top:14px"><button class="btn v" onclick="genCopy()">Generate</button><span class="lab" style="align-self:center">3 angles: curiosity · search · drama</span></div>
    <div id="cout"></div>
    <div class="row" style="margin-top:12px"><input id="csName" placeholder="Name this set to save it…" style="flex:2"><button class="btn d sm" onclick="saveCopySet()">Save set</button><span class="lab" style="align-self:center">Saved sets persist &amp; can attach to a show</span></div></div>
@@ -416,7 +458,7 @@ function renderBreak(target){target=target||'dtc';const el=$(target);if(!el)retu
  const it=BK.invItems&&BK.invItems[0];
  el.innerHTML=`<div class="hero"><div><h1>Break / format planner</h1>${BK._preloadNote?`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:4px">${esc(BK._preloadNote)}</div>`:''}</div><button class="btn sm" onclick="newBlankModel()">+ New blank model</button></div>
  <div class="card"><div class="etool" style="align-items:flex-end">
-   <div style="min-width:150px;flex:1"><label>Product</label><input value="${esc(it?it.name:'')}" placeholder="pull one under Advanced…" ${it?'readonly':''}></div>
+   <div style="min-width:190px;flex:1"><label>Product</label>${entityPicker('bkProd',{icon:'📦',placeholder:'search inventory / product…',value:it?{id:it.itemId,label:it.name}:null,search:invItemSearch,onpick:(iid)=>buildBreakFromProduct(iid),onclear:()=>newBlankModel()})}</div>
    <div><label>Cost $</label><input id="bCost" type="number" value="${BK.cost}" style="max-width:100px" oninput="BK.cost=+this.value||0;calcBreak()"></div>
    <div><label>Format</label><select onchange="BK.format=this.value;calcBreak()">${[['random','Random spots'],['tiered','Tiered / ranked'],['team','Team / character'],['pick','Pick-your-Pokémon']].map(([v,l])=>`<option value="${v}" ${BK.format===v?'selected':''}>${l}</option>`).join('')}</select></div>
    <div><label>Spots</label><input type="number" min="1" value="${BK.spots}" style="max-width:72px" oninput="BK.spots=Math.max(1,+this.value||1);calcBreak()"></div>
@@ -1025,16 +1067,16 @@ function dInventory(){const admin=ROLE==='admin';const rl=invRollup();const sets
    <div id="ivLinkChip" style="margin-top:8px"></div>
    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(128px,1fr));margin-top:10px">
    <div><label>Name</label><input id="ivN" placeholder="e.g. Ascended Heroes Box"></div>
-   <div><label>Category</label><select id="ivC">${INVCATS.map(c=>`<option>${c}</option>`).join('')}</select></div>
-   <div><label>Set / product</label><select id="ivS"><option value="">—</option>${L('sets').map(s=>`<option>${esc(s)}</option>`).join('')}</select></div>
+   <div><label>Category</label>${pickInput({id:'ivC',list:'invcats',value:'',placeholder:'category'})}</div>
+   <div style="min-width:150px"><label>Set / product</label>${entityPicker('ivSet',{icon:'🗂',placeholder:'search sets…',minChars:2,server:true,freeText:true,value:ivSetLink,search:dbSetSearch,onpick:(sid,label)=>{ivSetLink={id:sid,label};},onclear:()=>{ivSetLink=null;}})}</div>
    <div><label>Qty</label><input id="ivQ" type="number" value="1"></div>
    <div><label>Unit cost $</label><input id="ivCo" type="number" placeholder="0"></div>
    <div><label>Market $</label><input id="ivV" type="number" placeholder="0"></div>
-   <div><label>Grading co.</label><select id="ivGC"><option value="">— raw/sealed —</option>${TPG.map(g=>`<option>${g}</option>`).join('')}</select></div>
+   <div><label>Grading co.</label>${pickInput({id:'ivGC',list:'grading',value:'',placeholder:'raw/sealed'})}</div>
    <div><label>Grade</label><input id="ivGrade" placeholder="10 / 9.5"></div>
    <div><label>Card #</label><input id="ivNum" placeholder="199/191"></div>
    <div><label>Year</label><input id="ivYear" type="number" placeholder="2023"></div>
-   <div><label>Condition</label><input id="ivG" placeholder="NM / LP / Sealed"></div>
+   <div><label>Condition</label>${pickInput({id:'ivG',list:'conditions',value:'',placeholder:'NM / LP / Sealed'})}</div>
    <div><label>Image</label><div class="row" style="gap:6px"><input id="ivImg" placeholder="URL or upload" style="min-width:0"><button class="btn sm" onclick="invUploadImg()">⬆</button></div><img id="ivImgPv" style="display:none;height:40px;border-radius:5px;margin-top:4px;border:1px solid var(--line)"></div>
    <div><label>Owner</label><select id="ivOwner">${ownerOpts(ME)}</select></div></div>
    <div class="row" style="margin-top:12px"><button class="btn v" onclick="addInv()">+ Add item</button><button class="btn sm" onclick="downloadInvTemplate()">↓ CSV template</button><button class="btn sm" onclick="$('ivCSV').click()">Import CSV</button><input id="ivCSV" type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="importInv(this)"></div></div>`;
@@ -1082,16 +1124,16 @@ function buyListHTML(){
    <div class="row" style="justify-content:flex-end;margin-top:8px"><b>Projected order: ~${money(projected)}</b></div></div>`;}
 function addInv(){const n=$('ivN').value.trim();if(!n)return;const owner=($('ivOwner')&&$('ivOwner').value!=='')?$('ivOwner').value:(ROLE==='admin'&&$('ivOwner')?null:ME);
  const gv=id=>{const el=$(id);return el?el.value.trim():'';};
- const L2=ivLinked||{};
- S.inventory.push({id:'i'+Date.now(),name:n,cat:$('ivC').value,set:$('ivS').value,qty:+$('ivQ').value||1,cost:+$('ivCo').value||0,value:+$('ivV').value||0,gradingCompany:gv('ivGC'),grade:gv('ivGrade'),cardNumber:gv('ivNum'),year:gv('ivYear'),cond:gv('ivG'),img:$('ivImg').value,owner,
+ const L2=ivLinked||{};const SL=ivSetLink||{};
+ S.inventory.push({id:'i'+Date.now(),name:n,cat:gv('ivC'),set:(SL.label||''),setId:(SL.id||null),qty:+$('ivQ').value||1,cost:+$('ivCo').value||0,value:+$('ivV').value||0,gradingCompany:gv('ivGC'),grade:gv('ivGrade'),cardNumber:gv('ivNum'),year:gv('ivYear'),cond:gv('ivG'),img:$('ivImg').value,owner,
    cardId:L2.cardId||null,playerId:L2.playerId||null,parallel:L2.parallel||'',rarity:L2.rarity||''});
- ivLinked=null;save();dInventory();toast('Added'+(L2.cardId?' · linked to card':''));}
+ ivLinked=null;ivSetLink=null;save();dInventory();toast('Added'+(L2.cardId?' · linked to card':''));}
 function delInv(id){S.inventory=S.inventory.filter(x=>x.id!==id);save();dInventory();}
 /* ===== Quick-add inventory from the card library (search e10_cards → autofill + link) ===== */
-let ivLinked=null,_ivResults=[],_ivT=null;
+let ivLinked=null,ivSetLink=null,_ivResults=[],_ivT=null;
 function ivYearFromSet(s){const m=(s||'').match(/\b(19|20)\d{2}\b/);return m?m[0]:'';}
 async function dbCardLibrarySearch(q){q=(q||'').trim().toLowerCase();if(q.length<2)return[];const toks=q.split(/\s+/).filter(Boolean).slice(0,4);
- try{let query=sb.from('e10_cards').select('id,name,num,set_name,parallel,rarity,value,serial,player_id,set:set_id(year)');toks.forEach(t=>{query=query.like('search','%'+t+'%');});const{data,error}=await query.limit(20);if(error)throw error;return data||[];}catch(e){return[];}}
+ try{let query=sb.from('e10_cards').select('id,name,num,set_name,set_id,parallel,rarity,value,serial,player_id,set:set_id(year)');toks.forEach(t=>{query=query.like('search','%'+t+'%');});const{data,error}=await query.limit(20);if(error)throw error;return data||[];}catch(e){return[];}}
 function invCardSearch(q){clearTimeout(_ivT);const el=$('ivCardResults');if((q||'').trim().length<2){if(el)el.innerHTML='';return;}
  _ivT=setTimeout(async()=>{const list=await dbCardLibrarySearch(q);_ivResults=list;renderIvResults(list);},220);}
 function renderIvResults(list){const el=$('ivCardResults');if(!el)return;
@@ -1102,7 +1144,7 @@ function invAutofillFromCard(card){const base=/^base$/i.test(card.parallel||'');
  const setName=card.set_name||'';const year=(card.set&&card.set.year)||ivYearFromSet(setName)||'';
  const name=(card.name||'')+(setName?(' — '+setName):'')+(par?(' ('+par+')'):'');
  const nEl=$('ivN');if(nEl)nEl.value=name;
- const sel=$('ivS');if(sel&&setName){if(![...sel.options].some(o=>o.value===setName)){const o=document.createElement('option');o.value=setName;o.textContent=setName;sel.appendChild(o);}sel.value=setName;}
+ if(setName){ivSetLink={id:(card.set_id||null),label:setName};epSetValue('ivSet',ivSetLink);}
  const numEl=$('ivNum');if(numEl)numEl.value=card.num||'';
  const yrEl=$('ivYear');if(yrEl)yrEl.value=year?(''+year):'';
  const vEl=$('ivV');if(vEl&&(!vEl.value||+vEl.value===0)&&card.value!=null)vEl.value=card.value; /* prefill Market from card (raw) — never overwrite a typed value */
@@ -1314,7 +1356,7 @@ function exRows(){const cat=$('exCat').value,type=$('exType').value,ps=$('exPric
  const rows=[head];items.forEach(i=>{const title=ct?(ct+' — '+i.name):i.name;const desc=cd||((i.cond?i.cond+' · ':'')+'ships fast, packaged to protect');rows.push(['Trading Card Games',sub,title,desc,(+i.qty||1),type,price(i),'',type==='Buy It Now'?'TRUE':'',i.cond||'',i.img||'','','','','','','','']);});return{rows,count:items.length};}
 function updateExCount(){const el=$('exCount');if(el)el.textContent=exRows().count+' items ready';}
 function exportWhatnot(){const {rows,count}=exRows();if(!count){toast('No matching inventory');return;}csvDL('element10_whatnot_inventory.csv',rows);toast(count+' rows exported');}
-function dLists(){const lm=[['characters','Chase characters'],['sets','Sets / products'],['formats','Show formats'],['diff','Trust / hooks']];
+function dLists(){const lm=[['characters','Chase characters'],['sets','Sets / products'],['formats','Show formats'],['diff','Trust / hooks'],['invcats','Inventory categories'],['grading','Grading companies'],['conditions','Card conditions']];
  let h=`<div class="card"><h3 style="font-size:15px">Pick-lists</h3>`;
  lm.forEach(([k,label])=>{h+=`<div style="margin-bottom:14px"><div class="lab">${label}</div><div class="chipwrap">${L(k).map(v=>`<span class="pill">${esc(v)} <a onclick="rmList('${k}','${esc(v)}')" style="color:var(--red)">✕</a></span>`).join('')}</div><div class="row"><input id="add_${k}" placeholder="Add…" style="max-width:260px" onkeydown="if(event.key==='Enter')addList('${k}')"><button class="btn sm" onclick="addList('${k}')">+</button></div></div>`;});
  h+=`<div><div class="lab">Streamers</div><div class="chipwrap">${S.streamers.map(v=>`<span class="pill">${esc(v)} <a onclick="rmStreamer('${esc(v)}')" style="color:var(--red)">✕</a></span>`).join('')}</div><div class="row"><input id="add_str" placeholder="Add streamer…" style="max-width:260px" onkeydown="if(event.key==='Enter')addStreamer()"><button class="btn sm" onclick="addStreamer()">+</button></div></div></div>`;
@@ -1432,7 +1474,7 @@ const SHARED_KEYS=['comments','todos','streamers','lists','attachments','checkli
 
 function blankShared(){return{comments:[],todos:[],streamers:['Trent'],lists:JSON.parse(JSON.stringify(DEF_LISTS)),attachments:[],checklists:[],inventory:[],repacks:[]};}
 function blankScoped(){return{shows:{},breaks:[],copySets:[],dashCfg:{catValue:true,costMarket:true,movement:true},sales:null};}
-function normShared(o){o=o||{};if(!o.comments)o.comments=[];if(!o.todos)o.todos=[];o.todos.forEach(t=>{if(t.desc==null)t.desc='';if(!t.comments)t.comments=[];});if(!o.streamers)o.streamers=['Trent'];if(!o.lists)o.lists=JSON.parse(JSON.stringify(DEF_LISTS));['characters','sets','formats','diff'].forEach(k=>{if(!o.lists[k])o.lists[k]=(DEF_LISTS[k]||[]).slice();});['attachments','checklists','inventory','repacks'].forEach(k=>{if(!o[k])o[k]=[];});o.inventory.forEach(it=>{if(!it.id)it.id='i'+Math.random().toString(36).slice(2);if(!('owner'in it))it.owner=null;if(!(+it.qty>=0))it.qty=(+it.qty||1);if(!Array.isArray(it.reservations))it.reservations=[];it.reservations.forEach(r=>{r.qty=+r.qty||0;});if(!it.addedAt)it.addedAt=Date.now();
+function normShared(o){o=o||{};if(!o.comments)o.comments=[];if(!o.todos)o.todos=[];o.todos.forEach(t=>{if(t.desc==null)t.desc='';if(!t.comments)t.comments=[];});if(!o.streamers)o.streamers=['Trent'];if(!o.lists)o.lists=JSON.parse(JSON.stringify(DEF_LISTS));['characters','sets','formats','diff','invcats','grading','conditions'].forEach(k=>{if(!o.lists[k])o.lists[k]=(DEF_LISTS[k]||[]).slice();});['attachments','checklists','inventory','repacks'].forEach(k=>{if(!o[k])o[k]=[];});o.inventory.forEach(it=>{if(!it.id)it.id='i'+Math.random().toString(36).slice(2);if(!('owner'in it))it.owner=null;if(!(+it.qty>=0))it.qty=(+it.qty||1);if(!Array.isArray(it.reservations))it.reservations=[];it.reservations.forEach(r=>{r.qty=+r.qty||0;});if(!it.addedAt)it.addedAt=Date.now();
   if(!('cardId'in it))it.cardId=null;if(!('playerId'in it))it.playerId=null;if(!('parallel'in it))it.parallel='';/* links to e10_cards / e10_players when added from the library */
   /* structured grade fields — backfill once, losslessly, from the free-text cond */
   if(!('gradingCompany'in it)){it.gradingCompany='';it.grade=('grade'in it)?it.grade:'';const g=parseGrade(it.cond);if(g){it.gradingCompany=g.gradingCompany;it.grade=g.grade;it.cond='';}}
