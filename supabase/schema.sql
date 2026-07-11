@@ -199,3 +199,32 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --     their price at low=expected=high. Projection = Σ slot takes at LOW/EXPECTED/HIGH vs the
 --     cost/(1-marginGoal) clear line, a top-N concentration share + a top-spots-at-LOW downside, and a
 --     fixed-price nudge to close the margin gap. Reuses e10_slot_partition as-is; RLS not weakened.
+
+-- ─────────────────────────────────────────────────────────────
+-- APPLIED (migration e10_break_phase3_live_fulfillment):
+-- Break-format rebuild phase 3 — live break board + buyer assignment + fulfillment.
+-- Built ON the EXISTING live-break tables (e10_break_sessions / e10_break_slots / e10_break_events /
+-- e10_viewers / e10_session_viewers) — no parallel system, no new tables. All new columns nullable /
+-- defaulted so pre-phase-3 ad-hoc sessions/slots keep working.
+--   e10_break_slots += method, band_low/band_expected/band_high (phase-2 band snapshot), team_id,
+--     player_id (history seam), sold_at, plan jsonb (formatSlotId + card pull-list + cardCount +
+--     tierName + remainder flag), ship_state ('open'|'packed'|'shipped'), ship_note. The formatted
+--     spot maps 1:1 onto a slot: label←name, tier←tierName, price(fixed), band_*←resolved band,
+--     team_id/player_id←the include rule's linked valueId (so each hammer is queryable by entity).
+--     buyer_handle (text) + buyer_uid (optional viewer link) already existed — the buyer identity.
+--   e10_break_sessions += format_id (saved-model id), break_type, cost, proj_low/proj_expected/
+--     proj_high — the projection snapshot that powers the live header and modeled-vs-actual.
+--   Indexes: e10_break_slots(team_id), (player_id) [history seam]; (lower(buyer_handle)) where
+--     state='sold' [buyer-grouped ship list].
+--   RLS UNCHANGED and not weakened: slot INSERT/UPDATE/DELETE stay e10_owns_session (only the session
+--     owner or admin assigns — a member's UPDATE affects 0 rows), SELECT stays e10_can_read_session.
+--     New columns inherit these existing owner/admin policies. Membership checks are the STABLE
+--     SECURITY DEFINER helpers e10_owns_session / e10_can_read_session (single subquery, evaluated once).
+--   e10_buyer_suggest(p_session,p_q) — SECURITY DEFINER, gated by e10_owns_session (returns [] otherwise),
+--     anon revoked. Owner-only read path for the assign typeahead: session roster (e10_viewers, which is
+--     self/admin-read only) UNION this streamer's prior buyers — WITHOUT weakening e10_viewers' RLS.
+--   e10_slot_cards(p_checklist,p_slots,p_limit) — SECURITY INVOKER (RLS applies), reuses e10_slot_pred;
+--     returns the bounded matched card pull-list per formatted slot to seed the board (Field is capped).
+--   Buyer-grouped fulfillment query: read sold e10_break_slots across the owner's sessions
+--     (RLS-scoped) and group by buyer_uid else lower(buyer_handle) → cross-session ship list.
+--   Modeled-vs-actual reads the session's proj_* + cost snapshot vs summed hammer (real margin).
