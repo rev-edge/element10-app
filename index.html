@@ -1907,15 +1907,21 @@ async function liveCaseHit(){if(!LIVE.session)return;const v=!LIVE.session.case_
  LIVE.session.case_hit=v;await liveEvent('case_hit',null,{case_hit:v,scope:'session'});renderLive();
 }
 function liveDirUrl(){return location.href.replace(/[?#].*$/,'').replace(/\/[^\/]*$/,'/');}
-function liveStartHTML(){const models=(S.breaks||[]);const seed=LIVE_SEED;const defName=(seed&&seed.show)?(seed.show+' — live break'):'';
+function liveStartHTML(){const seed=LIVE_SEED;const defName=(seed&&seed.show)?(seed.show+' — live break'):'';
+ const fmts=(S.breaks||[]).filter(b=>b.ruleSlots&&b.ruleSlots.length);
+ const blankLabel=(seed&&seed.model)?'Start live break (from show)':(fmts.length?'Start blank session':'Start live break');
  return `<div class="hero"><div><h1>Live Break</h1></div></div>
- <div class="card" style="max-width:560px"><h3 style="font-size:15px">Start a session</h3>
+ ${fmts.length?`<div class="card" style="max-width:560px;margin-bottom:12px"><h3 style="font-size:15px">Start from a saved format</h3>
+   <div class="lab" style="text-transform:none;letter-spacing:0;margin:4px 0 8px">Seeds the board with the format's spots, methods, tiers, bands and card lists.</div>
+   <div class="row" style="gap:8px;align-items:flex-start"><div style="flex:2;min-width:0">${entityPicker('liveFmt',{icon:'📊',placeholder:'search your saved formats…',search:liveFormatSearch,onpick:(id)=>{window._liveFmtId=id;},onclear:()=>{window._liveFmtId=null;}})}</div><button class="btn v" onclick="liveStartPickedFormat()">▶ Start live board</button></div></div>`:''}
+ <div class="card" style="max-width:560px"><h3 style="font-size:15px">${fmts.length?'Or start a blank session':'Start a session'}</h3>
   ${seed?`<div class="out" style="margin-top:10px">Seeding from show <b>${esc(seed.show||'')}</b>${seed.model?` · model <b>${esc(seed.model.name)}</b> (${seed.model.slots} slots)`:' · no model attached — add spots manually'}</div>`:''}
   <div style="margin-top:12px"><label>Session name</label><input id="liveName" value="${esc(defName)}" placeholder="e.g. Friday Ascended Heroes Case Break"></div>
-  ${models.length?`<div style="margin-top:10px"><label>Seed spots from a saved break model (optional)</label><select id="liveModel"><option value="">— none (add spots manually) —</option>${models.map((m,i)=>`<option value="${i}">${esc(m.name)} · ${m.slots} spots</option>`).join('')}</select></div>`:''}
-  <div class="row" style="margin-top:16px"><button class="btn v" onclick="liveStart()">▶ Start live break</button></div>
+  <div class="row" style="margin-top:16px"><button class="btn ${fmts.length?'':'v'}" onclick="liveStart()">▶ ${blankLabel}</button></div>
   <div class="lab" style="margin-top:10px">Only you (and admin) can control your sessions. Viewers see only the spots they're in.</div></div>`;
 }
+function liveFormatSearch(q){q=(q||'').toLowerCase();return (S.breaks||[]).filter(b=>b.ruleSlots&&b.ruleSlots.length&&(b.name||'').toLowerCase().includes(q)).slice(0,24).map(b=>({id:b.id,label:b.name,sub:b.ruleSlots.length+' spots'+(b.breakType?(' · '+b.breakType):'')}));}
+function liveStartPickedFormat(){const e=EP['liveFmt'];const id=(e&&e.value&&e.value.id)||window._liveFmtId;if(!id){toast('Pick a saved format first');return;}liveStartFromFormat(id);}
 function liveActiveHTML(){const s=LIVE.session;const dir=liveDirUrl();const overlayUrl=dir+'overlay.html?code='+s.share_code;const companionUrl=dir+'companion.html';
  const open=LIVE.slots.filter(x=>x.state!=='sold'),sold=LIVE.slots.filter(x=>x.state==='sold');
  return `<div class="hero"><div><h1>${esc(s.name)}</h1><div class="sub">Live break · share code <b class="mono">${esc(s.share_code)}</b>${s.format_id?' · formatted':''}</div></div><button class="btn x" onclick="liveEnd()">End</button></div>
@@ -1929,7 +1935,7 @@ function liveActiveHTML(){const s=LIVE.session;const dir=liveDirUrl();const over
    ${open.length?`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:4px">Tap <b>Mark sold</b> as each spot closes → pick the winner → enter the hammer.</div>`:''}
    ${open.map((sl)=>liveSpotCard(sl,LIVE.slots.indexOf(sl))).join('')}
    ${sold.length?`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:14px;border-top:1px solid var(--line);padding-top:10px">Sold (${sold.length}) — tap to edit or reopen</div>`+sold.map((sl)=>liveSpotCard(sl,LIVE.slots.indexOf(sl))).join(''):''}
-   ${!LIVE.slots.length?`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:8px">No spots yet — add one below, or start a session from a saved format (Break planner → ▶ Live).</div>`:''}
+   ${!LIVE.slots.length?`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:8px">No spots yet — add one below.</div>`:''}
    <div class="row" style="margin-top:12px;gap:6px"><input id="slotLabel" list="dl_slotchars" placeholder="Add a spot (team / character)" style="flex:2" onkeydown="if(event.key==='Enter')liveAddSlot()"><button class="btn sm" onclick="liveAddSlot()">+ Add spot</button></div><datalist id="dl_slotchars">${pickOpts('characters')}</datalist></div>
  <details class="card" style="margin-top:12px"><summary style="cursor:pointer;font-weight:600;font-size:14px">Broadcast links (OBS overlay + viewer companion)</summary>
    <div class="row" style="margin-top:8px;gap:6px"><input value="${esc(overlayUrl)}" readonly style="flex:2;font-size:12px" onclick="this.select()"><button class="btn sm" onclick="copy('${esc(overlayUrl)}')">Copy overlay</button></div>
