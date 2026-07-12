@@ -1906,6 +1906,20 @@ async function liveCaseHit(){if(!LIVE.session)return;const v=!LIVE.session.case_
  try{await sb.from('e10_break_sessions').update({case_hit:v}).eq('id',LIVE.session.id);}catch(e){toast(e.message);return;}
  LIVE.session.case_hit=v;await liveEvent('case_hit',null,{case_hit:v,scope:'session'});renderLive();
 }
+async function liveToggleTrade(){if(!LIVE.session)return;const v=!LIVE.session.trade_open;
+ try{await sb.from('e10_break_sessions').update({trade_open:v}).eq('id',LIVE.session.id);}catch(e){toast(e.message);return;}
+ LIVE.session.trade_open=v;await liveEvent('trade_toggled',null,{trade_open:v});renderLive();
+}
+async function liveSetActive(id){if(!LIVE.session)return;const v=id||null;
+ try{await sb.from('e10_break_sessions').update({active_slot_id:v}).eq('id',LIVE.session.id);}catch(e){toast(e.message);return;}
+ LIVE.session.active_slot_id=v;await liveEvent('active_spot',v,{});renderLive();
+}
+async function liveSaveOverlayCfg(){if(!LIVE.session)return;
+ const cfg={showTitle:($('ovShow')&&$('ovShow').value.trim())||'',ticker:($('ovTicker')&&$('ovTicker').value.trim())||'',
+   handleLeft:($('ovHL')&&$('ovHL').value.trim())||'',handleRight:($('ovHR')&&$('ovHR').value.trim())||''};
+ try{await sb.from('e10_break_sessions').update({overlay_cfg:cfg}).eq('id',LIVE.session.id);}catch(e){toast(e.message);return;}
+ LIVE.session.overlay_cfg=cfg;toast('Overlay branding saved — live on the overlay');
+}
 function liveDirUrl(){return location.href.replace(/[?#].*$/,'').replace(/\/[^\/]*$/,'/');}
 function liveStartHTML(){const seed=LIVE_SEED;const defName=(seed&&seed.show)?(seed.show+' — live break'):'';
  const fmts=(S.breaks||[]).filter(b=>b.ruleSlots&&b.ruleSlots.length);
@@ -1928,8 +1942,10 @@ function liveActiveHTML(){const s=LIVE.session;const dir=liveDirUrl();const over
  ${liveProgressHTML()}
  <div class="card" style="margin-bottom:12px"><div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
    <button class="btn sm ${s.stash_or_pass?'v':''}" onclick="liveToggleStash()">Stash-or-pass: <b>${s.stash_or_pass?'ON':'OFF'}</b></button>
+   <button class="btn sm ${s.trade_open?'v':''}" onclick="liveToggleTrade()">Trade block: <b>${s.trade_open?'OPEN':'off'}</b></button>
    <button class="btn sm ${s.case_hit?'d':''}" onclick="liveCaseHit()">${s.case_hit?'🔥 Case hit — live':'Flag case hit'}</button>
-   <a class="btn sm" onclick="go('fulfill')">📦 Ship list</a></div></div>
+   <a class="btn sm" onclick="go('fulfill')">📦 Ship list</a></div>
+   <div class="lab" style="text-transform:none;letter-spacing:0;margin-top:6px;font-size:12px">These flip instantly on the OBS overlay. Set the spot being auctioned now with <b>● Now</b> on a spot below.</div></div>
  <div class="card">
    <div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="font-size:15px">Worklist — ${open.length} open · ${sold.length} sold</h3></div>
    ${open.length?`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:4px">Tap <b>Mark sold</b> as each spot closes → pick the winner → enter the hammer.</div>`:''}
@@ -1937,9 +1953,20 @@ function liveActiveHTML(){const s=LIVE.session;const dir=liveDirUrl();const over
    ${sold.length?`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:14px;border-top:1px solid var(--line);padding-top:10px">Sold (${sold.length}) — tap to edit or reopen</div>`+sold.map((sl)=>liveSpotCard(sl,LIVE.slots.indexOf(sl))).join(''):''}
    ${!LIVE.slots.length?`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:8px">No spots yet — add one below.</div>`:''}
    <div class="row" style="margin-top:12px;gap:6px"><input id="slotLabel" list="dl_slotchars" placeholder="Add a spot (team / character)" style="flex:2" onkeydown="if(event.key==='Enter')liveAddSlot()"><button class="btn sm" onclick="liveAddSlot()">+ Add spot</button></div><datalist id="dl_slotchars">${pickOpts('characters')}</datalist></div>
- <details class="card" style="margin-top:12px"><summary style="cursor:pointer;font-weight:600;font-size:14px">Broadcast links (OBS overlay + viewer companion)</summary>
-   <div class="row" style="margin-top:8px;gap:6px"><input value="${esc(overlayUrl)}" readonly style="flex:2;font-size:12px" onclick="this.select()"><button class="btn sm" onclick="copy('${esc(overlayUrl)}')">Copy overlay</button></div>
-   <div class="row" style="margin-top:6px;gap:6px"><input value="${esc(companionUrl)}" readonly style="flex:2;font-size:12px" onclick="this.select()"><button class="btn sm" onclick="copy('${esc(companionUrl)}')">Copy companion</button></div></details>`;
+ <details class="card" style="margin-top:12px"><summary style="cursor:pointer;font-weight:600;font-size:14px">OBS overlays + broadcast links (vertical 1080×1920)</summary>
+   ${(function(){const cfg=s.overlay_cfg||{};const onCam=overlayUrl+'&layout=oncam',graphics=overlayUrl+'&layout=graphics';return `
+   <div class="lab" style="text-transform:none;letter-spacing:0;margin:8px 0 4px">Add each as an OBS <b>Browser</b> source at <b>1080×1920</b> (transparent). Put one layout per scene.</div>
+   <div class="row" style="margin-top:6px;gap:6px"><input value="${esc(onCam)}" readonly style="flex:2;font-size:12px" onclick="this.select()"><button class="btn sm" onclick="copy('${esc(onCam)}')">Copy On-cam</button></div>
+   <div class="row" style="margin-top:6px;gap:6px"><input value="${esc(graphics)}" readonly style="flex:2;font-size:12px" onclick="this.select()"><button class="btn sm" onclick="copy('${esc(graphics)}')">Copy Graphics</button></div>
+   <div class="row" style="margin-top:6px;gap:6px"><input value="${esc(companionUrl)}" readonly style="flex:2;font-size:12px" onclick="this.select()"><button class="btn sm" onclick="copy('${esc(companionUrl)}')">Copy companion</button></div>
+   <div class="lab" style="text-transform:none;letter-spacing:0;margin:12px 0 4px"><b>Overlay branding</b> (saved to this session, live on the overlay)</div>
+   <div class="row" style="gap:6px;flex-wrap:wrap">
+     <input id="ovShow" placeholder="Show title" value="${esc(cfg.showTitle||'')}" style="flex:1;min-width:150px;font-size:12px">
+     <input id="ovTicker" placeholder="Ticker text (On-cam)" value="${esc(cfg.ticker||'')}" style="flex:2;min-width:200px;font-size:12px"></div>
+   <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">
+     <input id="ovHL" placeholder="Name-plate left (e.g. @host)" value="${esc(cfg.handleLeft||'')}" style="flex:1;min-width:150px;font-size:12px">
+     <input id="ovHR" placeholder="Name-plate right (e.g. @cohost)" value="${esc(cfg.handleRight||'')}" style="flex:1;min-width:150px;font-size:12px">
+     <button class="btn v sm" onclick="liveSaveOverlayCfg()">Save branding</button></div>`;})()}</details>`;
 }
 function liveProgressHTML(){const s=LIVE.session;const sold=LIVE.slots.filter(x=>x.state==='sold');
  const actual=sold.reduce((a,x)=>a+(+x.price||0),0),N=LIVE.slots.length,nSold=sold.length;
@@ -1962,11 +1989,12 @@ function liveSpotCard(sl,i){const openS=sl.state!=='sold';
  const cards=(sl.plan&&sl.plan.cards)||[],cc=(sl.plan&&sl.plan.cardCount);
  const cardline=cards.length?('🃏 '+cards.slice(0,3).map(c=>esc(c.name)).join(', ')+((cc&&cc>cards.length)?(' +'+(cc-cards.length)+' more'):(cards.length>3?' …':''))):(sl.plan&&sl.plan.remainder?'🧺 Field / remainder':'');
  if(openS){
-  return `<div class="out" style="margin-top:8px;padding:12px"><div class="row" style="justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
-    <div style="min-width:0;flex:1"><div style="font-weight:700;font-size:15px">${i+1}. ${esc(sl.label||'Spot')}</div>
+  const isNow=LIVE.session&&LIVE.session.active_slot_id===sl.id;
+  return `<div class="out" style="margin-top:8px;padding:12px${isNow?';border-left:4px solid var(--red)':''}"><div class="row" style="justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
+    <div style="min-width:0;flex:1"><div style="font-weight:700;font-size:15px">${i+1}. ${esc(sl.label||'Spot')}${isNow?' <span style="color:var(--red)">● LIVE NOW</span>':''}</div>
       ${band?`<div class="lab" style="text-transform:none;letter-spacing:0;font-size:12px">${band}</div>`:''}
       ${cardline?`<div class="lab" style="text-transform:none;letter-spacing:0;font-size:11.5px;margin-top:2px">${cardline}</div>`:''}</div>
-    <div class="row" style="gap:6px"><button class="btn v" style="padding:12px 18px;font-size:14px;white-space:nowrap" onclick="liveMarkSold('${sl.id}')">Mark sold</button><button class="btn x sm" onclick="liveDelSlot('${sl.id}')" title="Remove spot">✕</button></div></div></div>`;
+    <div class="row" style="gap:6px"><button class="btn sm ${isNow?'d':''}" style="white-space:nowrap" onclick="liveSetActive('${isNow?'':sl.id}')" title="Set the spot being auctioned now">${isNow?'● Now':'○ Now'}</button><button class="btn v" style="padding:12px 18px;font-size:14px;white-space:nowrap" onclick="liveMarkSold('${sl.id}')">Mark sold</button><button class="btn x sm" onclick="liveDelSlot('${sl.id}')" title="Remove spot">✕</button></div></div></div>`;
  }
  return `<div class="out" style="margin-top:8px;padding:12px;border-left:3px solid #0a8a4a"><div class="row" style="justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
    <div style="min-width:0;flex:1"><div style="font-weight:700;font-size:15px">${i+1}. ${esc(sl.label||'Spot')} <span style="color:#0a8a4a">✓ sold</span></div>
@@ -2009,7 +2037,7 @@ async function liveStartFromFormat(modelId){const model=(S.breaks||[]).find(b=>b
    const{data}=await sb.rpc('e10_slot_cards',{p_checklist:model.checklistId,p_slots:payload,p_limit:60});
    (data||[]).forEach(x=>{cardMap[x.i]={count:x.count,cards:x.cards||[]};});}catch(e){}}
  const{data:sess,error}=await sb.from('e10_break_sessions').insert({streamer_uid:MEID,name:model.name+' — live',
-   format_id:model.id,break_type:model.breakType||null,cost:proj.cost,proj_low:proj.low,proj_expected:proj.exp,proj_high:proj.high}).select().maybeSingle();
+   format_id:model.id,break_type:model.breakType||null,checklist_id:model.checklistId||null,cost:proj.cost,proj_low:proj.low,proj_expected:proj.exp,proj_high:proj.high}).select().maybeSingle();
  if(error){toast('Could not start: '+error.message);return;}
  LIVE.session=sess;LIVE.slots=[];await liveEvent('session_started',null,{name:sess.name,format_id:model.id});
  for(let i=0;i<rs.length;i++){const s=rs[i],take=modelTake(s,tb),tierName=(tb.find(t=>t.id===s.tierId)||{}).name||'';

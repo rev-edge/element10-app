@@ -228,3 +228,21 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --   Buyer-grouped fulfillment query: read sold e10_break_slots across the owner's sessions
 --     (RLS-scoped) and group by buyer_uid else lower(buyer_handle) → cross-session ship list.
 --   Modeled-vs-actual reads the session's proj_* + cost snapshot vs summed hammer (real margin).
+
+-- ─────────────────────────────────────────────────────────────
+-- APPLIED (migration e10_overlay_session_state):
+-- Vertical Whatnot OBS overlays (overlay.html, 1080x1920, two layouts ?layout=oncam|graphics).
+-- No new tables. Four nullable/defaulted columns on e10_break_sessions drive the overlay live:
+--   active_slot_id uuid  — the spot on the block now (streamer sets it with ● Now in the Live panel;
+--                          overlay renders it as the current-spot bar).
+--   trade_open boolean   — Trade-block state (Live panel toggle → overlay "TRADE BLOCK OPEN" badge).
+--   checklist_id uuid    — set at format-start (liveStartFromFormat); lets the overlay read the
+--                          chase-flagged cards for the chase list/board via e10_cards (chase=true).
+--   overlay_cfg jsonb    — {showTitle, ticker, handleLeft, handleRight} branding, edited from the
+--                          Live panel "OBS overlays" section; overlay reads it live.
+-- RLS UNCHANGED / not weakened: these inherit the existing e10_break_sessions policies (owner/admin
+--   write via streamer_uid=auth.uid()/e10_is_admin(); read via e10_can_read_session). The overlay
+--   signs in as the streamer, so it reads its own session + slots (existing realtime subscription
+--   reused) and the checklist's chase cards under the existing member-read e10_cards RLS. No new
+--   functions or policies; get_advisors shows no new findings. Stash-or-pass has no server-side vote
+--   store (companion is display-of-state), so the overlay shows the prompt/state, not fabricated tallies.
