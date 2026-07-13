@@ -46,10 +46,31 @@ html,body{width:1080px;height:1920px;background:transparent;font-family:var(--fo
 .trade{position:absolute;background:var(--red);color:#fff;border:5px solid #fff;border-radius:16px;padding:12px 22px;display:flex;align-items:center;gap:12px;font-weight:900;font-size:38px;text-transform:uppercase;letter-spacing:.02em;white-space:nowrap}
 .trade .pulse{width:22px;height:22px;border-radius:50%;background:#fff;animation:blink 1s steps(2) infinite}
 @keyframes blink{50%{opacity:.2}}
+/* ---- status placard cards (A) — laminated-sign look: thick border, hard offset shadow, tilt, pop-in ---- */
+#placards{position:absolute;left:40px;top:1084px;width:452px;display:flex;flex-direction:column;gap:22px}
+.placard{border:8px solid #000;border-radius:20px;padding:18px 24px;box-shadow:13px 13px 0 rgba(0,0,0,.62);transform:rotate(var(--rot,0deg));transform-origin:center}
+.placard .pl-big{font-weight:900;text-transform:uppercase;line-height:.9;font-size:52px;letter-spacing:-.01em}
+.placard .pl-sub{font-weight:800;font-size:23px;margin-top:8px;text-transform:uppercase;letter-spacing:.01em}
+.placard.pl-stash{background:var(--volt);color:#000}
+.placard.pl-case{background:var(--gold);color:#000}
+.placard.pl-trade{background:var(--red);color:#fff;border-color:#fff}
+.placard.pop{animation:placpop .5s cubic-bezier(.2,1.55,.4,1) both}
+@keyframes placpop{0%{transform:scale(.55) rotate(var(--rot,0deg));opacity:0}70%{transform:scale(1.06) rotate(var(--rot,0deg))}100%{transform:scale(1) rotate(var(--rot,0deg));opacity:1}}
+/* ---- chase board (A) — live cross-off ---- */
+#chaseboard{position:absolute;right:32px;top:1076px;width:476px;height:652px;background:var(--panel);border:6px solid var(--volt);border-radius:20px;overflow:hidden}
+#chaseboard .cb-hd{padding:16px 20px 12px;border-bottom:5px solid var(--volt)}
+#chaseboard .cb-title{font-weight:900;text-transform:uppercase;font-size:30px;color:var(--volt);line-height:1}
+#chaseboard .cb-count{font-weight:900;font-size:46px;color:#fff;margin-top:4px;line-height:1}
+#chaseboard .cb-count b{color:var(--volt)}
+#chaseboard .cb-scroll{position:absolute;left:0;right:0;top:132px;bottom:8px;overflow:hidden}
 /* ---- chase rows (shared) ---- */
 .chase-row{display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:3px solid rgba(255,255,255,.14)}
 .chase-row .chip{flex:0 0 auto;min-width:82px;text-align:center;font-weight:900;font-size:26px;color:#000;border-radius:10px;padding:6px 8px}
 .chase-row .nm{flex:1;min-width:0;font-weight:800;font-size:30px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chase-row .hittag{flex:0 0 auto;background:var(--red);color:#fff;font-weight:900;font-size:22px;padding:5px 12px;border-radius:8px;letter-spacing:.04em}
+.chase-row.hit{opacity:.42}
+.chase-row.hit .nm{text-decoration:line-through}
+.chase-row.hit .chip{background:#4a5058!important;color:#c7ccd2}
 /* rail (A) auto-scroll */
 #aChase{position:absolute;right:24px;top:1064px;width:332px;height:596px;overflow:hidden}
 .hd{font-weight:900;text-transform:uppercase;font-size:32px;color:var(--volt);padding:10px 16px;letter-spacing:.04em;position:relative;z-index:2;background:var(--panel)}
@@ -129,7 +150,8 @@ async function load(){
 }
 async function loadSlots(){const{data}=await sb.from('e10_break_slots').select('*').eq('session_id',SESSION.id).order('position');SLOTS=data||[];}
 async function loadChase(){CHASE=[];const cid=SESSION&&SESSION.checklist_id;if(!cid)return;
- try{const{data}=await sb.from('e10_cards').select('name,value,num,parallel').eq('checklist_id',cid).eq('chase',true).order('value',{ascending:false}).limit(15);CHASE=data||[];}catch(e){CHASE=[];}}
+ try{const{data}=await sb.from('e10_cards').select('id,name,value,num,parallel').eq('checklist_id',cid).eq('chase',true).order('value',{ascending:false}).limit(15);CHASE=data||[];}catch(e){CHASE=[];}}
+function hitSet(){return new Set((SESSION&&SESSION.chases_hit)||[]);}
 function stateMap(){const m={};SLOTS.forEach(s=>m[s.id]=s.state);return m;}
 function subscribe(){if(chan)sb.removeChannel(chan);
  chan=sb.channel('ov_'+SESSION.id)
@@ -158,8 +180,23 @@ function stashHTML(x,y,w){const on=SESSION&&SESSION.stash_or_pass;
  return `<div class="stash off" style="left:${x}px;top:${y}px;width:${w}px"><div class="big">STASH-OR-PASS: OFF</div></div>`;}
 function tradeHTML(x,y){if(!(SESSION&&SESSION.trade_open))return '';
  return `<div class="trade" style="left:${x}px;top:${y}px"><span class="pulse"></span>TRADE BLOCK OPEN</div>`;}
-function chaseRowsHTML(list){if(!list.length)return `<div class="chase-row"><div class="nm" style="color:var(--grey)">No chase list on this product.</div></div>`;
- return list.map(c=>{const col=chaseChipColor(c.value);return `<div class="chase-row"><div class="chip" style="background:${col}">${(+c.value>0)?money(c.value):'CHASE'}</div><div class="nm">${esc(c.name||'')}</div></div>`;}).join('');}
+function chaseRowsHTML(list,hits){if(!list.length)return `<div class="chase-row"><div class="nm" style="color:var(--grey)">No chase list on this product.</div></div>`;
+ hits=hits||new Set();
+ return list.map(c=>{const col=chaseChipColor(c.value),hit=hits.has(c.id);return `<div class="chase-row ${hit?'hit':''}"><div class="chip" style="background:${col}">${(+c.value>0)?money(c.value):'CHASE'}</div><div class="nm">${esc(c.name||'')}</div>${hit?'<div class="hittag">HIT</div>':''}</div>`;}).join('');}
+let prevPlac=new Set();
+function placardsHTML(){const items=[];
+ if(SESSION.stash_or_pass)items.push({k:'stash',big:'STASH<br>OR PASS?',sub:'cast your vote in the app',rot:-2.5});
+ if(SESSION.case_hit_open||SESSION.case_hit)items.push({k:'case',big:'CASE<br>HIT!',sub:'live case-hit box in play',rot:1.8});
+ if(SESSION.trade_open)items.push({k:'trade',big:'TRADE BLOCK<br>OPEN',sub:'DM to deal on cam',rot:-1.6});
+ if(!items.length){prevPlac=new Set();return '';}
+ const rows=items.map(i=>{const isNew=!prevPlac.has(i.k);return `<div class="placard pl-${i.k} ${isNew?'pop':''}" style="--rot:${i.rot}deg"><div class="pl-big">${i.big}</div><div class="pl-sub">${esc(i.sub)}</div></div>`;}).join('');
+ prevPlac=new Set(items.map(i=>i.k));
+ return `<div id="placards">${rows}</div>`;}
+function chaseBoardHTML(){const hits=hitSet();
+ const total=CHASE.length,hitCount=CHASE.filter(c=>hits.has(c.id)).length,remaining=Math.max(0,total-hitCount);
+ const rows=chaseRowsHTML(CHASE,hits),many=CHASE.length>8;
+ return `<div id="chaseboard"><div class="cb-hd"><div class="cb-title">🎯 Chases on the board</div><div class="cb-count"><b>${remaining}</b> LEFT <span style="font-size:26px;color:var(--grey)">/ ${total} chases</span></div></div>
+   <div class="cb-scroll"><div class="track ${many?'scroll':''}" style="--dur:${Math.max(18,CHASE.length*2.4)}s">${rows}${many?rows:''}</div></div></div>`;}
 function teamsGridHTML(){const open=SLOTS.filter(s=>s.state!=='sold').length;
  const cells=SLOTS.map(s=>{const gone=s.state==='sold';return `<div class="cell ${gone?'gone':'open'}">${gone?'<span class="mk">✓</span>':'●'} <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.label||'Spot')}</span></div>`;}).join('');
  return `<div class="spotsleft">SPOTS LEFT: <b>${open}</b> <span style="font-size:34px;color:var(--grey)">/ ${SLOTS.length}</span></div><div class="teamgrid">${cells||'<div class="cell open">Add spots</div>'}</div>`;}
@@ -177,15 +214,13 @@ function render(){if(!SESSION)return;
  $('caseBanner').classList.toggle('on',!!caseOn());
 }
 function renderA(){const c=cfg();
- const track=chaseRowsHTML(CHASE),many=CHASE.length>8;
  $('layout').innerHTML=`
   ${c.handleLeft?`<div class="plate" style="left:28px;top:876px"><span class="dot">◆</span> ${esc(c.handleLeft)}</div>`:''}
   ${c.handleRight?`<div class="plate" style="right:28px;top:876px"><span class="dot">◆</span> ${esc(c.handleRight)}</div>`:''}
   <div id="aTicker"><div class="brandbar up">ELEMENT<b style="background:var(--volt);color:#000;padding:0 8px;border-radius:6px">10</b></div><div class="tk">${esc((c.showTitle||SESSION.name||'LIVE BREAK'))}${c.ticker?('  •  '+esc(c.ticker)):''}</div></div>
-  <div id="aChase" class="panel volt"><div class="hd">🔥 CHASE LIST</div><div class="scrollbox"><div class="track ${many?'scroll':''}" style="--dur:${Math.max(16,CHASE.length*2.2)}s">${track}${many?track:''}</div></div></div>
-  ${tradeHTML(24,1500)}
-  ${nowbarHTML(24,1590,700)}
-  ${stashHTML(24,1762,1032)}`;
+  ${placardsHTML()}
+  ${chaseBoardHTML()}
+  ${nowbarHTML(24,1740,1032)}`;
 }
 function renderB(){const c=cfg();
  $('layout').innerHTML=`
@@ -193,7 +228,7 @@ function renderB(){const c=cfg();
     <div id="bHead"><div class="brand up">ELEMENT<b>10</b></div><div class="show">${esc(c.showTitle||SESSION.name||'LIVE BREAK')}</div></div>
     <div id="bRotate">
       <div id="bGrid" class="${ROT===0?'on':''}">${teamsGridHTML()}</div>
-      <div id="bChase" class="${ROT===1?'on':''}"><div class="hd">🔥 CHASE BOARD</div><div class="scrollbox"><div class="track ${CHASE.length>9?'scroll':''}" style="--dur:${Math.max(18,CHASE.length*2.4)}s">${chaseRowsHTML(CHASE)}${CHASE.length>9?chaseRowsHTML(CHASE):''}</div></div></div>
+      <div id="bChase" class="${ROT===1?'on':''}"><div class="hd">🔥 CHASE BOARD · ${Math.max(0,CHASE.length-CHASE.filter(c=>hitSet().has(c.id)).length)} LEFT</div><div class="scrollbox"><div class="track ${CHASE.length>9?'scroll':''}" style="--dur:${Math.max(18,CHASE.length*2.4)}s">${chaseRowsHTML(CHASE,hitSet())}${CHASE.length>9?chaseRowsHTML(CHASE,hitSet()):''}</div></div></div>
     </div>
   </div>
   ${nowbarHTML(24,1456,1032)}

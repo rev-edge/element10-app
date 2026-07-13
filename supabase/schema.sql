@@ -246,3 +246,21 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --   reused) and the checklist's chase cards under the existing member-read e10_cards RLS. No new
 --   functions or policies; get_advisors shows no new findings. Stash-or-pass has no server-side vote
 --   store (companion is display-of-state), so the overlay shows the prompt/state, not fabricated tallies.
+
+-- ─────────────────────────────────────────────────────────────
+-- APPLIED (migration e10_chases_hit_case_open):
+-- On-cam break board — status placard cards + live cross-off chase board.
+-- Two nullable/defaulted columns on e10_break_sessions (no new tables):
+--   chases_hit    jsonb   default '[]'  — array of e10_cards.id marked hit this session; the on-cam
+--                          chase board (and the graphics chase board) dim + strike + tag "HIT" any
+--                          chase whose id is in this set, and the "N LEFT" count = total − hit.
+--   case_hit_open boolean default false — persistent "case-hit box in play" flag so the CASE HIT
+--                          placard stays up; the existing momentary case_hit still drives the
+--                          celebratory top-banner flash.
+-- Panel writes: liveToggleChaseHit (per-chase mark/un-mark, one tap, logs a chase_hit/chase_unhit
+--   e10_break_event), liveToggleCaseOpen. Overlay reads session.chases_hit + the checklist's
+--   chase=true e10_cards live via the existing realtime subscription; crosses off + drops the count
+--   in real time. RLS UNCHANGED / not weakened: both columns inherit the existing e10_break_sessions
+--   policies (write owner/admin via streamer_uid=auth.uid() OR e10_is_admin(); read via
+--   e10_can_read_session). No new policy → no new membership check to InitPlan-wrap. Placards bind to
+--   session.stash_or_pass / (case_hit_open||case_hit) / trade_open; each shows only when its state is on.

@@ -1844,7 +1844,7 @@ async function boot(){if(!window.supabase){authScreen('Auth library failed to lo
  ME=session.user.email;MEID=session.user.id;S.user=ME;
  await loadAll();renderWho();renderScopebar();currentRender();}
 /* ========== LIVE BREAK SESSION — streamer control panel ========== */
-let LIVE={session:null,slots:[],chan:null};
+let LIVE={session:null,slots:[],chan:null,chases:[]};
 async function renderLive(){
  if(!sb){$('sec-live').innerHTML='<div class="card">Connecting…</div>';return;}
  if(!LIVE.session)await liveLoadActive();
@@ -1852,9 +1852,11 @@ async function renderLive(){
 }
 async function liveLoadActive(){
  try{const{data}=await sb.from('e10_break_sessions').select('*').eq('streamer_uid',MEID).eq('status','active').order('created_at',{ascending:false}).limit(1);
-  if(data&&data[0]){LIVE.session=data[0];await liveLoadSlots();liveSubscribe();}}catch(e){}
+  if(data&&data[0]){LIVE.session=data[0];await liveLoadSlots();await liveLoadChases();liveSubscribe();}}catch(e){}
 }
 async function liveLoadSlots(){try{const{data}=await sb.from('e10_break_slots').select('*').eq('session_id',LIVE.session.id).order('position');LIVE.slots=data||[];}catch(e){LIVE.slots=[];}}
+async function liveLoadChases(){LIVE.chases=[];const cid=LIVE.session&&LIVE.session.checklist_id;if(!cid)return;
+ try{const{data}=await sb.from('e10_cards').select('id,name,value').eq('checklist_id',cid).eq('chase',true).order('value',{ascending:false}).limit(15);LIVE.chases=data||[];}catch(e){LIVE.chases=[];}}
 async function liveEvent(type,slot_id,payload){try{await sb.from('e10_break_events').insert({session_id:LIVE.session.id,slot_id:slot_id||null,type,payload:payload||{},actor_uid:MEID});}catch(e){console.warn('event',e.message);}}
 function liveSubscribe(){if(!LIVE.session)return;if(LIVE.chan)sb.removeChannel(LIVE.chan);
  LIVE.chan=sb.channel('live_'+LIVE.session.id)
@@ -1877,7 +1879,7 @@ async function liveStart(){const name=($('liveName')&&$('liveName').value.trim()
 }
 async function liveEnd(){if(!LIVE.session||!confirm('End this live break session?'))return;
  try{await sb.from('e10_break_sessions').update({status:'ended',ended_at:new Date().toISOString()}).eq('id',LIVE.session.id);await liveEvent('session_ended',null,{});}catch(e){}
- if(LIVE.chan){sb.removeChannel(LIVE.chan);LIVE.chan=null;}LIVE.session=null;LIVE.slots=[];renderLive();toast('Session ended');
+ if(LIVE.chan){sb.removeChannel(LIVE.chan);LIVE.chan=null;}LIVE.session=null;LIVE.slots=[];LIVE.chases=[];renderLive();toast('Session ended');
 }
 async function liveAddSlot(){if(!LIVE.session)return;const label=($('slotLabel')&&$('slotLabel').value.trim())||'';const pos=LIVE.slots.length;
  const{data,error}=await sb.from('e10_break_slots').insert({session_id:LIVE.session.id,label:label||('Spot '+(pos+1)),position:pos}).select().maybeSingle();
@@ -1910,6 +1912,15 @@ async function liveToggleTrade(){if(!LIVE.session)return;const v=!LIVE.session.t
  try{await sb.from('e10_break_sessions').update({trade_open:v}).eq('id',LIVE.session.id);}catch(e){toast(e.message);return;}
  LIVE.session.trade_open=v;await liveEvent('trade_toggled',null,{trade_open:v});renderLive();
 }
+async function liveToggleCaseOpen(){if(!LIVE.session)return;const v=!LIVE.session.case_hit_open;
+ try{await sb.from('e10_break_sessions').update({case_hit_open:v}).eq('id',LIVE.session.id);}catch(e){toast(e.message);return;}
+ LIVE.session.case_hit_open=v;await liveEvent('case_open_toggled',null,{case_hit_open:v});renderLive();
+}
+async function liveToggleChaseHit(id){if(!LIVE.session)return;
+ const hit=new Set((LIVE.session.chases_hit)||[]);const had=hit.has(id);if(had)hit.delete(id);else hit.add(id);const arr=[...hit];
+ try{await sb.from('e10_break_sessions').update({chases_hit:arr}).eq('id',LIVE.session.id);}catch(e){toast(e.message);return;}
+ LIVE.session.chases_hit=arr;await liveEvent(had?'chase_unhit':'chase_hit',null,{card_id:id});renderLive();
+}
 async function liveSetActive(id){if(!LIVE.session)return;const v=id||null;
  try{await sb.from('e10_break_sessions').update({active_slot_id:v}).eq('id',LIVE.session.id);}catch(e){toast(e.message);return;}
  LIVE.session.active_slot_id=v;await liveEvent('active_spot',v,{});renderLive();
@@ -1936,6 +1947,12 @@ function liveStartHTML(){const seed=LIVE_SEED;const defName=(seed&&seed.show)?(s
 }
 function liveFormatSearch(q){q=(q||'').toLowerCase();return (S.breaks||[]).filter(b=>b.ruleSlots&&b.ruleSlots.length&&(b.name||'').toLowerCase().includes(q)).slice(0,24).map(b=>({id:b.id,label:b.name,sub:b.ruleSlots.length+' spots'+(b.breakType?(' · '+b.breakType):'')}));}
 function liveStartPickedFormat(){const e=EP['liveFmt'];const id=(e&&e.value&&e.value.id)||window._liveFmtId;if(!id){toast('Pick a saved format first');return;}liveStartFromFormat(id);}
+function liveChasesHTML(){const chs=LIVE.chases||[];if(!chs.length)return '';
+ const hit=new Set((LIVE.session.chases_hit)||[]);const remaining=chs.length-chs.filter(c=>hit.has(c.id)).length;
+ return `<div class="card" style="margin-bottom:12px"><div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="font-size:15px">🎯 Chases on the board — ${remaining} of ${chs.length} left</h3><span class="lab" style="text-transform:none;letter-spacing:0">Tap a chase when it's pulled — it crosses off live on the overlay</span></div>
+   <div style="margin-top:8px">${chs.map(c=>{const h=hit.has(c.id);return `<div class="row" style="justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line)${h?';opacity:.55':''}">
+     <div style="min-width:0;flex:1"><b style="${h?'text-decoration:line-through':''}">${esc(c.name||'')}</b> ${(+c.value>0)?('<span class="lab" style="text-transform:none;letter-spacing:0">'+money(c.value)+'</span>'):''}${h?' <span style="color:var(--red);font-weight:800">HIT</span>':''}</div>
+     <button class="btn sm ${h?'':'d'}" onclick="liveToggleChaseHit('${c.id}')">${h?'↩ Un-hit':'Mark hit'}</button></div>`;}).join('')}</div></div>`;}
 function liveActiveHTML(){const s=LIVE.session;const dir=liveDirUrl();const overlayUrl=dir+'overlay.html?code='+s.share_code;const companionUrl=dir+'companion.html';
  const open=LIVE.slots.filter(x=>x.state!=='sold'),sold=LIVE.slots.filter(x=>x.state==='sold');
  return `<div class="hero"><div><h1>${esc(s.name)}</h1><div class="sub">Live break · share code <b class="mono">${esc(s.share_code)}</b>${s.format_id?' · formatted':''}</div></div><button class="btn x" onclick="liveEnd()">End</button></div>
@@ -1943,9 +1960,11 @@ function liveActiveHTML(){const s=LIVE.session;const dir=liveDirUrl();const over
  <div class="card" style="margin-bottom:12px"><div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
    <button class="btn sm ${s.stash_or_pass?'v':''}" onclick="liveToggleStash()">Stash-or-pass: <b>${s.stash_or_pass?'ON':'OFF'}</b></button>
    <button class="btn sm ${s.trade_open?'v':''}" onclick="liveToggleTrade()">Trade block: <b>${s.trade_open?'OPEN':'off'}</b></button>
-   <button class="btn sm ${s.case_hit?'d':''}" onclick="liveCaseHit()">${s.case_hit?'🔥 Case hit — live':'Flag case hit'}</button>
+   <button class="btn sm ${s.case_hit?'d':''}" onclick="liveCaseHit()">${s.case_hit?'🔥 Case hit — flash':'Flash case hit'}</button>
+   <button class="btn sm ${s.case_hit_open?'d':''}" onclick="liveToggleCaseOpen()">Case placard: <b>${s.case_hit_open?'UP':'off'}</b></button>
    <a class="btn sm" onclick="go('fulfill')">📦 Ship list</a></div>
-   <div class="lab" style="text-transform:none;letter-spacing:0;margin-top:6px;font-size:12px">These flip instantly on the OBS overlay. Set the spot being auctioned now with <b>● Now</b> on a spot below.</div></div>
+   <div class="lab" style="text-transform:none;letter-spacing:0;margin-top:6px;font-size:12px">Stash / Trade / Case placards pop up on the on-cam overlay when live. <b>Flash</b> = momentary case-hit banner; <b>Case placard</b> stays up while the box is in play. Set the current spot with <b>● Now</b> below.</div></div>
+ ${liveChasesHTML()}
  <div class="card">
    <div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="font-size:15px">Worklist — ${open.length} open · ${sold.length} sold</h3></div>
    ${open.length?`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:4px">Tap <b>Mark sold</b> as each spot closes → pick the winner → enter the hammer.</div>`:''}
@@ -2048,7 +2067,7 @@ async function liveStartFromFormat(modelId){const model=(S.breaks||[]).find(b=>b
      price:((s.method==='fixed')?(+s.price||0):null),
      plan:{formatSlotId:s.id,breakType:model.breakType||null,tierName,remainder:!!s.remainder,cardCount:cm.count,cards:cm.cards}};
    try{const{data:sl}=await sb.from('e10_break_slots').insert(ins).select().maybeSingle();if(sl)LIVE.slots.push(sl);}catch(e){}}
- LIVE_SEED=null;liveSubscribe();go('live');renderLive();toast('Live break started — '+LIVE.slots.length+' formatted spots');
+ LIVE_SEED=null;await liveLoadChases();liveSubscribe();go('live');renderLive();toast('Live break started — '+LIVE.slots.length+' formatted spots');
 }
 /* projection of a SAVED model (pure; mirrors phase-2 computeProjection, reads through the same band shape) */
 function modelBand(slot,tierBands){const o=slot.bandOverride;
