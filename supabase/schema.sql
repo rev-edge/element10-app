@@ -355,3 +355,15 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --   the inventory form captures a Cost basis (per box / per case) + Boxes/case and stores `cost` PER BOX
 --   (case price ÷ boxes/case), so a case-priced product models correctly and the product editor slices to
 --   full case / half / N boxes against the right per-box cost.
+
+-- ─────────────────────────────────────────────────────────────
+-- CLIENT-ONLY FIX (no schema change): live-break PRODUCTS/COST reactivity.
+--   Root cause: breakConsume() ended with `p.boxes = p.consumed`, conflating the DESIRED committed box
+--   count (set by the slice) with how many boxes were actually pulled from stock. When on-hand was 0 (or
+--   short), applied=0 so consumed didn't move and this line overwrote the slice-driven p.boxes back to its
+--   old value — freezing the product line, the Break-cost total, the Avg-slot-target and the ROI header.
+--   Fix: cost is now DECOUPLED from stock — breakConsume only reconciles inventory and tracks p.consumed
+--   (actual movement); it never touches p.boxes. A shortage warns ("cost still committed for N") instead of
+--   freezing. Swept the same "mutate state but don't re-render" pattern: afterProdChange() now re-renders
+--   the whole surface in the REVIEW context too (its avg-slot-target header lives outside #prodBox), so a
+--   product change updates every cost-derived field, not just the product box.

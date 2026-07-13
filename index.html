@@ -2340,20 +2340,26 @@ function breakCost(prods){return (prods||[]).reduce((s,p)=>s+(+p.boxes||0)*(+p.p
 function prodArr(){if(LIVE.session){if(!Array.isArray(LIVE.session.products))LIVE.session.products=[];return LIVE.session.products;}
  if(BUILDER){const r=showById(BUILDER.id);if(r){if(!Array.isArray(r.s.products))r.s.products=[];return r.s.products;}}
  if(REVIEW){if(!Array.isArray(REVIEW.products))REVIEW.products=[];return REVIEW.products;}return [];}
-/* AUTOMATIC decrement/return — idempotent: reconcile inventory to the product's desired box count.
-   consumed tracks how many boxes THIS break has already taken, so we only ever apply the delta. */
-async function breakConsume(p){const delta=(+p.boxes||0)-(+p.consumed||0);if(delta===0)return true;let applied=0;
- const res=await cloudCommitShared(base=>{const it=base.inventory.find(x=>x.id===p.itemId);if(!it)return{ok:false,msg:'Item not in inventory'};
+/* AUTOMATIC stock reconcile — moves inventory toward the product's DESIRED box count (p.boxes).
+   p.consumed tracks how many boxes THIS break has actually pulled from stock, so we only apply the
+   remaining delta. Cost is DECOUPLED from stock: p.boxes (and therefore the line + Break cost) is set
+   by the slice and never touched here — a shortage only warns, it never freezes the committed cost. */
+async function breakConsume(p){const desired=(+p.boxes||0),delta=desired-(+p.consumed||0);if(delta===0)return true;let applied=0;
+ const res=await cloudCommitShared(base=>{const it=base.inventory.find(x=>x.id===p.itemId);if(!it)return{ok:false,msg:'notinv'};
    if(delta>0){const take=Math.min(delta,Math.max(0,+it.qty||0));it.qty=(+it.qty||0)-take;applied=take;}
    else{it.qty=(+it.qty||0)+(-delta);applied=delta;}
    return{ok:true,msg:''};});
- if(!res||!res.ok){toast((res&&res.msg)||'Inventory update failed');return false;}
- p.consumed=(+p.consumed||0)+applied;p.boxes=p.consumed;
- if(applied<delta)toast('Only '+applied+' box'+(applied===1?'':'es')+' of '+p.name+' were in stock');
+ if(!res||!res.ok){/* item no longer in inventory — keep the committed cost, just can't move stock */
+   if(delta>0)toast('Short stock: '+p.name+' isn’t in inventory — cost still committed for '+desired+' box'+(desired===1?'':'es')+'.');
+   return false;}
+ p.consumed=(+p.consumed||0)+applied;/* actual stock movement ONLY — does not drive p.boxes or the cost */
+ if(delta>0&&applied<delta)toast('Short stock: only '+applied+' of '+delta+' box'+(delta===1?'':'es')+' of '+p.name+' on hand — cost still committed for '+desired+'.');
  return true;}
 async function prodPersist(){if(!LIVE.session)return;LIVE.session.cost=breakCost(LIVE.session.products);
  try{await sb.from('e10_break_sessions').update({products:LIVE.session.products,cost:LIVE.session.cost}).eq('id',LIVE.session.id);}catch(e){toast(e.message);}}
-function afterProdChange(){if(LIVE.session)renderLive();else if(BUILDER){save();renderProductsUI();}else renderProductsUI();}
+/* Re-render the whole surface so EVERY cost-derived field updates, not just the product box:
+   live board → Break cost + Avg-slot-target + ROI header; review → its avg-slot-target header. */
+function afterProdChange(){if(LIVE.session)renderLive();else if(BUILDER){save();renderProductsUI();}else if(REVIEW)renderLive();else renderProductsUI();}
 async function prodAdd(itemId){const it=(S.inventory||[]).find(x=>x.id===itemId);if(!it){toast('Item not found');return;}
  const arr=prodArr();if(arr.some(p=>p.itemId===itemId)){toast('Already included');return;}
  const bpc=itemBoxesPerCase(it),pbc=itemPerBoxCost(it),slice=(bpc>1?'case':'boxes'),boxes=sliceToBoxes(slice,1,bpc);
