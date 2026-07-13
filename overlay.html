@@ -109,6 +109,44 @@ html,body{width:1080px;height:1920px;background:transparent;font-family:var(--fo
 #caseBanner{position:absolute;left:0;top:0;width:1080px;height:110px;display:none;justify-content:center;align-items:center;gap:16px;background:var(--gold);color:#000;font-weight:900;font-size:64px;text-transform:uppercase;letter-spacing:.03em;border-bottom:6px solid #000;animation:capulse 1s ease-in-out infinite}
 #caseBanner.on{display:flex}
 @keyframes capulse{50%{filter:brightness(1.2)}}
+/* ================= GRAPHICS v2 — team board + rails + brand frame ================= */
+/* format side rails (repeating mechanic text down both margins) */
+#railL,#railR{position:absolute;top:0;height:1632px;width:66px;background:var(--volt);overflow:hidden;display:flex;align-items:center;justify-content:center}
+#railL{left:0}#railR{right:0}
+.railtxt{writing-mode:vertical-rl;text-orientation:mixed;font-weight:900;font-size:38px;text-transform:uppercase;letter-spacing:.12em;color:#000;white-space:nowrap;line-height:1}
+#railL .railtxt{transform:rotate(180deg)}
+/* top band: banner + pills + board */
+#gTop{position:absolute;left:66px;right:66px;top:0;height:1070px;background:var(--panel);border-bottom:6px solid var(--volt)}
+#gBanner{position:absolute;left:0;right:0;top:0;height:92px;background:var(--volt);color:#000;display:flex;align-items:center;justify-content:center;gap:16px;font-weight:900;font-size:46px;text-transform:uppercase;letter-spacing:.05em;overflow:hidden;white-space:nowrap;padding:0 20px}
+#gBanner .brand b{background:#000;color:var(--volt)}
+#gLive{position:absolute;left:26px;top:112px;background:var(--red);color:#fff;border:4px solid #fff;border-radius:999px;padding:9px 24px;display:flex;align-items:center;gap:12px;font-weight:900;font-size:38px;text-transform:uppercase;letter-spacing:.04em}
+#gLive .dot{width:20px;height:20px;border-radius:50%;background:#fff;animation:blink 1s steps(2) infinite}
+#gGiveaway{position:absolute;right:26px;top:104px;background:var(--gold);color:#000;border:5px solid #000;border-radius:16px;padding:10px 20px;display:flex;flex-direction:column;align-items:flex-end;box-shadow:8px 8px 0 rgba(0,0,0,.5)}
+#gGiveaway .gv-lab{font-weight:900;font-size:30px;text-transform:uppercase;line-height:1}
+#gGiveaway .gv-row{display:flex;align-items:baseline;gap:16px;margin-top:4px}
+#gGiveaway .gv-timer{font-weight:900;font-size:46px;font-variant-numeric:tabular-nums;line-height:1}
+#gGiveaway .gv-ent{font-weight:800;font-size:26px;text-transform:uppercase}
+#gCount{position:absolute;left:26px;top:216px;font-weight:900;font-size:52px;text-transform:uppercase;color:#fff}
+#gCount b{color:var(--volt);font-size:60px}
+#gBoard{position:absolute;left:24px;right:24px;top:300px;height:748px;display:flex;flex-wrap:wrap;gap:12px;align-content:flex-start;overflow:hidden}
+.gtile{position:relative;border-radius:14px;border:4px solid;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:8px;overflow:hidden}
+.gtile.open{background:#0f1319;border-color:var(--volt)}
+.gtile.taken{background:#171b21;border-color:#2b3038;opacity:.5}
+.gtile .tmono{font-weight:900;font-size:46px;color:var(--volt);line-height:1}
+.gtile.taken .tmono{color:#5b6470}
+.gtile .tlogo{height:60px;max-width:88%;object-fit:contain}
+.gtile .tname{font-weight:800;font-size:22px;text-transform:uppercase;text-align:center;line-height:1.02;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;color:#fff}
+.gtile.taken .tname{color:#7b8590;text-decoration:line-through}
+.gtile .soldtag{position:absolute;top:6px;right:6px;background:var(--red);color:#fff;font-weight:900;font-size:16px;padding:2px 8px;border-radius:6px;letter-spacing:.04em}
+/* socials bar */
+#gSocials{position:absolute;left:66px;right:66px;top:1094px;height:62px;background:#0f1319;border:4px solid var(--volt);border-radius:14px;display:flex;align-items:center;justify-content:center;gap:14px;font-weight:900;font-size:34px;text-transform:uppercase;letter-spacing:.05em;color:#fff}
+#gSocials b{color:var(--volt)}
+/* brand chevrons framing the product-cam zone (flat, compression-safe) */
+.chev{position:absolute;top:1330px;width:70px;height:150px}
+.chev span{position:absolute;top:0;width:34px;height:150px;background:var(--volt);clip-path:polygon(0 0,60% 0,100% 50%,60% 100%,0 100%,40% 50%)}
+.chev.l{left:82px}.chev.l span:nth-child(2){left:32px;opacity:.55}
+.chev.r{right:82px;transform:scaleX(-1)}.chev.r span:nth-child(2){left:32px;opacity:.55}
+.chev.l span:nth-child(1){left:0}.chev.r span:nth-child(1){left:0}
 /* ---- auth ---- */
 #auth{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(4,5,8,.94);z-index:50}
 #auth .box{background:#0d0f13;border:4px solid var(--volt);border-radius:18px;padding:30px;width:520px}
@@ -137,6 +175,7 @@ const CODE=P.get('code')||'';
 const LAYOUT=(P.get('layout')||'graphics').toLowerCase()==='oncam'?'oncam':'graphics';
 const money=n=>'$'+Math.round(+n||0).toLocaleString();
 let sb=null,SESSION=null,SLOTS=[],CHASE=[],chan=null,PREV=null,ROT=0,rotTimer=null;
+let TEAMS={},VIEWERS=0,gvStarted=false;
 
 async function doLogin(){const email=$('em').value.trim(),password=$('pw').value;
  const{error}=await sb.auth.signInWithPassword({email,password});if(error){$('amsg').textContent=error.message;}else start();}
@@ -146,9 +185,12 @@ async function load(){
  if(!CODE){$('layout').innerHTML=frame('No session code in the link.');return;}
  const{data,error}=await sb.from('e10_break_sessions').select('*').eq('share_code',CODE).maybeSingle();
  if(error||!data){$('layout').innerHTML=frame('Session not found — check the code, or sign in as the streamer.');return;}
- SESSION=data;await loadSlots();await loadChase();subscribe();PREV=stateMap();render();
+ SESSION=data;await loadSlots();await loadTeams();await loadChase();await loadViewerCount();subscribe();PREV=stateMap();render();startGvTick();
 }
 async function loadSlots(){const{data}=await sb.from('e10_break_slots').select('*').eq('session_id',SESSION.id).order('position');SLOTS=data||[];}
+async function loadTeams(){TEAMS={};const ids=[...new Set(SLOTS.map(s=>s.team_id).filter(Boolean))];if(!ids.length)return;
+ try{const{data}=await sb.from('e10_teams').select('id,name,logo_url').in('id',ids);(data||[]).forEach(t=>{TEAMS[t.id]=t;});}catch(e){}}
+async function loadViewerCount(){VIEWERS=0;try{const{count}=await sb.from('e10_session_viewers').select('*',{count:'exact',head:true}).eq('session_id',SESSION.id);VIEWERS=count||0;}catch(e){VIEWERS=0;}}
 async function loadChase(){CHASE=[];const cid=SESSION&&SESSION.checklist_id;if(!cid)return;
  try{const{data}=await sb.from('e10_cards').select('id,name,value,num,parallel').eq('checklist_id',cid).eq('chase',true).order('value',{ascending:false}).limit(15);CHASE=data||[];}catch(e){CHASE=[];}}
 function hitSet(){return new Set((SESSION&&SESSION.chases_hit)||[]);}
@@ -203,7 +245,8 @@ function teamsGridHTML(){const open=SLOTS.filter(s=>s.state!=='sold').length;
 
 /* ---------- sold flash ---------- */
 let soldT=null;
-function flashSold(s){const el=$('sold');if(!el)return;
+function flashSold(s){if(LAYOUT!=='oncam')return;/* graphics dims the tile + Whatnot shows the winner natively — no duplicate flash */
+ const el=$('sold');if(!el)return;
  el.innerHTML=`<div class="won"><span class="who">${esc(s.buyer_handle||'WINNER')}</span> WON!</div><div class="amt">${money(s.price)} · ${esc(s.label||'Spot')}</div>`;
  el.classList.remove('show');void el.offsetWidth;el.classList.add('show');
  clearTimeout(soldT);soldT=setTimeout(()=>{el.classList.remove('show');},4800);}
@@ -222,24 +265,40 @@ function renderA(){const c=cfg();
   ${chaseBoardHTML()}
   ${nowbarHTML(24,1740,1032)}`;
 }
-function renderB(){const c=cfg();
+/* ---- graphics v2 helpers ---- */
+function tagline(){const c=cfg();if(c.tagline&&(''+c.tagline).trim())return (''+c.tagline).trim().toUpperCase();
+ const bt=(SESSION&&SESSION.break_type)||'';return (bt==='team'?'TEAM BREAK':(bt==='player'?'PLAYER BREAK':(bt==='hybrid'?'HYBRID BREAK':'LIVE BREAK')));}
+function monogram(label){const t=(label||'').replace(/[^A-Za-z0-9 ]/g,'').trim();const w=t.split(/\s+/).filter(Boolean);
+ if(w.length>=2)return (w[0][0]+w[1][0]).toUpperCase();return (t||'?').slice(0,3).toUpperCase();}
+function fmtCountdown(ms){const s=Math.max(0,Math.floor(ms/1000)),m=Math.floor(s/60),ss=s%60;return (m<10?'0':'')+m+':'+(ss<10?'0':'')+ss;}
+function boardHTML(){const n=SLOTS.length,cols=(n<=30?6:(n<=48?7:8)),rows=Math.max(1,Math.ceil(n/cols));
+ const rowH=Math.max(94,Math.min(212,Math.floor((748-(rows-1)*12)/rows))),basis=`calc((100% - ${(cols-1)*12}px) / ${cols})`;
+ return SLOTS.map(s=>{const sold=s.state==='sold',team=TEAMS[s.team_id],logo=team&&team.logo_url;
+   return `<div class="gtile ${sold?'taken':'open'}" style="flex:0 0 ${basis};height:${rowH}px">${sold?'<div class="soldtag">SOLD</div>':''}${logo?`<img class="tlogo" src="${esc(logo)}" onerror="this.style.display='none'">`:`<div class="tmono">${esc(monogram(s.label))}</div>`}<div class="tname">${esc(s.label||'')}</div></div>`;}).join('')||'<div class="gtile open" style="flex:0 0 200px;height:120px"><div class="tname">No spots</div></div>';}
+function livePillHTML(){return `<div id="gLive"><span class="dot"></span>LIVE${VIEWERS>0?(' · '+VIEWERS+' WATCHING'):''}</div>`;}
+function giveawayHTML(){const g=cfg().giveaway;if(!g||!g.on)return '';const ms=Math.max(0,(+g.endsAt||0)-Date.now()),done=ms<=0;
+ return `<div id="gGiveaway"><div class="gv-lab">🎁 ${esc(g.label||'GIVEAWAY')}</div><div class="gv-row"><span id="gvTimer" class="gv-timer">${done?'DRAWING':fmtCountdown(ms)}</span><span class="gv-ent">${(+g.entries||0)} entries</span></div></div>`;}
+function socialsHTML(){const c=cfg();const s=(c.socials&&(''+c.socials).trim())?(''+c.socials).trim():'@element10';
+ return `<div id="gSocials">FOLLOW <b>${esc(s)}</b></div>`;}
+function renderB(){const c=cfg(),open=SLOTS.filter(s=>s.state!=='sold').length,tag=tagline(),rail=(tag+'  ·  ').repeat(8);
+ if(rotTimer){clearInterval(rotTimer);rotTimer=null;}
  $('layout').innerHTML=`
-  <div id="bTop">
-    <div id="bHead"><div class="brand up">ELEMENT<b>10</b></div><div class="show">${esc(c.showTitle||SESSION.name||'LIVE BREAK')}</div></div>
-    <div id="bRotate">
-      <div id="bGrid" class="${ROT===0?'on':''}">${teamsGridHTML()}</div>
-      <div id="bChase" class="${ROT===1?'on':''}"><div class="hd">🔥 CHASE BOARD · ${Math.max(0,CHASE.length-CHASE.filter(c=>hitSet().has(c.id)).length)} LEFT</div><div class="scrollbox"><div class="track ${CHASE.length>9?'scroll':''}" style="--dur:${Math.max(18,CHASE.length*2.4)}s">${chaseRowsHTML(CHASE,hitSet())}${CHASE.length>9?chaseRowsHTML(CHASE,hitSet()):''}</div></div></div>
-    </div>
+  <div id="railL"><div class="railtxt">${esc(rail)}</div></div>
+  <div id="railR"><div class="railtxt">${esc(rail)}</div></div>
+  <div id="gTop">
+    <div id="gBanner"><span class="brand up">ELEMENT<b>10</b></span><span>· ${esc(tag)}</span></div>
+    ${livePillHTML()}
+    ${giveawayHTML()}
+    <div id="gCount"><b>${open}</b> / ${SLOTS.length} LEFT</div>
+    <div id="gBoard">${boardHTML()}</div>
   </div>
-  ${nowbarHTML(24,1456,1032)}
-  ${stashHTML(24,1622,1032)}
-  ${tradeHTML(24,1784)}`;
- startRotation();
+  ${socialsHTML()}
+  <div class="chev l"><span></span><span></span></div>
+  <div class="chev r"><span></span><span></span></div>`;
 }
-function startRotation(){if(LAYOUT!=='graphics')return;if(rotTimer)clearInterval(rotTimer);
- // only rotate if there is a chase board to rotate to
- if(!CHASE.length){ROT=0;const g=$('bGrid'),h=$('bChase');if(g)g.classList.add('on');if(h)h.classList.remove('on');return;}
- rotTimer=setInterval(()=>{ROT=ROT?0:1;const g=$('bGrid'),h=$('bChase');if(!g||!h){clearInterval(rotTimer);return;}g.classList.toggle('on',ROT===0);h.classList.toggle('on',ROT===1);},8000);}
+function startGvTick(){if(gvStarted)return;gvStarted=true;
+ setInterval(()=>{const el=$('gvTimer');if(!el)return;const g=cfg().giveaway;if(!g||!g.on)return;
+   const ms=Math.max(0,(+g.endsAt||0)-Date.now());el.textContent=ms<=0?'DRAWING':fmtCountdown(ms);},1000);}
 
 /* ---------- boot ---------- */
 function start(){$('auth').style.display='none';load();}

@@ -315,3 +315,19 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --   restricted 'viewer' is blocked SERVER-SIDE — inventory write and break-session insert both fail with
 --   "new row violates row-level security policy" — while admin retains full access and members are
 --   unaffected. Team writes stay admin-only RPCs; exports are client-side (act.reporting_export).
+
+-- ─────────────────────────────────────────────────────────────
+-- APPLIED (migration e10_teams_logo_url):
+-- Graphics overlay v2 — team-board-forward layout. One nullable column, no pipeline this pass:
+--   e10_teams.logo_url text — the live team board renders it as a tile logo when set, else a monogram
+--     derived from the slot label. RLS UNCHANGED (already InitPlan-wrapped: read=(select e10_is_member()),
+--     write=(select e10_is_admin())); a nullable column inherits those policies — nothing weakened.
+-- Everything else is client-only: overlay.html ?layout=graphics rebuilt into a live team tile board
+--   (one tile per session slot; bright/volt when available, dimmed when sold; "N LEFT"; logo via team_id
+--   → e10_teams.logo_url, else monogram; 6-wide, scales to 30+), format side rails + top banner from a
+--   configurable tagline (overlay_cfg.tagline, default from break_type), a LIVE pill (+ e10_session_viewers
+--   count when available), an Element-10 giveaway chip (overlay_cfg.giveaway {on,label,endsAt,entries} —
+--   started/stopped/entry-controlled from the Live panel, local countdown tick, hidden when off), a socials
+--   bar (overlay_cfg.socials), and brand chevrons framing the cam zone. The bottom ~15% is kept clear for
+--   Whatnot's native bid bar — the ON THE BLOCK spot/price bar and sold flash are suppressed on graphics
+--   (Whatnot shows spot/price/winner; the tiles show sold via dimming). The on-cam layout is untouched.
