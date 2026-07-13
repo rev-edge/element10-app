@@ -51,6 +51,13 @@ label{font-size:12px;color:var(--mut);font-weight:500;display:block;margin:0 0 4
 .sgrid{display:grid;grid-template-columns:88px repeat(7,1fr);gap:6px;min-width:820px}
 .sgrid .hd{font-family:var(--mono);font-size:11px;text-transform:uppercase;color:var(--mut);text-align:center;padding:6px 0;letter-spacing:.05em}
 .sgrid .dp{font-family:var(--mono);font-size:11px;text-transform:uppercase;color:var(--mut);display:flex;flex-direction:column;align-items:flex-end;justify-content:center;padding-right:8px;text-align:right}
+.mgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;min-width:760px}
+.mgrid .mhd{font-family:var(--mono);font-size:11px;text-transform:uppercase;color:var(--mut);text-align:center;padding:4px 0;letter-spacing:.05em}
+.mcell{background:var(--surface);border:1px solid var(--line);border-radius:8px;min-height:92px;padding:6px}
+.mcell.empty{background:transparent;border:none}
+.mcell.today{border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
+.mcell .mday{font-family:var(--mono);font-size:11px;color:var(--mut);font-weight:700;margin-bottom:4px}
+.mcell .mshow{background:var(--ink);color:#fff;border-radius:6px;padding:3px 6px;margin-bottom:3px;cursor:pointer;font-size:11px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cell{background:var(--surface);border:1px solid var(--line);border-radius:10px;min-height:70px;padding:6px}
 .cell.peak{background:#f7fce9;border-color:#e4f3bf}.cell.dover{border-color:var(--ink)}
 .show{background:var(--ink);color:#fff;border-radius:8px;padding:7px 8px;margin-bottom:5px;cursor:grab;font-size:11.5px;line-height:1.3}
@@ -240,7 +247,7 @@ function scheduleGridHTML(){
  let h=`<div style="overflow:auto"><div class="sgrid"><div></div>${DAYS.map(d=>`<div class="hd">${d}</div>`).join('')}`;
  DAYPARTS.forEach(dp=>{h+=`<div class="dp">${dp[0]}<span style="color:var(--mut2)">${dp[2]}</span></div>`;
   DAYS.forEach(day=>{const k=day+'|'+dp[0];const peak=dp[1]>=0.7?'peak':'';const arr=S.shows[k]||[];
-   h+=`<div class="cell ${peak}" ondragover="event.preventDefault()" ondragenter="this.classList.add('dover')" ondragleave="this.classList.remove('dover')" ondrop="this.classList.remove('dover');dropShow('${k}')">${arr.map((s,i)=>`<div class="show" draggable="true" ondragstart="dragShow('${k}',${i})" onclick="event.stopPropagation();editShow('${k}',${i})"><div class="nm">${esc(s.name)}</div><div class="mt">${esc(s.fmt||'')} · ${esc(s.dur||'')}m · ${esc(s.host||'')}</div>${showReadyHTML(s)}</div>`).join('')}<div class="addc" onclick="newShow('${k}')">+ add</div></div>`;});});
+   h+=`<div class="cell ${peak}" ondragover="event.preventDefault()" ondragenter="this.classList.add('dover')" ondragleave="this.classList.remove('dover')" ondrop="this.classList.remove('dover');dropShow('${k}')">${arr.map((s,i)=>`<div class="show" draggable="true" ondragstart="dragShow('${k}',${i})" onclick="event.stopPropagation();editShow('${k}',${i})"><div class="nm">${esc(s.name)}</div><div class="mt">${esc(s.fmt||'')} · ${esc(s.dur||'')}m · ${esc(s.host||'')}</div>${showReadyHTML(s)}</div>`).join('')}<div class="addc" onclick="createShowBuilder('${k}')">+ add</div></div>`;});});
  h+=`</div></div>`;return h;}
 /* Readiness dots: copy / break model / inventory allocated, + READY when all three are set. */
 function showReadyHTML(s){const c=!!s.titleSet,b=!!s.breakModel,inv=!!(s.inventoryAlloc&&s.inventoryAlloc.length);if(!c&&!b&&!inv)return '';const ready=c&&b&&inv;
@@ -267,33 +274,35 @@ function saveShow(ok,oi){if(!canEditScoped())return roGuard();
  (S.shows[k]=S.shows[k]||[]).push(s);save();closeM();rerenderSchedule();}
 /* ---------- SHOW DETAIL (the hub panel) ---------- */
 function showById(id){let res=null;Object.keys(S.shows||{}).forEach(k=>{(S.shows[k]||[]).forEach((s,i)=>{if(s.id===id)res={k,i,s};});});return res;}
-function showDetail(id){const r=showById(id);if(!r){closeM();return;}const s=r.s;const[day,dp]=r.k.split('|');
- const ro=!canEditScoped();
- const copyBox=s.titleSet?`<div class="out"><div class="row" style="justify-content:space-between"><span class="lab">${esc(s.titleSet.name)} · ${esc(s.titleSet.type)}</span>${ro?'':`<button class="btn x" onclick="showDetach('${id}','titleSet')">detach</button>`}</div><div style="margin-top:6px">${(s.titleSet.items||[]).map(it=>`<div style="font-size:12.5px;padding:2px 0"><span class="lab">${esc(it[0])}</span> ${esc(it[1])}</div>`).join('')}</div></div>`
-   :`<div class="lab">No copy attached.</div>${ro?'':`<div class="row" style="margin-top:6px"><select onchange="showPickCopy('${id}',this.value)" style="flex:2"><option value="">— attach a saved copy set —</option>${(S.copySets||[]).map(c=>`<option value="${c.id}">${esc(c.name)} · ${esc(c.type)}</option>`).join('')}</select><button class="btn sm" onclick="closeM();go('copy')">Generate ↗</button></div>`}`;
- const eco=s.breakModel&&s.breakModel.economics;
- const breakBox=s.breakModel?`<div class="out"><div class="row" style="justify-content:space-between"><span class="lab">${esc(s.breakModel.name)} · ${s.breakModel.slots} slots · ${s.breakModel.tiers} tiers</span>${ro?'':`<button class="btn x" onclick="showDetach('${id}','breakModel')">detach</button>`}</div>${eco?`<div style="font-size:12.5px;margin-top:6px">Exp. gross ${money(eco.grossAvg)} · proj. profit ${money(eco.profit)} · cost ${money(eco.cost)} · card value ${money(eco.totVal)}</div>`:''}${(s.inventoryAlloc&&s.inventoryAlloc.length)?`<div style="margin-top:6px"><span class="lab">Inventory allocation</span>${s.inventoryAlloc.map(a=>`<div style="font-size:12.5px;padding:1px 0">📦 ${esc(a.name)} · cost ${money(a.cost)} · val ${money(a.value)}</div>`).join('')}</div>`:''}${ro?'':`<div class="row" style="margin-top:8px"><button class="btn v sm" onclick="showStartLive('${id}')">▶ Start Live Break for this show</button></div>`}</div>`
-   :`<div class="lab">No break model attached.</div>${ro?'':`<div class="row" style="margin-top:6px"><select onchange="showPickBreak('${id}',this.value)" style="flex:2"><option value="">— attach a saved break model —</option>${(S.breaks||[]).map(b=>`<option value="${b.id}">${esc(b.name)} · ${b.slots} slots</option>`).join('')}</select><button class="btn sm" onclick="closeM();openModeler()">Build ↗</button></div><div class="row" style="margin-top:6px"><button class="btn sm" onclick="showStartLive('${id}')">▶ Start Live Break (no model)</button></div>`}`;
- const repackBox=s.repackRef?`<div class="out"><div class="row" style="justify-content:space-between"><span>🎁 ${esc(s.repackRef.name)}</span>${ro?'':`<button class="btn x" onclick="showDetach('${id}','repackRef')">detach</button>`}</div></div>`
-   :`<div class="lab">No repack attached.</div>${ro?'':`<div class="row" style="margin-top:6px"><select onchange="showPickRepack('${id}',this.value)" style="flex:2"><option value="">— attach a repack —</option>${(S.repacks||[]).map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select><button class="btn sm" onclick="closeM();go('repack')">Studio ↗</button></div>`}`;
- const reslist=[];S.inventory.forEach(it=>{(it.reservations||[]).forEach(x=>{if(x.showId===s.id)reslist.push({itemId:it.id,name:it.name,qty:x.qty,streamerUid:x.streamerUid});});});
- const resBox=`${reslist.length?reslist.map(o=>`<div style="font-size:12.5px;padding:2px 0">📦 ${esc(o.name)} ×${o.qty}${ro?'':((ROLE==='admin'||o.streamerUid===MEID)?` <a onclick="releaseReservation('${o.itemId}','${s.id}','${o.streamerUid}').then(()=>showDetail('${id}'))" style="color:var(--red)">release</a>`:'')}</div>`).join(''):'<div class="lab">No inventory reserved to this show.</div>'}${ro?'':`<div class="row" style="margin-top:6px;align-items:flex-start"><div style="flex:2;min-width:0">${entityPicker('srInv',{icon:'📦',placeholder:'search an available item…',search:q=>{const ql=(q||'').toLowerCase();return (S.inventory||[]).filter(i=>invAvailable(i)>0&&(i.name||'').toLowerCase().includes(ql)).slice(0,24).map(i=>({id:i.id,label:i.name,sub:[invAvailable(i)+' free',i.cat].filter(Boolean).join(' · ')}));},onpick:(iid,label)=>{window._srPick={id:iid,label};}})}</div><input id="srQty" type="number" value="1" min="1" style="width:64px"><button class="btn sm" onclick="showAddReserve('${id}')">Reserve</button></div>`}`;
- const needsBox=`${(s.needs||[]).length?s.needs.map((n,ni)=>`<div style="font-size:12.5px;padding:2px 0">🛒 ${esc(n.set||'?')} ×${n.qty}${n.approxCost?(' · ~'+money(n.approxCost)+'/ea'):''}${ro?'':` <a onclick="showDelNeed('${id}',${ni})" style="color:var(--red)">✕</a>`}</div>`).join(''):'<div class="lab">No manual needs.</div>'}${ro?'':`<div class="row" style="margin-top:6px"><div style="flex:2">${pickInput({id:'ndSet',list:'sets',value:'',placeholder:'— set —'})}</div><input id="ndQty" type="number" value="1" min="1" style="width:56px"><input id="ndCost" type="number" placeholder="$/ea" style="width:76px"><button class="btn sm" onclick="showAddNeed('${id}')">+ Need</button></div>`}`;
- $('modal').innerHTML=`<h3 style="font-size:18px">${esc(s.name||'Show')}</h3><div class="lab" style="margin-top:2px">${day} · ${dp}</div>
+/* ---- reusable show-config fragments (shared by the slim pop-out AND the full-screen builder) ---- */
+function showDetailFieldsHTML(s,id,day,dp,ro){return `
   <div class="row" style="margin-top:12px"><div style="flex:2"><label>Show name</label><input id="mname" value="${esc(s.name)}" ${ro?'disabled':''}></div></div>
   <div class="row" style="margin-top:8px"><div style="flex:1"><label>Day</label><select id="mday" ${ro?'disabled':''}>${DAYS.map(d=>`<option ${d===day?'selected':''}>${d}</option>`).join('')}</select></div>
    <div style="flex:1"><label>Daypart</label><select id="mdp" ${ro?'disabled':''}>${DAYPARTS.map(d=>`<option ${d[0]===dp?'selected':''}>${d[0]}</option>`).join('')}</select></div></div>
   <div class="row" style="margin-top:8px"><div style="flex:1"><label>Format</label>${pickInput({id:'mfmt',list:'formats',value:s.fmt||'',disabled:ro})}</div>
    <div style="flex:1"><label>Duration (min)</label><input id="mdur" type="number" value="${s.dur}" ${ro?'disabled':''}></div>
-   <div style="flex:1"><label>Streamer</label>${pickInput({id:'mhost',list:S.streamers,value:s.host||'',disabled:ro})}</div></div>
-  ${ro?'':`<div class="row" style="margin-top:10px"><button class="btn v sm" onclick="saveShowDetail('${id}')">Save details</button><button class="btn x" style="margin-left:auto" onclick="delShowById('${id}')">Delete show</button></div>`}
-  <div style="margin-top:16px"><span class="lab">Title / description copy</span>${copyBox}</div>
-  <div style="margin-top:14px"><span class="lab">Break / format model</span>${breakBox}</div>
-  <div style="margin-top:14px"><span class="lab">Repack</span>${repackBox}</div>
-  <div style="margin-top:14px"><span class="lab">Reserved inventory</span>${resBox}</div>
-  <div style="margin-top:14px"><span class="lab">Needs — feeds the buy list</span>${needsBox}</div>
-  <div style="margin-top:14px"><label>Notes</label><textarea ${ro?'disabled':''} placeholder="Prep notes for this show…" oninput="showSetNotes('${id}',this.value)">${esc(s.notes||'')}</textarea></div>
-  <div class="row" style="margin-top:16px"><button class="btn sm" onclick="closeM()">Close</button></div>`;
+   <div style="flex:1"><label>Streamer</label>${pickInput({id:'mhost',list:S.streamers,value:s.host||'',disabled:ro})}</div></div>`;}
+function showBreakBoxHTML(s,id,ro){const eco=s.breakModel&&s.breakModel.economics;
+ return s.breakModel?`<div class="out"><div class="row" style="justify-content:space-between"><span class="lab">${esc(s.breakModel.name)} · ${s.breakModel.slots} slots · ${s.breakModel.tiers} tiers</span>${ro?'':`<button class="btn x" onclick="showDetach('${id}','breakModel')">detach</button>`}</div>${eco?`<div style="font-size:12.5px;margin-top:6px">Exp. gross ${money(eco.grossAvg)} · proj. profit ${money(eco.profit)} · cost ${money(eco.cost)} · card value ${money(eco.totVal)}</div>`:''}${(s.inventoryAlloc&&s.inventoryAlloc.length)?`<div style="margin-top:6px"><span class="lab">Inventory allocation</span>${s.inventoryAlloc.map(a=>`<div style="font-size:12.5px;padding:1px 0">📦 ${esc(a.name)} · cost ${money(a.cost)} · val ${money(a.value)}</div>`).join('')}</div>`:''}${ro?'':`<div class="row" style="margin-top:8px"><button class="btn v sm" onclick="showStartLive('${id}')">▶ Start Live Break for this show</button></div>`}</div>`
+   :`<div class="lab">No break model attached.</div>${ro?'':`<div class="row" style="margin-top:6px"><select onchange="showPickBreak('${id}',this.value)" style="flex:2"><option value="">— attach a saved break model —</option>${(S.breaks||[]).map(b=>`<option value="${b.id}">${esc(b.name)} · ${b.slots} slots</option>`).join('')}</select><button class="btn sm" onclick="closeM();openModeler()">Build ↗</button></div><div class="row" style="margin-top:6px"><button class="btn sm" onclick="showStartLive('${id}')">▶ Start Live Break (no model)</button></div>`}`;}
+function showResBoxHTML(s,id,ro){const reslist=[];S.inventory.forEach(it=>{(it.reservations||[]).forEach(x=>{if(x.showId===s.id)reslist.push({itemId:it.id,name:it.name,qty:x.qty,streamerUid:x.streamerUid});});});
+ return `${reslist.length?reslist.map(o=>`<div style="font-size:12.5px;padding:2px 0">📦 ${esc(o.name)} ×${o.qty}${ro?'':((ROLE==='admin'||o.streamerUid===MEID)?` <a onclick="releaseReservation('${o.itemId}','${s.id}','${o.streamerUid}').then(()=>showRerender('${id}'))" style="color:var(--red)">release</a>`:'')}</div>`).join(''):'<div class="lab">No inventory reserved to this show.</div>'}${ro?'':`<div class="row" style="margin-top:6px;align-items:flex-start"><div style="flex:2;min-width:0">${entityPicker('srInv',{icon:'📦',placeholder:'search an available item…',search:q=>{const ql=(q||'').toLowerCase();return (S.inventory||[]).filter(i=>invAvailable(i)>0&&(i.name||'').toLowerCase().includes(ql)).slice(0,24).map(i=>({id:i.id,label:i.name,sub:[invAvailable(i)+' free',i.cat].filter(Boolean).join(' · ')}));},onpick:(iid,label)=>{window._srPick={id:iid,label};}})}</div><input id="srQty" type="number" value="1" min="1" style="width:64px"><button class="btn sm" onclick="showAddReserve('${id}')">Reserve</button></div>`}`;}
+function showCopyBoxHTML(s,id,ro){return s.titleSet?`<div class="out"><div class="row" style="justify-content:space-between"><span class="lab">${esc(s.titleSet.name)} · ${esc(s.titleSet.type)}</span>${ro?'':`<button class="btn x" onclick="showDetach('${id}','titleSet')">detach</button>`}</div><div style="margin-top:6px">${(s.titleSet.items||[]).map(it=>`<div style="font-size:12.5px;padding:2px 0"><span class="lab">${esc(it[0])}</span> ${esc(it[1])}</div>`).join('')}</div></div>`
+   :`<div class="lab">No copy attached.</div>${ro?'':`<div class="row" style="margin-top:6px"><select onchange="showPickCopy('${id}',this.value)" style="flex:2"><option value="">— attach a saved copy set —</option>${(S.copySets||[]).map(c=>`<option value="${c.id}">${esc(c.name)} · ${esc(c.type)}</option>`).join('')}</select><button class="btn sm" onclick="go('copy')">Generate ↗</button></div>`}`;}
+function showRepackBoxHTML(s,id,ro){return s.repackRef?`<div class="out"><div class="row" style="justify-content:space-between"><span>🎁 ${esc(s.repackRef.name)}</span>${ro?'':`<button class="btn x" onclick="showDetach('${id}','repackRef')">detach</button>`}</div></div>`
+   :`<div class="lab">No repack attached.</div>${ro?'':`<div class="row" style="margin-top:6px"><select onchange="showPickRepack('${id}',this.value)" style="flex:2"><option value="">— attach a repack —</option>${(S.repacks||[]).map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select><button class="btn sm" onclick="go('repack')">Studio ↗</button></div>`}`;}
+function showNeedsBoxHTML(s,id,ro){return `${(s.needs||[]).length?s.needs.map((n,ni)=>`<div style="font-size:12.5px;padding:2px 0">🛒 ${esc(n.set||'?')} ×${n.qty}${n.approxCost?(' · ~'+money(n.approxCost)+'/ea'):''}${ro?'':` <a onclick="showDelNeed('${id}',${ni})" style="color:var(--red)">✕</a>`}</div>`).join(''):'<div class="lab">No manual needs.</div>'}${ro?'':`<div class="row" style="margin-top:6px"><div style="flex:2">${pickInput({id:'ndSet',list:'sets',value:'',placeholder:'— set —'})}</div><input id="ndQty" type="number" value="1" min="1" style="width:56px"><input id="ndCost" type="number" placeholder="$/ea" style="width:76px"><button class="btn sm" onclick="showAddNeed('${id}')">+ Need</button></div>`}`;}
+/* re-render whichever surface is showing this show (builder view, pop-out modal, or the grid) */
+function showRerender(id){if(BUILDER&&BUILDER.id===id){renderShowBuilder(id);}else if($('ov')&&$('ov').style.display==='flex'){showDetail(id);}else{rerenderSchedule();}}
+/* SLIM pop-out — quick edit / go-live only: header fields + break model + reserved inventory. */
+function showDetail(id){const r=showById(id);if(!r){closeM();return;}const s=r.s;const[day,dp]=r.k.split('|');const ro=!canEditScoped();
+ $('modal').innerHTML=`<h3 style="font-size:18px">${esc(s.name||'Show')}</h3><div class="lab" style="margin-top:2px">${day} · ${dp}</div>
+  ${showDetailFieldsHTML(s,id,day,dp,ro)}
+  ${ro?'':`<div class="row" style="margin-top:10px;flex-wrap:wrap;gap:6px"><button class="btn v sm" onclick="saveShowDetail('${id}')">Save</button><button class="btn sm" onclick="configureShow('${id}')">⚙ Configure ↗</button><button class="btn x" style="margin-left:auto" onclick="delShowById('${id}')">Delete</button></div>`}
+  <div style="margin-top:16px"><span class="lab">Break / format model</span>${showBreakBoxHTML(s,id,ro)}</div>
+  <div style="margin-top:14px"><span class="lab">Reserved inventory</span>${showResBoxHTML(s,id,ro)}</div>
+  <div class="lab" style="text-transform:none;letter-spacing:0;margin-top:14px">Copy, repacks, needs &amp; notes live in <a onclick="configureShow('${id}')">⚙ Configure</a> (full builder).</div>
+  <div class="row" style="margin-top:14px"><button class="btn sm" onclick="closeM()">Close</button></div>`;
  $('ov').style.display='flex';}
 function saveShowDetail(id){if(!canEditScoped())return roGuard();const r=showById(id);if(!r)return;const s=r.s;
  s.name=$('mname').value.trim()||'Untitled show';s.fmt=$('mfmt').value;s.dur=+$('mdur').value||60;s.host=$('mhost').value;
@@ -301,8 +310,8 @@ function saveShowDetail(id){if(!canEditScoped())return roGuard();const r=showByI
  if(nk!==r.k){S.shows[r.k].splice(r.i,1);if(!S.shows[r.k].length)delete S.shows[r.k];(S.shows[nk]=S.shows[nk]||[]).push(s);}
  save();closeM();rerenderSchedule();toast('Show saved');}
 function delShowById(id){if(!canEditScoped())return roGuard();const r=showById(id);if(!r)return;S.shows[r.k].splice(r.i,1);if(!S.shows[r.k].length)delete S.shows[r.k];save();closeM();rerenderSchedule();}
-function showPickCopy(id,setId){if(!setId)return;if(!canEditScoped())return roGuard();const cs=(S.copySets||[]).find(x=>x.id===setId);const r=showById(id);if(!cs||!r)return;r.s.titleSet=JSON.parse(JSON.stringify(cs));r.s.titleSetId=cs.id;save();showDetail(id);toast('Copy attached');}
-async function showPickBreak(id,bid){if(!bid)return;if(!canEditScoped())return roGuard();const b=(S.breaks||[]).find(x=>x.id===bid);const r=showById(id);if(!b||!r)return;r.s.breakModel=JSON.parse(JSON.stringify(b));r.s.breakModelId=b.id;r.s.inventoryAlloc=(b.invItems||[]).map(x=>({itemId:x.itemId,name:x.name,qty:x.qty,cost:x.cost,value:x.value,set:x.set}));save();const res=await reserveModelToShow(r.s,b);showDetail(id);toast((res&&res.msg)||'Break model attached');}
+function showPickCopy(id,setId){if(!setId)return;if(!canEditScoped())return roGuard();const cs=(S.copySets||[]).find(x=>x.id===setId);const r=showById(id);if(!cs||!r)return;r.s.titleSet=JSON.parse(JSON.stringify(cs));r.s.titleSetId=cs.id;save();showRerender(id);toast('Copy attached');}
+async function showPickBreak(id,bid){if(!bid)return;if(!canEditScoped())return roGuard();const b=(S.breaks||[]).find(x=>x.id===bid);const r=showById(id);if(!b||!r)return;r.s.breakModel=JSON.parse(JSON.stringify(b));r.s.breakModelId=b.id;r.s.inventoryAlloc=(b.invItems||[]).map(x=>({itemId:x.itemId,name:x.name,qty:x.qty,cost:x.cost,value:x.value,set:x.set}));save();const res=await reserveModelToShow(r.s,b);showRerender(id);toast((res&&res.msg)||'Break model attached');}
 /* Attaching a model to a show converts its inventory pulls into hard reservations (and detach releases them). */
 async function reserveModelToShow(show,model){
  if(!model||!Array.isArray(model.invItems)||!model.invItems.length)return{ok:true,msg:'Break model attached'};
@@ -322,16 +331,16 @@ async function releaseShowReservations(show,model){const showId=show.id,ids=(mod
    it.reservations=it.reservations.filter(rz=>{const match=rz.showId===showId&&(!ids||ids.includes(it.id));if(!match)return true;return !(admin||rz.streamerUid===MEID);});});
   return{ok:true,msg:'Released reservations'};});
 }
-function showPickRepack(id,rid){if(!rid)return;if(!canEditScoped())return roGuard();const p=(S.repacks||[]).find(x=>x.id===rid);const r=showById(id);if(!p||!r)return;r.s.repackRef={id:p.id,name:p.name};save();showDetail(id);}
+function showPickRepack(id,rid){if(!rid)return;if(!canEditScoped())return roGuard();const p=(S.repacks||[]).find(x=>x.id===rid);const r=showById(id);if(!p||!r)return;r.s.repackRef={id:p.id,name:p.name};save();showRerender(id);}
 async function showDetach(id,field){if(!canEditScoped())return roGuard();const r=showById(id);if(!r)return;
- if(field==='titleSet'){r.s.titleSet=null;r.s.titleSetId=null;save();showDetail(id);return;}
- if(field==='breakModel'){const m=r.s.breakModel;r.s.breakModel=null;r.s.breakModelId=null;r.s.inventoryAlloc=[];save();if(m)await releaseShowReservations(r.s,m);showDetail(id);toast('Detached · reservations released');return;}
- if(field==='repackRef'){r.s.repackRef=null;save();showDetail(id);return;}}
+ if(field==='titleSet'){r.s.titleSet=null;r.s.titleSetId=null;save();showRerender(id);return;}
+ if(field==='breakModel'){const m=r.s.breakModel;r.s.breakModel=null;r.s.breakModelId=null;r.s.inventoryAlloc=[];save();if(m)await releaseShowReservations(r.s,m);showRerender(id);toast('Detached · reservations released');return;}
+ if(field==='repackRef'){r.s.repackRef=null;save();showRerender(id);return;}}
 function showSetNotes(id,v){const r=showById(id);if(r){r.s.notes=v;save();}}
-async function showAddReserve(id){const r=showById(id);if(!r)return;const p=window._srPick;if(!p||!p.id){toast('Search and pick an item first');return;}const qty=$('srQty')?+$('srQty').value:1;const res=await reserveUnits(p.id,r.k+'|||'+r.i,qty);window._srPick=null;if(res&&res.ok)showDetail(id);}
-function showAddNeed(id){if(!canEditScoped())return roGuard();const r=showById(id);if(!r)return;const set=$('ndSet')?$('ndSet').value:'';if(!set){toast('Pick a set');return;}const qty=Math.max(1,$('ndQty')?+$('ndQty').value:1);const cost=$('ndCost')?+$('ndCost').value:0;(r.s.needs=r.s.needs||[]).push({id:'nd'+Date.now(),set,qty,approxCost:cost||0});save();showDetail(id);toast('Need added');}
-function showDelNeed(id,ni){if(!canEditScoped())return roGuard();const r=showById(id);if(!r||!r.s.needs)return;r.s.needs.splice(ni,1);save();showDetail(id);}
-function showStartLive(id){const r=showById(id);if(!r)return;LIVE_SEED={show:r.s.name,model:r.s.breakModel||null};closeM();go('live');}
+async function showAddReserve(id){const r=showById(id);if(!r)return;const p=window._srPick;if(!p||!p.id){toast('Search and pick an item first');return;}const qty=$('srQty')?+$('srQty').value:1;const res=await reserveUnits(p.id,r.k+'|||'+r.i,qty);window._srPick=null;if(res&&res.ok)showRerender(id);}
+function showAddNeed(id){if(!canEditScoped())return roGuard();const r=showById(id);if(!r)return;const set=$('ndSet')?$('ndSet').value:'';if(!set){toast('Pick a set');return;}const qty=Math.max(1,$('ndQty')?+$('ndQty').value:1);const cost=$('ndCost')?+$('ndCost').value:0;(r.s.needs=r.s.needs||[]).push({id:'nd'+Date.now(),set,qty,approxCost:cost||0});save();showRerender(id);toast('Need added');}
+function showDelNeed(id,ni){if(!canEditScoped())return roGuard();const r=showById(id);if(!r||!r.s.needs)return;r.s.needs.splice(ni,1);save();showRerender(id);}
+function showStartLive(id){const r=showById(id);if(!r)return;BUILDER=null;LIVE_SEED={show:r.s.name,model:r.s.breakModel||null};closeM();go('live');}
 function delShow(k,i){if(!canEditScoped())return roGuard();S.shows[k].splice(i,1);if(!S.shows[k].length)delete S.shows[k];save();closeM();rerenderSchedule();}
 function closeM(){$('ov').style.display='none';}
 
@@ -392,9 +401,56 @@ function scheduleRollupHTML(){
    <div style="text-align:right;min-width:0"><span class="lab">Streamer load</span><div style="margin-top:4px">${pills||'<span class="lab">no shows</span>'}</div></div>
  </div></div>`;
 }
+let schedView=(function(){try{return localStorage.getItem('e10_schedView')||'week';}catch(e){return 'week';}})();
+let schedDay=DAYS[0],schedMonthOffset=0,BUILDER=null;
+function setSchedView(v){schedView=v;try{localStorage.setItem('e10_schedView',v);}catch(e){}renderSchedule();}
+function schedDayStep(d){const i=(DAYS.indexOf(schedDay)+d+DAYS.length)%DAYS.length;schedDay=DAYS[i];renderSchedule();}
 function renderSchedule(){
- $('sec-schedule').innerHTML=`<div class="hero"><div><h1>Schedule</h1></div><div class="row" style="gap:6px">${ROLE==='admin'?`<button class="btn sm" onclick="copyWeekToUniversal()" title="Publish this week to the team baseline everyone sees">Copy week → Universal</button>`:''}<button class="btn v" onclick="newShow()">+ New show</button></div></div>${scheduleRollupHTML()}${scheduleGridHTML()}`;
+ if(BUILDER){const r=showById(BUILDER.id);if(r){renderShowBuilder(BUILDER.id);return;}BUILDER=null;}
+ const views=[['day','Day'],['week','Week'],['month','Month']];
+ const toggle=`<div class="row" style="gap:4px;margin-right:8px">${views.map(v=>`<button class="tab ${schedView===v[0]?'on':''}" onclick="setSchedView('${v[0]}')">${v[1]}</button>`).join('')}</div>`;
+ const body=schedView==='day'?dayViewHTML():(schedView==='month'?monthViewHTML():scheduleGridHTML());
+ const subnav=schedView==='day'?dayNavHTML():(schedView==='month'?monthNavHTML():'');
+ $('sec-schedule').innerHTML=`<div class="hero"><div><h1>Schedule</h1></div><div class="row" style="gap:6px;align-items:center;flex-wrap:wrap">${toggle}${ROLE==='admin'?`<button class="btn sm" onclick="copyWeekToUniversal()" title="Publish this week to the team baseline everyone sees">Copy week → Universal</button>`:''}<button class="btn v" onclick="createShowBuilder()">+ Create show</button></div></div>${scheduleRollupHTML()}${subnav}${body}`;
 }
+function dayNavHTML(){return `<div class="row" style="gap:6px;margin-bottom:12px;align-items:center;flex-wrap:wrap"><button class="btn sm" onclick="schedDayStep(-1)">‹</button><div class="row" style="gap:4px">${DAYS.map(d=>`<button class="tab ${d===schedDay?'on':''}" onclick="schedDay='${d}';renderSchedule()">${d}</button>`).join('')}</div><button class="btn sm" onclick="schedDayStep(1)">›</button></div>`;}
+function dayViewHTML(){const day=schedDay;let h=`<div class="card">`;
+ DAYPARTS.forEach(dp=>{const k=day+'|'+dp[0];const arr=S.shows[k]||[];
+  h+=`<div style="padding:12px 0;border-bottom:1px solid var(--line)"><div class="row" style="justify-content:space-between;align-items:center"><b style="font-size:15px">${dp[0]} <span class="lab" style="text-transform:none;letter-spacing:0">${dp[2]}</span></b>${canEditScoped()?`<button class="btn x sm" onclick="createShowBuilder('${k}')">+ add</button>`:''}</div>
+   ${arr.length?arr.map((s,i)=>`<div class="out" style="margin-top:8px;cursor:pointer" onclick="editShow('${k}',${i})"><div class="row" style="justify-content:space-between;align-items:center"><b>${esc(s.name)}</b>${showReadyHTML(s)}</div><div class="lab" style="text-transform:none;letter-spacing:0;margin-top:2px">${esc(s.fmt||'')} · ${esc(s.dur||'')}m · ${esc(s.host||'')}</div></div>`).join(''):'<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:6px">No shows.</div>'}</div>`;});
+ return h+`</div>`;}
+function monthBase(){const b=new Date();b.setDate(1);b.setMonth(b.getMonth()+schedMonthOffset);return b;}
+function monthNavHTML(){const b=monthBase();return `<div class="row" style="gap:6px;margin-bottom:12px;align-items:center"><button class="btn sm" onclick="schedMonthOffset--;renderSchedule()">‹</button><b style="min-width:170px;text-align:center">${b.toLocaleString('default',{month:'long'})} ${b.getFullYear()}</b><button class="btn sm" onclick="schedMonthOffset++;renderSchedule()">›</button>${schedMonthOffset?`<button class="btn x sm" onclick="schedMonthOffset=0;renderSchedule()">This month</button>`:''}</div>`;}
+function monthViewHTML(){const b=monthBase();const year=b.getFullYear(),month=b.getMonth();
+ const startDow=(new Date(year,month,1).getDay()+6)%7,dim=new Date(year,month+1,0).getDate();
+ const cells=[];for(let i=0;i<startDow;i++)cells.push(null);for(let d=1;d<=dim;d++)cells.push(d);while(cells.length%7)cells.push(null);
+ const today=new Date(),thisMonth=(today.getFullYear()===year&&today.getMonth()===month);
+ let h=`<div class="card"><div style="overflow:auto"><div class="mgrid">${DAYS.map(d=>`<div class="mhd">${d}</div>`).join('')}`;
+ cells.forEach(d=>{if(d==null){h+=`<div class="mcell empty"></div>`;return;}
+   const dow=DAYS[(new Date(year,month,d).getDay()+6)%7],shows=[];
+   DAYPARTS.forEach(dp=>{const k=dow+'|'+dp[0];(S.shows[k]||[]).forEach((s,i)=>shows.push({s,k,i}));});
+   h+=`<div class="mcell${thisMonth&&today.getDate()===d?' today':''}"><div class="mday">${d}</div>${shows.slice(0,3).map(x=>`<div class="mshow" title="${esc(x.s.name)} · ${esc(x.s.fmt||'')}" onclick="editShow('${x.k}',${x.i})">${esc(x.s.name)}</div>`).join('')}${shows.length>3?`<div class="lab" style="text-transform:none;letter-spacing:0;font-size:11px">+${shows.length-3} more</div>`:''}</div>`;});
+ return h+`</div></div><div class="lab" style="text-transform:none;letter-spacing:0;margin-top:10px">Weekly shows projected onto ${b.toLocaleString('default',{month:'long'})} — each weekday repeats its scheduled shows.</div></div>`;}
+/* ---- full-screen show builder (create + full configuration; reuses every module's editor) ---- */
+function createShowBuilder(k){if(!canEditScoped())return roGuard();k=k||(schedDay+'|Evening');
+ const s={id:'sh'+Date.now(),name:'New show',fmt:(L('formats')[0]||''),dur:90,host:S.streamers[0]||'',notes:'',titleSet:null,titleSetId:null,breakModel:null,breakModelId:null,inventoryAlloc:[],repackRef:null,needs:[],products:[]};
+ (S.shows[k]=S.shows[k]||[]).push(s);save();openShowBuilder(s.id);}
+function configureShow(id){openShowBuilder(id);}
+function openShowBuilder(id){closeM();if(!$('sec-schedule').classList.contains('on'))go('schedule');renderShowBuilder(id);}
+function closeBuilder(){BUILDER=null;renderSchedule();}
+function renderShowBuilder(id){const r=showById(id);if(!r){BUILDER=null;renderSchedule();return;}const s=r.s;const[day,dp]=r.k.split('|');const ro=!canEditScoped();
+ BUILDER={id};if(!Array.isArray(s.products))s.products=[];
+ const cost=breakCost(s.products);
+ $('sec-schedule').innerHTML=`<div class="hero"><div><h1>Show builder</h1><div class="sub">${esc(s.name||'Untitled')} · ${day} ${dp}${cost>0?(' · break cost '+money(cost)):''}</div></div><button class="btn" onclick="closeBuilder()">← Back to schedule</button></div>
+   <div class="card" style="margin-bottom:14px"><h3 style="font-size:15px">Show details</h3>${showDetailFieldsHTML(s,id,day,dp,ro)}${ro?'':`<div class="row" style="margin-top:10px"><button class="btn v sm" onclick="saveShowDetail('${id}')">Save details</button><button class="btn x" style="margin-left:auto" onclick="delShowById('${id}')">Delete show</button></div>`}</div>
+   <div class="card" style="margin-bottom:14px"><h3 style="font-size:15px">Break / format</h3><div style="margin-top:8px">${showBreakBoxHTML(s,id,ro)}</div></div>
+   <div class="card" style="margin-bottom:14px"><div id="prodBox">${productEditorHTML()}</div></div>
+   <div class="card" style="margin-bottom:14px"><h3 style="font-size:15px">Reserved inventory</h3><div style="margin-top:8px">${showResBoxHTML(s,id,ro)}</div></div>
+   <div class="card" style="margin-bottom:14px"><h3 style="font-size:15px">Title / description copy</h3><div style="margin-top:8px">${showCopyBoxHTML(s,id,ro)}</div></div>
+   <div class="card" style="margin-bottom:14px"><h3 style="font-size:15px">Repack</h3><div style="margin-top:8px">${showRepackBoxHTML(s,id,ro)}</div></div>
+   <div class="card" style="margin-bottom:14px"><h3 style="font-size:15px">Needs — feeds the buy list</h3><div style="margin-top:8px">${showNeedsBoxHTML(s,id,ro)}</div></div>
+   <div class="card" style="margin-bottom:24px"><label>Notes</label><textarea ${ro?'disabled':''} placeholder="Prep notes for this show…" oninput="showSetNotes('${id}',this.value)">${esc(s.notes||'')}</textarea></div>`;
+ window.scrollTo(0,0);}
 
 /* ---------- SHOW HUB — cross-module attach helpers ---------- */
 let CS_LAST=null;      // last generated copy set in Copy Studio {type,items}
@@ -2116,7 +2172,9 @@ function itemPerBoxCost(it){return (it&&+it.perBoxCost>0)?+it.perBoxCost:(+((it&
 function sliceToBoxes(slice,n,bpc){bpc=Math.max(1,+bpc||1);if(slice==='case')return bpc;if(slice==='half')return Math.max(1,Math.round(bpc/2));return Math.max(1,+n||1);}
 function breakCost(prods){return (prods||[]).reduce((s,p)=>s+(+p.boxes||0)*(+p.perBoxCost||0),0);}
 /* the products array being edited — REVIEW.products before go-live, LIVE.session.products mid-show */
-function prodArr(){if(LIVE.session){if(!Array.isArray(LIVE.session.products))LIVE.session.products=[];return LIVE.session.products;}if(REVIEW){if(!Array.isArray(REVIEW.products))REVIEW.products=[];return REVIEW.products;}return [];}
+function prodArr(){if(LIVE.session){if(!Array.isArray(LIVE.session.products))LIVE.session.products=[];return LIVE.session.products;}
+ if(BUILDER){const r=showById(BUILDER.id);if(r){if(!Array.isArray(r.s.products))r.s.products=[];return r.s.products;}}
+ if(REVIEW){if(!Array.isArray(REVIEW.products))REVIEW.products=[];return REVIEW.products;}return [];}
 /* AUTOMATIC decrement/return — idempotent: reconcile inventory to the product's desired box count.
    consumed tracks how many boxes THIS break has already taken, so we only ever apply the delta. */
 async function breakConsume(p){const delta=(+p.boxes||0)-(+p.consumed||0);if(delta===0)return true;let applied=0;
@@ -2130,7 +2188,7 @@ async function breakConsume(p){const delta=(+p.boxes||0)-(+p.consumed||0);if(del
  return true;}
 async function prodPersist(){if(!LIVE.session)return;LIVE.session.cost=breakCost(LIVE.session.products);
  try{await sb.from('e10_break_sessions').update({products:LIVE.session.products,cost:LIVE.session.cost}).eq('id',LIVE.session.id);}catch(e){toast(e.message);}}
-function afterProdChange(){if(LIVE.session)renderLive();else renderProductsUI();}
+function afterProdChange(){if(LIVE.session)renderLive();else if(BUILDER){save();renderProductsUI();}else renderProductsUI();}
 async function prodAdd(itemId){const it=(S.inventory||[]).find(x=>x.id===itemId);if(!it){toast('Item not found');return;}
  const arr=prodArr();if(arr.some(p=>p.itemId===itemId)){toast('Already included');return;}
  const bpc=itemBoxesPerCase(it),pbc=itemPerBoxCost(it),slice=(bpc>1?'case':'boxes'),boxes=sliceToBoxes(slice,1,bpc);
@@ -2170,6 +2228,7 @@ function partRemove(i){if(!REVIEW)return;(REVIEW.participants||[]).splice(i,1);r
 let REVIEW=null;
 function liveStartFromFormat(modelId){const model=(S.breaks||[]).find(b=>b.id===modelId);if(!model){toast('Model not found');return;}
  if(!canEditScoped())return roGuard();
+ BUILDER=null;
  if(LIVE.session){go('live');toast('End the current live session first');return;}
  const rs=(model.ruleSlots||[]);if(!rs.length){toast('This model has no formatted spots — build slots in the planner first.');return;}
  /* load the format into BK so the slot builder is editable in the review */
