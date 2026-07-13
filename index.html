@@ -1301,8 +1301,10 @@ function dInventory(){const admin=ROLE==='admin';const rl=invRollup();const sets
    <div><label>Name</label><input id="ivN" placeholder="e.g. Ascended Heroes Box"></div>
    <div><label>Category</label>${pickInput({id:'ivC',list:'invcats',value:'',placeholder:'category'})}</div>
    <div style="min-width:150px"><label>Set / product</label>${entityPicker('ivSet',{icon:'🗂',placeholder:'search sets…',minChars:2,server:true,freeText:true,value:ivSetLink,search:dbSetSearch,onpick:(sid,label)=>{ivSetLink={id:sid,label};},onclear:()=>{ivSetLink=null;}})}</div>
-   <div><label>Qty</label><input id="ivQ" type="number" value="1"></div>
+   <div><label>Qty (boxes on hand)</label><input id="ivQ" type="number" value="1"></div>
    <div><label>Unit cost $</label><input id="ivCo" type="number" placeholder="0"></div>
+   <div><label>Boxes / case</label><input id="ivBPC" type="number" min="1" value="1" title="For sealed product bought by the case — boxes per case. Leave 1 for singles/slabs."></div>
+   <div><label>Per-box cost $</label><input id="ivPBC" type="number" placeholder="= unit cost" title="Cost of one box (defaults to unit cost)."></div>
    <div><label>Market $</label><input id="ivV" type="number" placeholder="0"></div>
    <div><label>Grading co.</label>${pickInput({id:'ivGC',list:'grading',value:'',placeholder:'raw/sealed'})}</div>
    <div><label>Grade</label><input id="ivGrade" placeholder="10 / 9.5"></div>
@@ -1357,7 +1359,8 @@ function buyListHTML(){
 function addInv(){const n=$('ivN').value.trim();if(!n)return;const owner=($('ivOwner')&&$('ivOwner').value!=='')?$('ivOwner').value:(ROLE==='admin'&&$('ivOwner')?null:ME);
  const gv=id=>{const el=$(id);return el?el.value.trim():'';};
  const L2=ivLinked||{};const SL=ivSetLink||{};
- S.inventory.push({id:'i'+Date.now(),name:n,cat:gv('ivC'),set:(SL.label||''),setId:(SL.id||null),qty:+$('ivQ').value||1,cost:+$('ivCo').value||0,value:+$('ivV').value||0,gradingCompany:gv('ivGC'),grade:gv('ivGrade'),cardNumber:gv('ivNum'),year:gv('ivYear'),cond:gv('ivG'),img:$('ivImg').value,owner,
+ const unitCost=+$('ivCo').value||0,bpc=Math.max(1,+($('ivBPC')&&$('ivBPC').value)||1),pbc=($('ivPBC')&&$('ivPBC').value!=='')?(+$('ivPBC').value||0):unitCost;
+ S.inventory.push({id:'i'+Date.now(),name:n,cat:gv('ivC'),set:(SL.label||''),setId:(SL.id||null),qty:+$('ivQ').value||1,cost:unitCost,value:+$('ivV').value||0,boxesPerCase:bpc,perBoxCost:pbc,gradingCompany:gv('ivGC'),grade:gv('ivGrade'),cardNumber:gv('ivNum'),year:gv('ivYear'),cond:gv('ivG'),img:$('ivImg').value,owner,
    cardId:L2.cardId||null,playerId:L2.playerId||null,parallel:L2.parallel||'',rarity:L2.rarity||''});
  ivLinked=null;ivSetLink=null;save();dInventory();toast('Added'+(L2.cardId?' · linked to card':''));}
 function delInv(id){S.inventory=S.inventory.filter(x=>x.id!==id);save();dInventory();}
@@ -1712,6 +1715,10 @@ function blankShared(){return{comments:[],todos:[],streamers:['Trent'],lists:JSO
 function blankScoped(){return{shows:{},breaks:[],copySets:[],dashCfg:{catValue:true,costMarket:true,movement:true},sales:null};}
 function normShared(o){o=o||{};if(!o.comments)o.comments=[];if(!o.todos)o.todos=[];o.todos.forEach(t=>{if(t.desc==null)t.desc='';if(!t.comments)t.comments=[];});if(!o.streamers)o.streamers=['Trent'];if(!o.lists)o.lists=JSON.parse(JSON.stringify(DEF_LISTS));['characters','sets','formats','diff','invcats','grading','conditions'].forEach(k=>{if(!o.lists[k])o.lists[k]=(DEF_LISTS[k]||[]).slice();});['attachments','checklists','inventory','repacks'].forEach(k=>{if(!o[k])o[k]=[];});o.inventory.forEach(it=>{if(!it.id)it.id='i'+Math.random().toString(36).slice(2);if(!('owner'in it))it.owner=null;if(!(+it.qty>=0))it.qty=(+it.qty||1);if(!Array.isArray(it.reservations))it.reservations=[];it.reservations.forEach(r=>{r.qty=+r.qty||0;});if(!it.addedAt)it.addedAt=Date.now();
   if(!('cardId'in it))it.cardId=null;if(!('playerId'in it))it.playerId=null;if(!('parallel'in it))it.parallel='';/* links to e10_cards / e10_players when added from the library */
+  /* box/case model (v2): wax tracks stock in boxes; boxesPerCase for case-bought product; perBoxCost
+     per box. Backward compatible — default boxesPerCase=1 and derive perBoxCost from unit cost. */
+  if(!(+it.boxesPerCase>=1))it.boxesPerCase=Math.max(1,+it.boxesPerCase||1);
+  if(it.perBoxCost==null||it.perBoxCost==='')it.perBoxCost=(+it.cost||0);
   /* structured grade fields — backfill once, losslessly, from the free-text cond */
   if(!('gradingCompany'in it)){it.gradingCompany='';it.grade=('grade'in it)?it.grade:'';const g=parseGrade(it.cond);if(g){it.gradingCompany=g.gradingCompany;it.grade=g.grade;it.cond='';}}
   if(!('grade'in it))it.grade='';if(!('cardNumber'in it))it.cardNumber='';if(!('year'in it))it.year='';});o.repacks.forEach(p=>{if(!p.cards)p.cards=[];if(!p.pool)p.pool=[];});o.checklists.forEach(clNormalize);return o;}
@@ -1847,6 +1854,7 @@ async function boot(){if(!window.supabase){authScreen('Auth library failed to lo
 let LIVE={session:null,slots:[],chan:null,chases:[]};
 async function renderLive(){
  if(!sb){$('sec-live').innerHTML='<div class="card">Connecting…</div>';return;}
+ if(REVIEW&&!LIVE.session){$('sec-live').innerHTML=liveReviewHTML();renderSlotBuilder();bkEvalSlots();return;}
  if(!LIVE.session)await liveLoadActive();
  $('sec-live').innerHTML=LIVE.session?liveActiveHTML():liveStartHTML();
 }
@@ -1964,6 +1972,7 @@ function liveActiveHTML(){const s=LIVE.session;const dir=liveDirUrl();const over
    <button class="btn sm ${s.case_hit_open?'d':''}" onclick="liveToggleCaseOpen()">Case placard: <b>${s.case_hit_open?'UP':'off'}</b></button>
    <a class="btn sm" onclick="go('fulfill')">📦 Ship list</a></div>
    <div class="lab" style="text-transform:none;letter-spacing:0;margin-top:6px;font-size:12px">Stash / Trade / Case placards pop up on the on-cam overlay when live. <b>Flash</b> = momentary case-hit banner; <b>Case placard</b> stays up while the box is in play. Set the current spot with <b>● Now</b> below.</div></div>
+ <div class="card" style="margin-bottom:12px"><div id="prodBox">${productEditorHTML()}</div></div>
  ${liveChasesHTML()}
  <div class="card">
    <div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="font-size:15px">Worklist — ${open.length} open · ${sold.length} sold</h3></div>
@@ -2046,28 +2055,110 @@ async function liveReopen(id){const sl=LIVE.slots.find(x=>x.id===id);if(!sl)retu
  try{const{error}=await sb.from('e10_break_slots').update({state:'available',sold_at:null,updated_at:new Date().toISOString()}).eq('id',id);if(error)throw error;}catch(e){toast(e.message);return;}
  sl.state='available';sl.sold_at=null;await liveEvent('spot_reopened',id,{label:sl.label});renderLive();toast('Reopened '+(sl.label||'spot'));
 }
-async function liveStartFromFormat(modelId){const model=(S.breaks||[]).find(b=>b.id===modelId);if(!model){toast('Model not found');return;}
+/* ===== Box/case model + break-cost engine (Phase A) ===== */
+function itemBoxesPerCase(it){return Math.max(1,+(it&&it.boxesPerCase)||1);}
+function itemPerBoxCost(it){return (it&&+it.perBoxCost>0)?+it.perBoxCost:(+((it&&it.cost))||0);}
+function sliceToBoxes(slice,n,bpc){bpc=Math.max(1,+bpc||1);if(slice==='case')return bpc;if(slice==='half')return Math.max(1,Math.round(bpc/2));return Math.max(1,+n||1);}
+function breakCost(prods){return (prods||[]).reduce((s,p)=>s+(+p.boxes||0)*(+p.perBoxCost||0),0);}
+/* the products array being edited — REVIEW.products before go-live, LIVE.session.products mid-show */
+function prodArr(){if(LIVE.session){if(!Array.isArray(LIVE.session.products))LIVE.session.products=[];return LIVE.session.products;}if(REVIEW){if(!Array.isArray(REVIEW.products))REVIEW.products=[];return REVIEW.products;}return [];}
+/* AUTOMATIC decrement/return — idempotent: reconcile inventory to the product's desired box count.
+   consumed tracks how many boxes THIS break has already taken, so we only ever apply the delta. */
+async function breakConsume(p){const delta=(+p.boxes||0)-(+p.consumed||0);if(delta===0)return true;let applied=0;
+ const res=await cloudCommitShared(base=>{const it=base.inventory.find(x=>x.id===p.itemId);if(!it)return{ok:false,msg:'Item not in inventory'};
+   if(delta>0){const take=Math.min(delta,Math.max(0,+it.qty||0));it.qty=(+it.qty||0)-take;applied=take;}
+   else{it.qty=(+it.qty||0)+(-delta);applied=delta;}
+   return{ok:true,msg:''};});
+ if(!res||!res.ok){toast((res&&res.msg)||'Inventory update failed');return false;}
+ p.consumed=(+p.consumed||0)+applied;p.boxes=p.consumed;
+ if(applied<delta)toast('Only '+applied+' box'+(applied===1?'':'es')+' of '+p.name+' were in stock');
+ return true;}
+async function prodPersist(){if(!LIVE.session)return;LIVE.session.cost=breakCost(LIVE.session.products);
+ try{await sb.from('e10_break_sessions').update({products:LIVE.session.products,cost:LIVE.session.cost}).eq('id',LIVE.session.id);}catch(e){toast(e.message);}}
+function afterProdChange(){if(LIVE.session)renderLive();else renderProductsUI();}
+async function prodAdd(itemId){const it=(S.inventory||[]).find(x=>x.id===itemId);if(!it){toast('Item not found');return;}
+ const arr=prodArr();if(arr.some(p=>p.itemId===itemId)){toast('Already included');return;}
+ const bpc=itemBoxesPerCase(it),pbc=itemPerBoxCost(it),slice=(bpc>1?'case':'boxes'),boxes=sliceToBoxes(slice,1,bpc);
+ const p={itemId,name:it.name,cat:it.cat||'',slice,n:1,boxes,perBoxCost:pbc,boxesPerCase:bpc,consumed:0};arr.push(p);
+ if(LIVE.session){await breakConsume(p);await prodPersist();}
+ afterProdChange();}
+async function prodRemove(idx){const arr=prodArr();const p=arr[idx];if(!p)return;
+ if(LIVE.session){p.boxes=0;await breakConsume(p);/* returns its boxes to stock */}
+ arr.splice(idx,1);
+ if(LIVE.session)await prodPersist();
+ afterProdChange();}
+async function prodSlice(idx,slice,n){const arr=prodArr();const p=arr[idx];if(!p)return;
+ p.slice=slice;if(n!=null)p.n=Math.max(1,+n||1);p.boxes=sliceToBoxes(p.slice,p.n,p.boxesPerCase);
+ if(LIVE.session){await breakConsume(p);await prodPersist();}
+ afterProdChange();}
+function prodRowHTML(p,i){const it=(S.inventory||[]).find(x=>x.id===p.itemId);const onhand=it?(+it.qty||0):0;const bpc=Math.max(1,+p.boxesPerCase||1);
+ return `<div class="row" style="justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:wrap">
+   <div style="min-width:0;flex:1"><b>${esc(p.name)}</b> <span class="lab" style="text-transform:none;letter-spacing:0">${p.boxes} box${p.boxes===1?'':'es'} × ${money(p.perBoxCost)} = <b>${money(p.boxes*p.perBoxCost)}</b>${LIVE.session?(' · on-hand '+onhand):''}</span></div>
+   <div class="row" style="gap:6px;align-items:center">
+     <select onchange="prodSlice(${i},this.value)" style="font-size:12px">${[['case','Full case ('+bpc+')'],['half','Half case ('+Math.max(1,Math.round(bpc/2))+')'],['boxes','N boxes']].map(o=>`<option value="${o[0]}" ${p.slice===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select>
+     ${p.slice==='boxes'?`<input type="number" min="1" value="${p.n||1}" style="width:64px;font-size:12px" onchange="prodSlice(${i},'boxes',this.value)">`:''}
+     <button class="btn x sm" onclick="prodRemove(${i})" title="Remove (returns boxes to stock)">✕</button></div></div>`;}
+function productEditorHTML(){const arr=prodArr(),cost=breakCost(arr);
+ return `<div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="font-size:15px">📦 Products / cost</h3><b id="breakCostVal" style="font-size:17px">Break cost: ${money(cost)}</b></div>
+   <div class="lab" style="text-transform:none;letter-spacing:0;margin-top:2px">Include sealed product by full case / half case / N boxes. ${LIVE.session?'Adding decrements on-hand boxes; removing returns them.':'Boxes are committed (decremented) when you go live.'}</div>
+   <div style="margin-top:8px">${arr.map((p,i)=>prodRowHTML(p,i)).join('')||'<div class="lab" style="text-transform:none;letter-spacing:0">No products yet.</div>'}</div>
+   <div class="row" style="margin-top:10px;gap:8px;align-items:flex-start"><div style="flex:2;min-width:0">${entityPicker('prodPick',{icon:'📦',placeholder:'search inventory to add…',search:invItemSearch,onpick:(id)=>{prodAdd(id);}})}</div></div>`;}
+function renderProductsUI(){const box=$('prodBox');if(box)box.innerHTML=productEditorHTML();}
+/* ===== Participants (review) ===== */
+function participantsHTML(){const ps=(REVIEW&&REVIEW.participants)||[];
+ return `<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px">${ps.map((p,i)=>`<span class="pill" style="margin:0">${esc(p)} <a onclick="partRemove(${i})" style="color:var(--red);cursor:pointer">✕</a></span>`).join('')||'<span class="lab" style="text-transform:none;letter-spacing:0">No hosts yet.</span>'}</div>
+   <div class="row" style="margin-top:8px;gap:6px">${pickInput({id:'partPick',list:(S.streamers||[]),placeholder:'add host…',style:'max-width:220px'})}<button class="btn sm" onclick="partAdd()">+ Add host</button></div>`;}
+function renderParticipants(){const box=$('partBox');if(box)box.innerHTML=participantsHTML();}
+function partAdd(){if(!REVIEW)return;const el=$('partPick'),v=el?el.value.trim():'';if(!v)return;REVIEW.participants=REVIEW.participants||[];if(!REVIEW.participants.includes(v))REVIEW.participants.push(v);renderParticipants();}
+function partRemove(i){if(!REVIEW)return;(REVIEW.participants||[]).splice(i,1);renderParticipants();}
+/* ===== Pre-flight review screen ===== */
+let REVIEW=null;
+function liveStartFromFormat(modelId){const model=(S.breaks||[]).find(b=>b.id===modelId);if(!model){toast('Model not found');return;}
  if(!canEditScoped())return roGuard();
  if(LIVE.session){go('live');toast('End the current live session first');return;}
  const rs=(model.ruleSlots||[]);if(!rs.length){toast('This model has no formatted spots — build slots in the planner first.');return;}
- const tb=model.tierBands||[],proj=modelProjection(model);
+ /* load the format into BK so the slot builder is editable in the review */
+ BK.slots=JSON.parse(JSON.stringify(rs));BK.tierBands=JSON.parse(JSON.stringify(model.tierBands||[]));BK.checklistId=model.checklistId||null;BK.breakType=model.breakType||'team';BK.cost=+((model.inputs&&model.inputs.cost)||model.cost||0);BK.targetMargin=(model.inputs&&model.inputs.targetMargin!=null)?model.inputs.targetMargin:30;BK._slotEval=null;BK._modelId=model.id;
+ REVIEW={modelId:model.id,title:model.name+' — live',participants:(S.streamers&&S.streamers.length)?[S.streamers[0]]:[],products:[]};
+ go('live');renderLive();
+}
+function liveCancelReview(){REVIEW=null;renderLive();}
+function liveReviewHTML(){const model=(S.breaks||[]).find(b=>b.id===REVIEW.modelId)||{};const proj=computeProjection();
+ return `<div class="hero"><div><h1>Review break — pre-flight</h1><div class="sub">Set title, hosts, products &amp; cost. Tweak slots. Then confirm to go live.</div></div><button class="btn x" onclick="liveCancelReview()">Cancel</button></div>
+  <div class="card" style="margin-bottom:12px"><div class="lab" style="text-transform:none;letter-spacing:0;font-size:13px">Format: <b>${esc(model.name||'—')}</b> · ${esc(BK.breakType||'team')} break · <b>${(BK.slots||[]).length}</b> spots · ${(BK.tierBands||[]).length} tiers · projection ${money(proj.low)} / <b>${money(proj.exp)}</b> / ${money(proj.high)}</div></div>
+  <div class="card" style="margin-bottom:12px"><label>Stream title</label><input id="rvTitle" value="${esc(REVIEW.title)}" oninput="REVIEW.title=this.value" style="font-size:16px;width:100%;max-width:520px"></div>
+  <div class="card" style="margin-bottom:12px"><h3 style="font-size:15px">Participants / hosts</h3><div id="partBox">${participantsHTML()}</div></div>
+  <div class="card" style="margin-bottom:12px"><div id="prodBox">${productEditorHTML()}</div></div>
+  <div class="card" style="margin-bottom:12px"><h3 style="font-size:15px">Slots — last-minute edits</h3><div id="bkSlots"></div></div>
+  <div class="row" style="gap:8px;margin-bottom:20px"><button class="btn v" onclick="liveConfirmReview()">✓ Confirm &amp; go live</button><button class="btn" onclick="liveCancelReview()">Cancel</button></div>`;}
+async function liveConfirmReview(){if(!REVIEW)return;if(!canEditScoped())return roGuard();
+ const model=(S.breaks||[]).find(b=>b.id===REVIEW.modelId)||{};
+ const rs=BK.slots||[];if(!rs.length){toast('Add at least one slot before going live');return;}
+ const tb=BK.tierBands||[],breakType=BK.breakType||'team',checklistId=BK.checklistId||null,proj=computeProjection();
+ const title=(REVIEW.title||'').trim()||((model.name||'Live')+' — live');
+ const cost=breakCost(REVIEW.products);
  let cardMap={};
- if(model.checklistId){try{const payload=rs.map(s=>({name:s.name||'',include:s.include||[],exclude:s.exclude||[],remainder:!!s.remainder}));
-   const{data}=await sb.rpc('e10_slot_cards',{p_checklist:model.checklistId,p_slots:payload,p_limit:60});
+ if(checklistId){try{const payload=rs.map(s=>({name:s.name||'',include:s.include||[],exclude:s.exclude||[],remainder:!!s.remainder}));
+   const{data}=await sb.rpc('e10_slot_cards',{p_checklist:checklistId,p_slots:payload,p_limit:60});
    (data||[]).forEach(x=>{cardMap[x.i]={count:x.count,cards:x.cards||[]};});}catch(e){}}
- const{data:sess,error}=await sb.from('e10_break_sessions').insert({streamer_uid:MEID,name:model.name+' — live',
-   format_id:model.id,break_type:model.breakType||null,checklist_id:model.checklistId||null,cost:proj.cost,proj_low:proj.low,proj_expected:proj.exp,proj_high:proj.high}).select().maybeSingle();
+ const{data:sess,error}=await sb.from('e10_break_sessions').insert({streamer_uid:MEID,name:title,
+   format_id:REVIEW.modelId,break_type:breakType,checklist_id:checklistId,cost,proj_low:proj.low,proj_expected:proj.exp,proj_high:proj.high,
+   participants:REVIEW.participants||[],products:[]}).select().maybeSingle();
  if(error){toast('Could not start: '+error.message);return;}
- LIVE.session=sess;LIVE.slots=[];await liveEvent('session_started',null,{name:sess.name,format_id:model.id});
+ LIVE.session=sess;LIVE.slots=[];await liveEvent('session_started',null,{name:sess.name,format_id:REVIEW.modelId,participants:REVIEW.participants||[]});
  for(let i=0;i<rs.length;i++){const s=rs[i],take=modelTake(s,tb),tierName=(tb.find(t=>t.id===s.tierId)||{}).name||'';
    const teamC=(s.include||[]).find(c=>c.field==='team'&&c.valueId),playerC=(s.include||[]).find(c=>c.field==='player'&&c.valueId),cm=cardMap[i]||{count:null,cards:[]};
    const ins={session_id:sess.id,label:s.name||('Spot '+(i+1)),position:i,method:s.method||'$1auction',tier:tierName,
      band_low:take.low,band_expected:take.expected,band_high:take.high,
      team_id:teamC?teamC.valueId:null,player_id:playerC?playerC.valueId:null,
      price:((s.method==='fixed')?(+s.price||0):null),
-     plan:{formatSlotId:s.id,breakType:model.breakType||null,tierName,remainder:!!s.remainder,cardCount:cm.count,cards:cm.cards}};
+     plan:{formatSlotId:s.id,breakType,tierName,remainder:!!s.remainder,cardCount:cm.count,cards:cm.cards}};
    try{const{data:sl}=await sb.from('e10_break_slots').insert(ins).select().maybeSingle();if(sl)LIVE.slots.push(sl);}catch(e){}}
- LIVE_SEED=null;await liveLoadChases();liveSubscribe();go('live');renderLive();toast('Live break started — '+LIVE.slots.length+' formatted spots');
+ /* commit product boxes now — decrement inventory (idempotent via consumed=0 → boxes) */
+ LIVE.session.products=[];
+ for(const p of (REVIEW.products||[])){p.consumed=0;await breakConsume(p);LIVE.session.products.push(p);}
+ await prodPersist();
+ REVIEW=null;LIVE_SEED=null;await liveLoadChases();liveSubscribe();go('live');renderLive();toast('Live break started — '+LIVE.slots.length+' spots · cost '+money(LIVE.session.cost||0));
 }
 /* projection of a SAVED model (pure; mirrors phase-2 computeProjection, reads through the same band shape) */
 function modelBand(slot,tierBands){const o=slot.bandOverride;

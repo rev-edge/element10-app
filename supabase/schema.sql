@@ -264,3 +264,24 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --   policies (write owner/admin via streamer_uid=auth.uid() OR e10_is_admin(); read via
 --   e10_can_read_session). No new policy → no new membership check to InitPlan-wrap. Placards bind to
 --   session.stash_or_pass / (case_hit_open||case_hit) / trade_open; each shows only when its state is on.
+
+-- ─────────────────────────────────────────────────────────────
+-- APPLIED (migration e10_session_products_participants):
+-- Live Break Phase A — box/case inventory + pre-flight format review + break cost.
+-- Two nullable/defaulted jsonb columns on e10_break_sessions (no new tables); break_type, cost,
+-- name(title) already exist:
+--   products     jsonb default '[]' — the included sealed products:
+--                  [{itemId,name,cat,slice('case'|'half'|'boxes'),n,boxes,perBoxCost,boxesPerCase,consumed}].
+--                  break cost = Σ boxes×perBoxCost (persisted to session.cost = the invested basis for ROI).
+--   participants jsonb default '[]' — hosts on the break (from the streamer picker).
+-- Box/case model lives in the JSONB workspace inventory (S.inventory): items gain boxesPerCase (default 1)
+--   and perBoxCost (default = unit cost); on-hand qty is counted in boxes. Slicing full case / half /
+--   N boxes → a box count via boxesPerCase. AUTOMATIC decrement is idempotent: each session product row
+--   carries `consumed` (boxes this break has taken); breakConsume() only ever applies delta = boxes −
+--   consumed to it.qty (decrement when >0, return when <0) via cloudCommitShared, then sets consumed =
+--   applied so repeated edits never double-count. Review defers the decrement to Confirm; mid-show
+--   add/remove/re-slice decrements/returns immediately. On break end, consumed boxes stay consumed
+--   (opened). available = qty − reserved is unchanged, so reservations/rollup stay correct.
+-- RLS UNCHANGED / not weakened: both columns inherit the existing e10_break_sessions owner/admin write
+--   + can_read_session read; no new policy, nothing new to InitPlan-wrap. Inventory writes go through the
+--   existing member-writable shared workspace row via cloudCommitShared (read-modify-write).
