@@ -13,6 +13,13 @@ header{display:flex;align-items:center;gap:22px;padding:16px 26px;border-bottom:
 nav{display:flex;gap:6px;flex-wrap:wrap}
 .tab{font-family:var(--sans);font-weight:500;font-size:13.5px;padding:8px 15px;border-radius:var(--rp);border:1px solid transparent;background:none;cursor:pointer;color:var(--mut)}
 .tab:hover{background:var(--surface2);color:var(--ink)}.tab.on{background:var(--ink);color:#fff}
+.subnav{display:flex;gap:6px;flex-wrap:wrap;padding:9px 26px;border-bottom:1px solid var(--line);background:var(--surface)}
+.subnav .tab{font-size:13px}
+.profmenu{position:absolute;right:0;top:calc(100% + 8px);min-width:252px;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 34px rgba(0,0,0,.16);padding:6px;z-index:100;text-align:left}
+.pm-hd{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut2);padding:9px 10px 4px;font-weight:700}
+.pm-item{padding:9px 11px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;color:var(--ink)}
+.pm-item:hover{background:var(--surface2)}
+.pm-sec+.pm-sec{border-top:1px solid var(--line);margin-top:4px;padding-top:2px}
 .wrap{max-width:1180px;margin:0 auto;padding:26px}
 .sec{display:none}.sec.on{display:block}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px 20px}
@@ -99,6 +106,7 @@ details.gcfg>summary{list-style:none;cursor:pointer}details.gcfg>summary::-webki
 </style><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head><body>
 <header><div class="logo">ELEMENT<b>10</b></div><nav id="nav"></nav><div id="who" style="margin-left:auto"></div></header>
+<div id="subnav" class="subnav" style="display:none"></div>
 <div class="wrap">
   <div class="sec on" id="sec-home"></div>
   <div class="sec" id="sec-schedule"></div>
@@ -193,13 +201,37 @@ function money(n){return '$'+Math.round(n).toLocaleString();}
 const L=k=>S.lists[k];
 
 /* ---------- nav ---------- */
-const SECTIONS=[['home','Home'],['schedule','Schedule'],['copy','Copy Studio'],['gen','Schedule Gen'],['live','Live Break'],['fulfill','Ship'],['repack','Repack Studio'],['data','Data & Lists']];
-$('nav').innerHTML=SECTIONS.map((s,i)=>`<button class="tab ${i===0?'on':''}" data-s="${s[0]}" onclick="go('${s[0]}')">${s[1]}</button>`).join('');
-function go(s){document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.s===s));document.querySelectorAll('.sec').forEach(x=>x.classList.remove('on'));$('sec-'+s).classList.add('on');window.scrollTo(0,0);({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData,repack:renderRepack,live:renderLive,fulfill:renderFulfill}[s])();}
+/* Two-level nav: five top groups, each rolling up its modules as a sub-nav. Modules keep their
+   render fns + section divs + dataTab state; only the routing/highlight layer is new. */
+const NAV=[
+ {k:'home',label:'Home',subs:[{k:'home',label:'Home',sec:'home'}]},
+ {k:'schedule',label:'Schedule',subs:[{k:'schedule',label:'Schedule',sec:'schedule'},{k:'gen',label:'Generator',sec:'gen'}]},
+ {k:'inventory',label:'Inventory',subs:[{k:'inventory',label:'Inventory',dt:'inventory'},{k:'checklists',label:'Checklists',dt:'checklists'},{k:'players',label:'Players',dt:'players'},{k:'modeler',label:'Break / Format',dt:'modeler'}]},
+ {k:'toolkit',label:'Live Toolkit',subs:[{k:'live',label:'Live Break',sec:'live'},{k:'repack',label:'Repack',sec:'repack'},{k:'fulfill',label:'Ship',sec:'fulfill'},{k:'copy',label:'Copy Studio',sec:'copy'}]},
+ {k:'reporting',label:'Reporting & Analytics',subs:[{k:'overview',label:'Overview',dt:'overview'},{k:'reports',label:'Reports',dt:'reports'},{k:'export',label:'Whatnot Export',dt:'export'}]},
+];
+const SETTINGS_SUBS=[{k:'team',label:'Team',dt:'team'},{k:'lists',label:'Lists & Settings',dt:'lists'},{k:'perm',label:'Permissions',dt:'team'}];
+const SEC2GROUP={home:'home',schedule:'schedule',gen:'schedule',live:'toolkit',repack:'toolkit',fulfill:'toolkit',copy:'toolkit'};
+const DT_INVENTORY=['inventory','checklists','players','modeler'],DT_REPORTING=['overview','reports','export'];
+function groupForDataTab(dt){return DT_INVENTORY.includes(dt)?'inventory':(DT_REPORTING.includes(dt)?'reporting':'settings');}
+function subsFor(g){return g==='settings'?SETTINGS_SUBS:((NAV.find(x=>x.k===g)||{subs:[]}).subs);}
+let GROUP='home',SUB={};
+function renderNav(){const el=$('nav');if(el)el.innerHTML=NAV.map(g=>`<button class="tab ${GROUP===g.k?'on':''}" onclick="goGroup('${g.k}')">${esc(g.label)}</button>`).join('');}
+function renderSubnav(){const box=$('subnav');if(!box)return;const subs=subsFor(GROUP);
+ if(!subs||subs.length<2){box.innerHTML='';box.style.display='none';return;}
+ box.style.display='flex';const cur=SUB[GROUP]||subs[0].k;
+ box.innerHTML=subs.map(s=>`<button class="tab ${cur===s.k?'on':''}" onclick="goSub('${GROUP}','${s.k}')">${esc(s.label)}</button>`).join('');}
+function goGroup(g){const subs=subsFor(g);const cur=SUB[g]||(subs[0]&&subs[0].k);if(cur)goSub(g,cur);}
+function goSub(g,subKey){const subs=subsFor(g);const sub=subs.find(x=>x.k===subKey)||subs[0];if(!sub)return;GROUP=g;SUB[g]=sub.k;if(sub.dt){dataTab=sub.dt;go('data');}else go(sub.sec);}
+function go(s){document.querySelectorAll('.sec').forEach(x=>x.classList.remove('on'));const el=$('sec-'+s);if(el)el.classList.add('on');window.scrollTo(0,0);
+ ({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData,repack:renderRepack,live:renderLive,fulfill:renderFulfill}[s]||renderHome)();
+ if(s==='data'){GROUP=groupForDataTab(dataTab);SUB[GROUP]=dataTab;}else if(SEC2GROUP[s]){GROUP=SEC2GROUP[s];SUB[GROUP]=s;}
+ renderNav();renderSubnav();}
+renderNav();
 $('foot').textContent='Element 10 · Command · shared team workspace · synced live';
 function renderWho(){$('who').innerHTML=S.user?`<button class="btn sm" onclick="signIn()">👤 ${esc(S.user)}</button>`:`<button class="btn v sm" onclick="signIn()">Sign in</button>`;}
 function signIn(cb){window._siCb=(typeof cb==='function')?cb:null;$('modal').innerHTML=`<h3 style="font-size:18px">Sign in</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:6px 0 12px">Your name tags your notes and comments so the team knows who did what. Real email logins arrive when we host the shared version.</div><label>Your name</label><input id="siName" value="${esc(S.user||'')}" placeholder="e.g. Trent" onkeydown="if(event.key==='Enter')doSignIn()"><div class="row" style="margin-top:16px"><button class="btn v" onclick="doSignIn()">Save</button>${S.user?'<button class="btn sm" onclick="closeM()">Cancel</button>':''}</div>`;$('ov').style.display='flex';setTimeout(()=>{const el=$('siName');if(el)el.focus();},60);}
-function doSignIn(){const v=$('siName').value.trim();if(!v)return;S.user=v;save();renderWho();closeM();const cb=window._siCb;window._siCb=null;if(cb)cb();else{const on=document.querySelector('.tab.on');if(on)({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData,repack:renderRepack,live:renderLive,fulfill:renderFulfill}[on.dataset.s])();}}
+function doSignIn(){const v=$('siName').value.trim();if(!v)return;S.user=v;save();renderWho();closeM();const cb=window._siCb;window._siCb=null;if(cb)cb();else currentRender();}
 function requireUser(cb){if(S.user)cb();else signIn(cb);}
 renderWho();
 
@@ -1217,13 +1249,10 @@ function gRenameView(id,idx){const G=GRIDS[id];const v=G.state.views[+idx];if(!v
 function gDeleteView(id,idx){const G=GRIDS[id];const v=G.state.views[+idx];if(!v||!confirm('Delete view “'+v.name+'”?'))return;G.state.views.splice(+idx,1);G.state.activeView=-1;gPersist(G);G.cfg.render();}
 function gResetFilters(id){const G=GRIDS[id];G.state.filters=Object.assign({},G.cfg.defaultFilters||{});G.state.widths={};G.state.activeView=-1;try{localStorage.removeItem(G.sk+'_widths');}catch(e){}gPersist(G);if(G.cfg.onApply)G.cfg.onApply(G);G.cfg.render();toast('Reset — filters & column widths');}
 function dataHub(){
- const tabs=[['overview','Overview'],['inventory','Inventory'],['checklists','Checklists'],['players','Players'],['modeler','Break / Format'],['reports','Reports'],['export','Whatnot Export'],['lists','Lists & Settings']];
- if(ROLE==='admin')tabs.push(['team','Team']);
+ /* Tab bar now lives in the top-level sub-nav; this just renders the active module into #dtc. */
  if(dataTab==='team'&&ROLE!=='admin')dataTab='overview';
- let h=`<div class="hero"><div><h1>Inventory &amp; Data</h1></div></div>`;
- h+=`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">${tabs.map(t=>`<button class="tab ${t[0]===dataTab?'on':''}" onclick="dataTab='${t[0]}';dataHub()">${t[1]}</button>`).join('')}</div><div id="dtc"></div>`;
- $('sec-data').innerHTML=h;
- ({overview:dOverview,inventory:dInventory,checklists:dChecklists,players:dPlayers,modeler:dModeler,reports:dReports,export:dExport,lists:dLists,team:dTeam}[dataTab])();
+ $('sec-data').innerHTML=`<div id="dtc"></div>`;
+ ({overview:dOverview,inventory:dInventory,checklists:dChecklists,players:dPlayers,modeler:dModeler,reports:dReports,export:dExport,lists:dLists,team:dTeam}[dataTab]||dOverview)();
 }
 function invTotals(){let cost=0,val=0,byCat={},qty=0;const view=invView();view.forEach(i=>{const q=+i.qty||1,c=(+i.cost||0)*q,v=(+i.value||0)*q;cost+=c;val+=v;qty+=q;byCat[i.cat]=(byCat[i.cat]||0)+v;});return{cost,val,byCat,qty,cnt:view.length,gain:val-cost};}
 function svgBars(entries){if(!entries.length)return '<div style="color:var(--mut);font-size:13px">No inventory yet.</div>';
@@ -1744,7 +1773,7 @@ function rebuildS(){normShared(SHARED);normScoped(SCOPED);
     shows:SCOPED.shows,breaks:SCOPED.breaks,copySets:SCOPED.copySets,dashCfg:SCOPED.dashCfg,sales:SCOPED.sales,user:ME};}
 function pushFromS(){SHARED.comments=S.comments;SHARED.todos=S.todos;SHARED.streamers=S.streamers;SHARED.lists=S.lists;SHARED.attachments=S.attachments;SHARED.checklists=S.checklists;SHARED.inventory=S.inventory;SHARED.repacks=S.repacks;
  SCOPED.shows=S.shows;SCOPED.breaks=S.breaks;SCOPED.copySets=S.copySets;SCOPED.dashCfg=S.dashCfg;SCOPED.sales=S.sales;}
-function currentRender(){const on=document.querySelector('.tab.on');if(on){({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData,repack:renderRepack,live:renderLive,fulfill:renderFulfill}[on.dataset.s])();}else renderHome();}
+function currentRender(){const on=document.querySelector('.sec.on');const s=on?on.id.replace('sec-',''):'home';({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData,repack:renderRepack,live:renderLive,fulfill:renderFulfill}[s]||renderHome)();}
 /* Preserve typing across realtime updates: defer a section re-render while an input is focused. */
 let _pendingRender=false;
 function isEditing(){const a=document.activeElement;return !!a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.tagName==='SELECT');}
@@ -1832,8 +1861,34 @@ async function loadAll(){
  if(!sh||!sh.data||!Object.keys(sh.data).length)await writeRow('shared',null,SHARED);
  if(SCOPE!=='mine'&&SCOPE!=='universal'&&ROLE!=='admin')SCOPE='mine';
  await loadScopedFor(SCOPE);await loadOpShows();rebuildS();subscribeRealtime();}
-renderWho=function(){if($('who'))$('who').innerHTML=`<button class="btn sm" onclick="signOut()">\u{1F464} ${esc(ME||'')}${ROLE==='admin'?' · admin':''} · sign out</button>`;};
+renderWho=function(){if(!$('who'))return;$('who').innerHTML=`<div style="position:relative"><button class="btn sm" onclick="toggleProfileMenu(event)">\u{1F464} ${esc(ME||'')}${ROLE==='admin'?' · admin':''} ▾</button><div id="profMenu" class="profmenu" style="display:none"></div></div>`;};
 function signOut(){sb.auth.signOut().then(()=>location.reload());}
+function closeProfileMenu(){const m=$('profMenu');if(m)m.style.display='none';}
+function _pmOutside(e){const m=$('profMenu');if(m&&m.style.display==='block'&&!m.parentNode.contains(e.target)){closeProfileMenu();document.removeEventListener('click',_pmOutside);}}
+function toggleProfileMenu(ev){if(ev)ev.stopPropagation();const m=$('profMenu');if(!m)return;
+ if(m.style.display==='block'){closeProfileMenu();return;}
+ m.innerHTML=profileMenuHTML();m.style.display='block';setTimeout(()=>document.addEventListener('click',_pmOutside),0);}
+function profileMenuHTML(){
+ let h=`<div class="pm-sec"><div class="pm-hd">Account</div>
+   <div class="pm-item" onclick="openAccountSettings()">⚙️ Account settings</div>
+   <div class="pm-item" onclick="signOut()">↩ Log out</div></div>`;
+ if(ROLE==='admin')h+=`<div class="pm-sec"><div class="pm-hd">Admin · Settings</div>
+   <div class="pm-item" onclick="closeProfileMenu();goSub('settings','team')">\u{1F465} Team</div>
+   <div class="pm-item" onclick="closeProfileMenu();goSub('settings','lists')">\u{1F5C2} Lists &amp; Settings</div>
+   <div class="pm-item" onclick="closeProfileMenu();goSub('settings','perm')">\u{1F512} Permissions</div></div>`;
+ return h;}
+function openAccountSettings(){closeProfileMenu();
+ $('modal').innerHTML=`<h3 style="font-size:18px">Account settings</h3>
+   <div class="lab" style="text-transform:none;letter-spacing:0;margin:8px 0 4px">Signed in as</div>
+   <div style="font-weight:700;font-size:15px">${esc(ME||'')}</div>
+   <div class="lab" style="text-transform:none;letter-spacing:0;margin-top:2px">Role: <b>${esc(ROLE||'member')}</b></div>
+   <div style="margin-top:14px"><label>Change password</label><input id="acPw" type="password" placeholder="new password (min 6 chars)" autocomplete="new-password"><div class="row" style="margin-top:8px"><button class="btn v sm" onclick="acChangePassword()">Update password</button></div><div class="lab" id="acMsg" style="text-transform:none;letter-spacing:0;margin-top:8px"></div></div>
+   <div class="row" style="margin-top:16px;border-top:1px solid var(--line);padding-top:12px;gap:8px"><button class="btn sm" onclick="signOut()">↩ Log out</button><button class="btn sm" onclick="closeM()">Close</button></div>`;
+ $('ov').style.display='flex';}
+async function acChangePassword(){const el=$('acPw'),pw=el?el.value:'';const m=$('acMsg');
+ if((pw||'').length<6){if(m)m.textContent='Password must be 6+ characters.';return;}
+ try{const{error}=await sb.auth.updateUser({password:pw});if(m){m.style.color=error?'var(--red)':'var(--mut)';m.textContent=error?error.message:'Password updated.';}if(!error&&el)el.value='';}
+ catch(e){if(m)m.textContent=e.message;}}
 function authScreen(msg){document.body.innerHTML=`<div style="max-width:380px;margin:12vh auto;padding:24px;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif">
  <div style="font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-weight:700;font-size:32px;text-transform:uppercase;letter-spacing:.04em">ELEMENT<span style="background:#C6FF3A;padding:0 8px;border-radius:6px">10</span></div>
  <div style="color:#6b6d73;margin:8px 0 22px">Team command center — sign in to continue.</div>
