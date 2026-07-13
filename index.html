@@ -86,6 +86,16 @@ td{padding:8px 10px;border-bottom:1px solid var(--line)}
 .egrid th.srt .chev{color:var(--mut2);margin-left:5px;font-size:9px}
 .egrid th.srt.on .chev{color:var(--ink)}
 .egrid td .actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-end}
+/* ── per-column Excel-style filter row (shared grid engine) ── */
+.egrid tr.gfilt th{background:var(--surface2);border-top:0;padding:3px 4px;font-weight:400}
+.gflt-txt,.gflt-num{display:flex;gap:3px;align-items:center}
+.gflt-txt input,.gflt-num input{min-width:0;width:100%;font-size:11px;padding:2px 4px}
+.gflt-txt select,.gflt-num select,.gflt-pop .gflt-sum{font-size:11px;padding:2px 3px;max-width:52px;flex:0 0 auto}
+.gflt-pop{position:relative}
+.gflt-pop>summary{list-style:none;cursor:pointer;font-size:11px;padding:2px 6px;border:0.5px solid var(--line);border-radius:6px;background:var(--surface);white-space:nowrap}
+.gflt-pop>summary::-webkit-details-marker{display:none}
+.gflt-pop[open]>.gpop{position:absolute;left:0;top:100%;z-index:40;min-width:150px;max-height:240px;overflow:auto;background:var(--surface);border:0.5px solid var(--line);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.14);padding:8px}
+.gflt-clr{cursor:pointer;color:var(--red);font-size:11px;margin-left:2px}
 /* ── toolbar above a grid: bordered fields + segmented control ── */
 .etool{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px}
 .etool>div{display:flex;flex-direction:column}
@@ -1117,7 +1127,16 @@ function clCancelReview(){clReviewMode=false;PENDING_CL=null;delete GRIDS['cl:__
    Nothing here loads a whole card table into the browser. */
 const CARD_PAGE=100;const CARD_COL={num:'num',name:'name',set:'set_name',rarity:'rarity',value:'value',parallel:'parallel',card_type:'card_type',serial:'serial',color:'color',rookie:'rookie',chase:'chase',team:'team'};
 async function dbChecklists(){try{const{data,error}=await sb.from('e10_checklists').select('id,name,source,card_count,updated_at,set:set_id(name,sport)').order('updated_at',{ascending:false});if(error)throw error;window._clCount=window._clCount||{};(data||[]).forEach(c=>{window._clCount[c.id]=c.card_count;});return data||[];}catch(e){toast('Load checklists: '+e.message);return[];}}
-function dbCardFiltered(o){const f=(o&&o.filters)||{};return !!((o&&o.search&&o.search.trim())||(f.set||'').trim()||(f.rarity||'').trim()||(f.parallel||'').trim()||(f.card_type||'').trim()||(f.team||'').trim());}
+function dbCardColFiltersActive(cf){if(!cf)return false;return Object.keys(cf).some(k=>{const c=SC_COLS.find(x=>x.key===k),ft=c?gFilterType(c):null;return ft&&gColFilterActive(cf[k],ft);});}
+function dbCardFiltered(o){const f=(o&&o.filters)||{};return !!((o&&o.search&&o.search.trim())||(f.set||'').trim()||(f.rarity||'').trim()||(f.parallel||'').trim()||(f.card_type||'').trim()||(f.team||'').trim()||dbCardColFiltersActive(o&&o.colFilters));}
+/* translate the shared engine's per-column filters into Supabase query conditions (server push-down) */
+function dbCardColFilters(q,cf){if(!cf)return q;
+ Object.keys(cf).forEach(key=>{const c=SC_COLS.find(x=>x.key===key),ft=c?gFilterType(c):null,f=cf[key];if(!ft||!gColFilterActive(f,ft))return;const col=CARD_COL[key]||key;
+   if(ft==='enum'){if(key==='chase'||key==='rookie'){const t=f.v.includes('Yes'),n=f.v.includes('No');if(t&&!n)q=q.eq(col,true);else if(n&&!t)q=q.eq(col,false);}else q=q.in(col,f.v);return;}
+   if(ft==='num'){const a=f.v,b=f.v2;if(a===''||a==null)return;switch(f.op){case 'ne':q=q.neq(col,+a);break;case 'gte':q=q.gte(col,+a);break;case 'lte':q=q.lte(col,+a);break;case 'between':q=q.gte(col,+a);if(b!==''&&b!=null)q=q.lte(col,+b);break;default:q=q.eq(col,+a);}return;}
+   const v=(f.v==null?'':(''+f.v)).trim(),p=s=>s.replace(/[%_]/g,' ');
+   switch(f.op){case 'empty':q=q.or(col+'.is.null,'+col+'.eq.');break;case 'nempty':q=q.not(col,'is',null).neq(col,'');break;case 'eq':if(v)q=q.ilike(col,p(v));break;case 'starts':if(v)q=q.ilike(col,p(v)+'%');break;case 'ends':if(v)q=q.ilike(col,'%'+p(v));break;case 'ncontains':if(v)q=q.not(col,'ilike','%'+p(v)+'%');break;default:if(v)q=q.ilike(col,'%'+p(v)+'%');}});
+ return q;}
 function dbCardFilters(q,o){const f=o.filters||{};const s=(o.search||'').trim().toLowerCase();
  /* Tokenize on whitespace and require ALL tokens (AND), each as an ILIKE substring. PostgREST
     ANDs chained .like calls; the AND-of-ILIKEs still uses the e10_cards_search_trgm index. This
@@ -1129,6 +1148,7 @@ function dbCardFilters(q,o){const f=o.filters||{};const s=(o.search||'').trim().
  if((f.parallel||'').trim())q=q.ilike('parallel','%'+f.parallel.trim()+'%');
  if((f.card_type||'').trim())q=q.ilike('card_type','%'+f.card_type.trim()+'%');
  if((f.team||'').trim())q=q.ilike('team','%'+f.team.trim()+'%');
+ if(o.colFilters)q=dbCardColFilters(q,o.colFilters);
  return q;}
 async function dbCards(scopeCol,scopeId,o){o=o||{};try{
  let q=sb.from('e10_cards').select('id,num,name,set_name,rarity,value,parallel,card_type,serial,color,rookie,chase,team,team_id,player_id,player:player_id(id,name)').eq(scopeCol,scopeId);
@@ -1156,19 +1176,19 @@ function scBumpTotal(d){if(!SRV)return;if(SRV.knownTotal!=null)SRV.knownTotal=Ma
 async function scDel(id){if(!confirm('Delete this card?'))return;try{await sb.from('e10_cards').delete().eq('id',id);}catch(e){toast(e.message);return;}scCacheClear();if(SRV){SRV.rows=SRV.rows.filter(r=>r.id!==id);scBumpTotal(-1);gRenderList(SRV.G);scPager();}}
 async function scAddCard(){if(!SRV||SRV.scopeCol!=='checklist_id')return;try{const{error}=await sb.from('e10_cards').insert({checklist_id:SRV.scopeId,name:'New card',card_type:'base'});if(error){toast(error.message);return;}}catch(e){toast(e.message);return;}scCacheClear();scBumpTotal(1);SRV.page=0;scFetch();toast('Card added');}
 const SC_COLS=[
- {key:'num',label:'Card #',sortable:true,sortVal:c=>c.num||'',cell:c=>`<td class="mono"><input value="${esc(c.num||'')}" style="width:78px;font-size:12px" onchange="scEdit('${c.id}','num',this.value)"></td>`},
- {key:'name',label:'Name',core:true,first:true,sortable:true,sortVal:c=>(c.name||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.name||'')}" style="min-width:150px" onchange="scEdit('${c.id}','name',this.value)"></td>`},
- {key:'player',label:'Player',sortable:false,cell:c=>`<td>${c.player?`<a style="cursor:pointer;color:#2563eb;text-decoration:underline" onclick="openPlayer('${c.player.id}')">${esc(c.player.name)}</a>`:'<span class="lab">—</span>'}</td>`},
- {key:'set',label:'Set',sortable:true,sortVal:c=>(c.set_name||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.set_name||'')}" style="min-width:130px;font-size:12px" onchange="scEdit('${c.id}','set',this.value)"></td>`},
- {key:'team',label:'Team',sortable:true,sortVal:c=>(c.team||'').toLowerCase(),cell:c=>`<td><div class="row" style="gap:3px;align-items:center;flex-wrap:nowrap"><input value="${esc(c.team||'')}" style="min-width:92px;font-size:12px" placeholder="—" onchange="scEdit('${c.id}','team',this.value)"><button class="btn x sm ${c.team_id?'v':''}" title="Link to a team entity" onclick="scTeamLink('${c.id}')">🔗</button></div></td>`},
- {key:'parallel',label:'Parallel',sortable:true,sortVal:c=>(c.parallel||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.parallel||'')}" style="min-width:100px;font-size:12px" placeholder="Base" onchange="scEdit('${c.id}','parallel',this.value)"></td>`},
- {key:'card_type',label:'Type',sortable:true,sortVal:c=>c.card_type||'',cell:c=>`<td><select style="font-size:12px" onchange="scEdit('${c.id}','card_type',this.value)">${['base','parallel','insert','SSP'].map(t=>`<option ${((c.card_type||'base')===t)?'selected':''}>${t}</option>`).join('')}</select></td>`},
- {key:'serial',label:'Serial',sortable:true,sortVal:c=>c.serial||'',cell:c=>`<td class="mono"><input value="${esc(c.serial||'')}" style="width:60px;font-size:12px" placeholder="/99" onchange="scEdit('${c.id}','serial',this.value)"></td>`},
- {key:'color',label:'Color',sortable:true,sortVal:c=>(c.color||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.color||'')}" style="width:88px;font-size:12px" onchange="scEdit('${c.id}','color',this.value)"></td>`},
- {key:'rarity',label:'Rarity',sortable:true,sortVal:c=>(c.rarity||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.rarity||'')}" style="min-width:110px;font-size:12px" onchange="scEdit('${c.id}','rarity',this.value)"></td>`},
- {key:'value',label:'Value',sortable:true,sortVal:c=>+c.value||0,cell:c=>`<td class="mono"><input type="number" value="${c.value==null?'':esc(''+c.value)}" style="width:74px" onchange="scEdit('${c.id}','value',this.value)"></td>`},
- {key:'rookie',label:'RC',sortable:true,sortVal:c=>c.rookie?1:0,cell:c=>`<td style="text-align:center"><input type="checkbox" style="width:auto" ${c.rookie?'checked':''} onchange="scEdit('${c.id}','rookie',this.checked)"></td>`},
- {key:'chase',label:'Chase',sortable:true,sortVal:c=>c.chase?1:0,cell:c=>`<td style="text-align:center"><input type="checkbox" style="width:auto" ${c.chase?'checked':''} onchange="scEdit('${c.id}','chase',this.checked)"></td>`},
+ {key:'num',label:'Card #',filter:'text',sortable:true,sortVal:c=>c.num||'',cell:c=>`<td class="mono"><input value="${esc(c.num||'')}" style="width:78px;font-size:12px" onchange="scEdit('${c.id}','num',this.value)"></td>`},
+ {key:'name',label:'Name',core:true,first:true,filter:'text',sortable:true,sortVal:c=>(c.name||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.name||'')}" style="min-width:150px" onchange="scEdit('${c.id}','name',this.value)"></td>`},
+ {key:'player',label:'Player',filter:false,sortable:false,cell:c=>`<td>${c.player?`<a style="cursor:pointer;color:#2563eb;text-decoration:underline" onclick="openPlayer('${c.player.id}')">${esc(c.player.name)}</a>`:'<span class="lab">—</span>'}</td>`},
+ {key:'set',label:'Set',filter:'text',sortable:true,sortVal:c=>(c.set_name||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.set_name||'')}" style="min-width:130px;font-size:12px" onchange="scEdit('${c.id}','set',this.value)"></td>`},
+ {key:'team',label:'Team',filter:'text',sortable:true,sortVal:c=>(c.team||'').toLowerCase(),cell:c=>`<td><div class="row" style="gap:3px;align-items:center;flex-wrap:nowrap"><input value="${esc(c.team||'')}" style="min-width:92px;font-size:12px" placeholder="—" onchange="scEdit('${c.id}','team',this.value)"><button class="btn x sm ${c.team_id?'v':''}" title="Link to a team entity" onclick="scTeamLink('${c.id}')">🔗</button></div></td>`},
+ {key:'parallel',label:'Parallel',filter:'text',sortable:true,sortVal:c=>(c.parallel||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.parallel||'')}" style="min-width:100px;font-size:12px" placeholder="Base" onchange="scEdit('${c.id}','parallel',this.value)"></td>`},
+ {key:'card_type',label:'Type',filter:'enum',enumVals:['base','parallel','insert','SSP'],sortable:true,sortVal:c=>c.card_type||'',cell:c=>`<td><select style="font-size:12px" onchange="scEdit('${c.id}','card_type',this.value)">${['base','parallel','insert','SSP'].map(t=>`<option ${((c.card_type||'base')===t)?'selected':''}>${t}</option>`).join('')}</select></td>`},
+ {key:'serial',label:'Serial',filter:'text',sortable:true,sortVal:c=>c.serial||'',cell:c=>`<td class="mono"><input value="${esc(c.serial||'')}" style="width:60px;font-size:12px" placeholder="/99" onchange="scEdit('${c.id}','serial',this.value)"></td>`},
+ {key:'color',label:'Color',filter:'text',sortable:true,sortVal:c=>(c.color||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.color||'')}" style="width:88px;font-size:12px" onchange="scEdit('${c.id}','color',this.value)"></td>`},
+ {key:'rarity',label:'Rarity',filter:'text',sortable:true,sortVal:c=>(c.rarity||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.rarity||'')}" style="min-width:110px;font-size:12px" onchange="scEdit('${c.id}','rarity',this.value)"></td>`},
+ {key:'value',label:'Value',filter:'num',sortable:true,sortVal:c=>+c.value||0,cell:c=>`<td class="mono"><input type="number" value="${c.value==null?'':esc(''+c.value)}" style="width:74px" onchange="scEdit('${c.id}','value',this.value)"></td>`},
+ {key:'rookie',label:'RC',filter:'enum',enumVals:['Yes','No'],sortable:true,sortVal:c=>c.rookie?1:0,cell:c=>`<td style="text-align:center"><input type="checkbox" style="width:auto" ${c.rookie?'checked':''} onchange="scEdit('${c.id}','rookie',this.checked)"></td>`},
+ {key:'chase',label:'Chase',filter:'enum',enumVals:['Yes','No'],sortable:true,sortVal:c=>c.chase?1:0,cell:c=>`<td style="text-align:center"><input type="checkbox" style="width:auto" ${c.chase?'checked':''} onchange="scEdit('${c.id}','chase',this.checked)"></td>`},
  {key:'actions',label:'',core:true,sortable:false,cell:c=>`<td style="white-space:nowrap"><button class="btn sm" title="Add this card to inventory" onclick="invFromCard('${c.id}')">＋ Inv</button> <button class="btn x" onclick="scDel('${c.id}')">✕</button></td>`},
 ];
 const SC_DEFAULT=['num','name','player','set','parallel','card_type','value','chase','actions'];
@@ -1179,9 +1199,9 @@ const _scCache=new Map();const SC_CACHE_MAX=24;
 function scCacheGet(k){if(_scCache.has(k)){const v=_scCache.get(k);_scCache.delete(k);_scCache.set(k,v);return v;}return null;}
 function scCacheSet(k,v){_scCache.set(k,v);while(_scCache.size>SC_CACHE_MAX)_scCache.delete(_scCache.keys().next().value);}
 function scCacheClear(){_scCache.clear();}
-function scGridCfg(){return {sk:'e10_sc',cols:SC_COLS,defaultCols:SC_DEFAULT,defaultSort:{col:'name',dir:1},
- defaultFilters:{search:'',set:'',team:'',rarity:'',parallel:'',card_type:''},listBoxId:'scListBox',colsMenuId:'scColsMenu',viewPrompt:'Name this view (e.g. "Rookies", "/99 parallels")',
- base:()=>SRV?SRV.rows:[],searchFn:null,filter:null,onSort:()=>{SRV.page=0;scFetch();},render:()=>{renderCardGridShell();scFetch();}};}
+function scGridCfg(){return {sk:'e10_sc',cols:SC_COLS,defaultCols:SC_DEFAULT,defaultSort:{col:'name',dir:1},colFilters:true,serverBacked:true,
+ defaultFilters:{search:''},listBoxId:'scListBox',colsMenuId:'scColsMenu',viewPrompt:'Name this view (e.g. "Rookies", "/99 parallels")',
+ base:()=>SRV?SRV.rows:[],searchFn:null,filter:null,onSort:()=>{SRV.page=0;scFetch();},onColFilter:()=>{if(SRV){SRV.page=0;scCacheClear();scFetch();}},render:()=>{renderCardGridShell();scFetch();}};}
 function openCardGrid(scopeCol,scopeId,name,mode){const known=(scopeCol==='checklist_id'&&window._clCount&&window._clCount[scopeId]!=null)?window._clCount[scopeId]:null;
  SRV={scopeCol,scopeId,name:name||'',mode:mode||'checklist',page:0,rows:null,count:0,knownTotal:known};if(!GRIDS['sc'])makeGrid('sc',scGridCfg());SRV.G=GRIDS['sc'];clOpenId='sc';renderCardGridShell();scFetch();}
 function openServerChecklist(clId,name){openCardGrid('checklist_id',clId,name||(window._clCache&&window._clCache[clId])||'Checklist','checklist');}
@@ -1190,27 +1210,28 @@ function closeCardGrid(){const m=SRV?SRV.mode:'checklist';SRV=null;clOpenId=null
 function scFilter(field,val){if(!SRV)return;SRV.G.state.filters[field]=val;SRV.G.state.activeView=-1;SRV.page=0;clearTimeout(_scT);_scT=setTimeout(scFetch,250);}
 function scPage(dir){if(!SRV)return;let np=SRV.page+dir;if(np<0)return;if(dir>0){if(SRV.count!=null){if(np>Math.ceil(SRV.count/CARD_PAGE)-1)return;}else if((SRV.rows||[]).length<CARD_PAGE)return;}SRV.page=np;scFetch();}
 async function scFetch(){if(!SRV)return;const G=SRV.G,F=G.state.filters;
- const key=JSON.stringify([SRV.scopeCol,SRV.scopeId,F,G.state.sort,SRV.page]);SRV._key=key;
- const filtered=dbCardFiltered({search:F.search,filters:F});
+ const key=JSON.stringify([SRV.scopeCol,SRV.scopeId,F,G.state.colFilters,G.state.sort,SRV.page]);SRV._key=key;
+ const CF=G.state.colFilters;
+ const filtered=dbCardFiltered({search:F.search,filters:F,colFilters:CF});
  const patchCount=k=>c=>{if(SRV&&SRV._key===k){SRV.count=c;if(!filtered&&c!=null)SRV.knownTotal=c;const e=_scCache.get(k);if(e)e.count=c;scPager();}};
  /* Cache hit: rows render instantly with zero requests (backspace / repeat / page flip). */
  const cached=scCacheGet(key);
  if(cached){SRV.rows=cached.rows;SRV.ms=0;SRV.loading=false;
    SRV.count=cached.count!=null?cached.count:((!filtered&&SRV.knownTotal!=null)?SRV.knownTotal:null);
-   gRenderList(G);scPager();
-   if(SRV.count==null)dbCardCount(SRV.scopeCol,SRV.scopeId,{search:F.search,filters:F}).then(patchCount(key));
+   gRenderBody(G);scPager();
+   if(SRV.count==null)dbCardCount(SRV.scopeCol,SRV.scopeId,{search:F.search,filters:F,colFilters:CF}).then(patchCount(key));
    return;}
  const box=$('scListBox');if(box){if(SRV.rows==null)box.innerHTML='<div class="lab" style="padding:14px">Loading…</div>';else box.style.opacity='0.5';}
  SRV.loading=true;scPager();const t0=Date.now();
- const res=await dbCards(SRV.scopeCol,SRV.scopeId,{search:F.search,filters:F,sort:G.state.sort,offset:SRV.page*CARD_PAGE,limit:CARD_PAGE});
+ const res=await dbCards(SRV.scopeCol,SRV.scopeId,{search:F.search,filters:F,colFilters:CF,sort:G.state.sort,offset:SRV.page*CARD_PAGE,limit:CARD_PAGE});
  if(!SRV||SRV._key!==key)return;SRV.rows=res.rows;SRV.ms=Date.now()-t0;SRV.loading=false;
- gRenderList(G);const b2=$('scListBox');if(b2)b2.style.opacity='';
+ gRenderBody(G);const b2=$('scListBox');if(b2)b2.style.opacity='';
  /* Total: unfiltered uses the known count (no request); a filter fires ONE decoupled count that
     never blocks the render. Cache the rows immediately; patch the count into the cache when it
     resolves so a later repeat returns rows AND total with zero requests. */
  const initCount=(!filtered&&SRV.knownTotal!=null)?SRV.knownTotal:null;
  SRV.count=initCount;scCacheSet(key,{rows:res.rows,count:initCount});scPager();
- if(initCount==null)dbCardCount(SRV.scopeCol,SRV.scopeId,{search:F.search,filters:F}).then(patchCount(key));}
+ if(initCount==null)dbCardCount(SRV.scopeCol,SRV.scopeId,{search:F.search,filters:F,colFilters:CF}).then(patchCount(key));}
 function scPager(){const el=$('scPager');if(!el||!SRV)return;const known=SRV.count!=null;const from=(SRV.rows&&SRV.rows.length)?SRV.page*CARD_PAGE+1:0,to=SRV.page*CARD_PAGE+((SRV.rows||[]).length);const pages=known?Math.max(1,Math.ceil(SRV.count/CARD_PAGE)):null;
  el.innerHTML=`${SRV.loading?'<span style="color:#0a8a4a;font-weight:600">⟳ searching…</span> ':''}<span>${from.toLocaleString()}–${to.toLocaleString()} of <b>${known?SRV.count.toLocaleString():'…'}</b>${(SRV.ms!=null&&!SRV.loading)?' · '+SRV.ms+'ms':''}</span> <button class="btn x sm" ${SRV.page<=0?'disabled':''} onclick="scPage(-1)">‹ Prev</button> <span class="mono">${SRV.page+1}${pages?'/'+pages:''}</span> <button class="btn x sm" ${(known?SRV.page>=pages-1:(SRV.rows||[]).length<CARD_PAGE)?'disabled':''} onclick="scPage(1)">Next ›</button>`;}
 function renderCardGridShell(){const G=SRV.G,F=G.state.filters;const player=SRV.mode==='player';
@@ -1218,12 +1239,8 @@ function renderCardGridShell(){const G=SRV.G,F=G.state.filters;const player=SRV.
    <div class="row" style="gap:8px;align-items:center"><button class="btn sm" onclick="closeCardGrid()">← ${player?'Players':'Checklists'}</button><h3 style="font-size:15px">${player?'👤 ':''}${esc(SRV.name)}</h3>${player&&window._plMeta&&window._plMeta.team?`<span class="lab">${esc(window._plMeta.team||'')}${window._plMeta.nationality?' · '+esc(window._plMeta.nationality):''}</span>`:''}</div>
    <div class="row" style="gap:6px;flex-wrap:wrap">${player?'':`<button class="btn sm" onclick="scBulkChase(true)" title="Flag every card matching the current filter/search as chase">🎯 Mark filtered chase</button><button class="btn sm" onclick="scBulkChase(false)" title="Clear chase on the filtered cards">Unmark filtered</button><button class="btn sm" onclick="chaseApplyFromGrid()" title="Apply a saved player chase list to this checklist">Apply chase list…</button><button class="btn sm" onclick="chaseSaveFromChecklist('${SRV.scopeId}')" title="Save this checklist's chase players as a reusable list">＋ Save chases as list</button><button class="btn sm" onclick="buildBreakFromChecklist('${SRV.scopeId}')" title="Preload the break modeler with chase cards">⚡ Model a break</button><button class="btn v sm" onclick="scAddCard()">+ Add card</button>`}</div></div>
    <div class="etool" style="margin-top:12px">
-     <div style="flex:2;min-width:160px"><label>Search all fields</label><input value="${esc(F.search||'')}" placeholder="name / set / parallel / color / #…" oninput="scFilter('search',this.value)"></div>
-     <div><label>Set</label><input value="${esc(F.set||'')}" placeholder="type…" style="max-width:130px" oninput="scFilter('set',this.value)"></div>
-     <div><label>Rarity</label><input value="${esc(F.rarity||'')}" placeholder="type…" style="max-width:110px" oninput="scFilter('rarity',this.value)"></div>
-     <div><label>Parallel</label><input value="${esc(F.parallel||'')}" placeholder="type…" style="max-width:110px" oninput="scFilter('parallel',this.value)"></div>
-     <div><label>Type</label><input value="${esc(F.card_type||'')}" placeholder="type…" style="max-width:90px" oninput="scFilter('card_type',this.value)"></div>
-     <div><label>Team</label><input value="${esc(F.team||'')}" placeholder="type…" style="max-width:110px" oninput="scFilter('team',this.value)"></div>
+     <div style="flex:2;min-width:200px"><label>Search all fields</label><input value="${esc(F.search||'')}" placeholder="name / set / parallel / color / #…" oninput="scFilter('search',this.value)"></div>
+     <div style="align-self:flex-end"><span class="lab" style="text-transform:none;letter-spacing:0">Set · Rarity · Parallel · Type · Team → filter per column in the row under the headers ↓ (pushes to the query across all pages)</span></div>
    </div>
    <div class="etool" style="margin-top:8px;align-items:center;gap:10px">${gColsBtn(G)}${gViewsHTML(G)}<div id="scPager" class="lab" style="margin-left:auto;text-transform:none;letter-spacing:0"></div></div>
    <div id="scListBox"></div></div>`;
@@ -1433,14 +1450,31 @@ let exCopyRef=''; // Whatnot Export: which show's attached copy to prefill
    onApply(G), migrate(G), viewPrompt. Column: {key,label,type,core,first,sortable,sortVal(row),cell(row,admin,G)}. */
 const GRIDS={};
 function gLoad(k,def){try{const v=JSON.parse(localStorage.getItem(k));return v==null?def:v;}catch(e){return def;}}
-function makeGrid(id,cfg){const sk=cfg.sk;const G={id,sk,cfg,state:{cols:gLoad(sk+'_cols',null),sort:gLoad(sk+'_sort',cfg.defaultSort||{col:cfg.defaultCols[0],dir:1}),filters:Object.assign({},cfg.defaultFilters||{},gLoad(sk+'_filters',{})),views:gLoad(sk+'_views',[]),widths:gLoad(sk+'_widths',{})||{},activeView:-1}};if(cfg.migrate)cfg.migrate(G);GRIDS[id]=G;return G;}
+function makeGrid(id,cfg){const sk=cfg.sk;const G={id,sk,cfg,state:{cols:gLoad(sk+'_cols',null),sort:gLoad(sk+'_sort',cfg.defaultSort||{col:cfg.defaultCols[0],dir:1}),filters:Object.assign({},cfg.defaultFilters||{},gLoad(sk+'_filters',{})),colFilters:gLoad(sk+'_colf',{})||{},views:gLoad(sk+'_views',[]),widths:gLoad(sk+'_widths',{})||{},activeView:-1}};if(cfg.migrate)cfg.migrate(G);GRIDS[id]=G;return G;}
 function gColDef(G,k){return G.cfg.cols.find(c=>c.key===k);}
 function gVisibleKeys(G){let keys=(Array.isArray(G.state.cols)&&G.state.cols.length?G.state.cols:G.cfg.defaultCols).filter(k=>gColDef(G,k));G.cfg.cols.filter(c=>c.core).forEach(c=>{if(!keys.includes(c.key)){if(c.first)keys.unshift(c.key);else keys.push(c.key);}});return keys;}
 function gVisibleCols(G){return gVisibleKeys(G).map(k=>gColDef(G,k));}
-function gPersist(G){try{const s=G.sk;localStorage.setItem(s+'_cols',JSON.stringify(gVisibleKeys(G)));localStorage.setItem(s+'_sort',JSON.stringify(G.state.sort));localStorage.setItem(s+'_filters',JSON.stringify(G.state.filters));localStorage.setItem(s+'_views',JSON.stringify(G.state.views));localStorage.setItem(s+'_widths',JSON.stringify(G.state.widths||{}));}catch(e){}}
+function gPersist(G){try{const s=G.sk;localStorage.setItem(s+'_cols',JSON.stringify(gVisibleKeys(G)));localStorage.setItem(s+'_sort',JSON.stringify(G.state.sort));localStorage.setItem(s+'_filters',JSON.stringify(G.state.filters));localStorage.setItem(s+'_colf',JSON.stringify(G.state.colFilters||{}));localStorage.setItem(s+'_views',JSON.stringify(G.state.views));localStorage.setItem(s+'_widths',JSON.stringify(G.state.widths||{}));}catch(e){}}
+/* ===== per-column Excel-style filters (shared engine). Column declares filter via `filter`:
+   'text'|'num'|'enum'|false (default text, or num when type==='num'). Value read via col.filterGet||col.sortVal;
+   enum distinct via col.enumGet||col.sortVal. Client grids filter in gRows; server grids translate
+   G.state.colFilters into their query (see dbCardFilters). ===== */
+function gFilterType(c){if(!c||c.filter===false||c.key==='actions')return null;if(c.filter)return c.filter;return c.type==='num'?'num':'text';}
+function gEnumValues(G,c){if(Array.isArray(c.enumVals))return c.enumVals.slice();/* fixed set (server grids can't scan all pages) */const get=c.enumGet||c.sortVal||(_=>'');const set=new Set();(G.cfg.base?G.cfg.base(G):[]).forEach(r=>{const v=get(r);set.add(v==null?'':String(v));});return [...set].sort((a,b)=>a.localeCompare(b));}
+function gColFilterActive(f,ft){if(!f)return false;if(ft==='enum')return Array.isArray(f.v)&&f.v.length>0;if(f.op==='empty'||f.op==='nempty')return true;return f.v!=null&&f.v!=='';}
+function gApplyColFilters(G,rows){const cf=G.state.colFilters||{};const active=Object.keys(cf).map(k=>({k,c:gColDef(G,k)})).filter(x=>x.c&&gColFilterActive(cf[x.k],gFilterType(x.c)));
+ if(!active.length)return rows;
+ return rows.filter(row=>active.every(({k,c})=>{const ft=gFilterType(c),f=cf[k];
+   if(ft==='enum'){const dv=String((c.enumGet||c.sortVal)(row));return f.v.includes(dv);}
+   const raw=(c.filterGet||c.sortVal||(_=>''))(row);
+   if(ft==='num'){if(raw==null||raw==='')return false;const n=+raw||0,a=+f.v,b=+f.v2;switch(f.op){case 'ne':return n!==a;case 'gte':return n>=a;case 'lte':return n<=a;case 'between':return n>=a&&n<=(isNaN(b)?a:b);default:return n===a;}}
+   const s=String(raw==null?'':raw).toLowerCase(),q=String(f.v||'').toLowerCase();
+   switch(f.op){case 'ncontains':return !s.includes(q);case 'eq':return s===q;case 'starts':return s.startsWith(q);case 'ends':return s.endsWith(q);case 'empty':return s.trim()==='';case 'nempty':return s.trim()!=='';default:return s.includes(q);}}));}
+function gAnyColFilter(G){const cf=G.state.colFilters||{};return Object.keys(cf).some(k=>{const c=gColDef(G,k);return c&&gColFilterActive(cf[k],gFilterType(c));});}
 function gRows(G){let rows=G.cfg.base(G).slice();const f=G.state.filters;const q=(f.search||'').trim().toLowerCase();
  if(q&&G.cfg.searchFn)rows=rows.filter(r=>G.cfg.searchFn(r,q));
  if(G.cfg.filter)rows=rows.filter(r=>G.cfg.filter(r,f));
+ if(G.cfg.colFilters&&!G.cfg.serverBacked)rows=gApplyColFilters(G,rows);
  const sc=gColDef(G,G.state.sort.col)||gVisibleCols(G)[0],d=G.state.sort.dir,key=sc?sc.sortVal:(_=>0);
  return rows.sort((a,b)=>{const ka=key(a),kb=key(b);return (ka<kb?-1:ka>kb?1:0)*d;});}
 /* ===== drag-to-resize columns (shared: every grid built on this engine inherits it) =====
@@ -1469,9 +1503,31 @@ function gResizeStart(ev,id,key){ev.preventDefault();ev.stopPropagation();const 
  document.body.style.cursor='col-resize';document.body.style.userSelect='none';
  document.addEventListener('mousemove',move,true);document.addEventListener('mouseup',up,true);}
 function gSortSet(id,key){if(_gResizing)return;const G=GRIDS[id];if(!G)return;if(G.state.sort.col===key)G.state.sort.dir*=-1;else G.state.sort={col:key,dir:1};gPersist(G);if(G.cfg.onSort){G.cfg.onSort(G);return;}gRenderList(G);}
+function gBodyHTML(G,rows,cols,admin){return rows.map(i=>`<tr>${cols.map(c=>c.cell(i,admin,G)).join('')}</tr>`).join('')||`<tr><td colspan="${cols.length}" style="color:var(--mut)">${G.cfg.emptyMsg?G.cfg.emptyMsg(G):'No rows match.'}</td></tr>`;}
 function gRenderList(G){const box=$(G.cfg.listBoxId);if(!box)return;gPersist(G);const admin=ROLE==='admin';const rows=gRows(G),cols=gVisibleCols(G);
- const wa=gWidthsActive(G);const sumW=wa?gSumWidths(G,cols):0;
- box.innerHTML=`<div class="egrid wide" style="margin-top:12px"><table${wa?` style="table-layout:fixed;width:${sumW}px;min-width:${sumW}px"`:''}><tr>${cols.map(c=>gSortTh(G,c)).join('')}</tr>${rows.map(i=>`<tr>${cols.map(c=>c.cell(i,admin,G)).join('')}</tr>`).join('')||`<tr><td colspan="${cols.length}" style="color:var(--mut)">No rows match.</td></tr>`}</table></div>${G.cfg.footer?G.cfg.footer(rows,admin):''}`;}
+ const wa=gWidthsActive(G);const sumW=wa?gSumWidths(G,cols):0;const tb=G.cfg.listBoxId+'_tb';
+ box.innerHTML=`<div class="egrid wide" style="margin-top:12px"><table${wa?` style="table-layout:fixed;width:${sumW}px;min-width:${sumW}px"`:''}><thead><tr>${cols.map(c=>gSortTh(G,c)).join('')}</tr>${G.cfg.colFilters?`<tr class="gfilt">${cols.map(c=>gFilterCell(G,c)).join('')}</tr>`:''}</thead><tbody id="${tb}">${gBodyHTML(G,rows,cols,admin)}</tbody></table></div>${G.cfg.footer?`<div id="${G.cfg.listBoxId}_ft">${G.cfg.footer(rows,admin)}</div>`:''}`;}
+/* refresh ONLY the data rows (+ footer) — leaves the filter-row inputs untouched so typing keeps focus */
+function gRenderBody(G){const tb=$(G.cfg.listBoxId+'_tb');if(!tb)return gRenderList(G);gPersist(G);const admin=ROLE==='admin';const rows=gRows(G),cols=gVisibleCols(G);tb.innerHTML=gBodyHTML(G,rows,cols,admin);const ft=$(G.cfg.listBoxId+'_ft');if(ft&&G.cfg.footer)ft.innerHTML=G.cfg.footer(rows,admin);}
+const TXT_OPS=[['contains','contains'],['ncontains','not contains'],['eq','equals'],['starts','starts with'],['ends','ends with'],['empty','is empty'],['nempty','not empty']];
+const NUM_OPS=[['eq','='],['ne','≠'],['gte','≥'],['lte','≤'],['between','between']];
+function gFilterCell(G,c){const ft=gFilterType(c);if(!ft)return '<th></th>';const id=G.id,k=c.key,f=(G.state.colFilters&&G.state.colFilters[k])||{};const active=gColFilterActive(f,ft);
+ const clr=active?`<a class="gflt-clr" title="Clear filter" onclick="gClearColFilter('${id}','${k}')">✕</a>`:'';
+ if(ft==='enum'){const vals=gEnumValues(G,c),sel=Array.isArray(f.v)?f.v:[];
+   return `<th><div class="gflt-txt"><details class="gflt-pop"><summary class="gflt-sum" title="${esc(c.label)}">${sel.length?sel.length+' picked':'All'} ▾</summary><div class="gpop"><div class="row" style="gap:6px;margin-bottom:6px"><button class="btn x sm" onclick="gEnumAll('${id}','${k}',1)">All</button><button class="btn x sm" onclick="gEnumAll('${id}','${k}',0)">Clear</button></div>${vals.map(v=>`<label class="grow" style="gap:6px;margin:0"><input type="checkbox" style="width:auto" ${sel.includes(v)?'checked':''} onchange="gEnumToggle('${id}','${k}','${jsq(v)}',this.checked)"> ${esc(v)||'<span class="lab">(blank)</span>'}</label>`).join('')||'<div class="lab">no values</div>'}</div></details>${clr}</div></th>`;}
+ if(ft==='num'){const op=f.op||'gte';return `<th><div class="gflt-num"><select title="${esc(c.label)}" onchange="gColFilterOp('${id}','${k}',this.value)">${NUM_OPS.map(o=>`<option value="${o[0]}" ${op===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select><input id="gflt_${id}_${k}" type="number" value="${esc(f.v==null?'':f.v)}" placeholder="…" oninput="gColFilterV('${id}','${k}',this.value)">${op==='between'?`<input type="number" value="${esc(f.v2==null?'':f.v2)}" placeholder="…" oninput="gColFilterV2('${id}','${k}',this.value)">`:''}${clr}</div></th>`;}
+ const op=f.op||'contains',noVal=(op==='empty'||op==='nempty');
+ return `<th><div class="gflt-txt"><select title="${esc(c.label)}" onchange="gColFilterOp('${id}','${k}',this.value)">${TXT_OPS.map(o=>`<option value="${o[0]}" ${op===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select>${noVal?'':`<input id="gflt_${id}_${k}" value="${esc(f.v||'')}" placeholder="filter…" oninput="gColFilterV('${id}','${k}',this.value)">`}${clr}</div></th>`;}
+let _gFiltT={};
+function gCF(G){G.state.colFilters=G.state.colFilters||{};return G.state.colFilters;}
+function gAfterFilter(G){G.state.activeView=-1;gPersist(G);if(G.cfg.onColFilter)G.cfg.onColFilter(G);else gRenderBody(G);}
+function gAfterFilterDeb(G){clearTimeout(_gFiltT[G.id]);_gFiltT[G.id]=setTimeout(()=>gAfterFilter(G),220);}
+function gColFilterOp(id,key,op){const G=GRIDS[id];const cf=gCF(G);cf[key]=Object.assign({},cf[key]||{},{op});if(op==='empty'||op==='nempty')cf[key].v='';G.state.activeView=-1;gPersist(G);gRenderList(G);if(G.cfg.onColFilter)G.cfg.onColFilter(G);const inp=$('gflt_'+id+'_'+key);if(inp){inp.focus();}}
+function gColFilterV(id,key,v){const G=GRIDS[id];const cf=gCF(G);const def=gFilterType(gColDef(G,key))==='num'?'gte':'contains';cf[key]=Object.assign({op:def},cf[key]||{},{v});gAfterFilterDeb(G);}
+function gColFilterV2(id,key,v){const G=GRIDS[id];const cf=gCF(G);cf[key]=Object.assign({op:'between'},cf[key]||{},{v2:v});gAfterFilterDeb(G);}
+function gEnumToggle(id,key,val,on){const G=GRIDS[id];const cf=gCF(G);const cur=(cf[key]&&Array.isArray(cf[key].v))?cf[key].v.slice():[];const i=cur.indexOf(val);if(on&&i<0)cur.push(val);if(!on&&i>=0)cur.splice(i,1);cf[key]={op:'in',v:cur};gAfterFilter(G);}
+function gEnumAll(id,key,all){const G=GRIDS[id];const cf=gCF(G);cf[key]={op:'in',v:all?gEnumValues(G,gColDef(G,key)):[]};G.state.activeView=-1;gPersist(G);gRenderList(G);if(G.cfg.onColFilter)G.cfg.onColFilter(G);}
+function gClearColFilter(id,key){const G=GRIDS[id];delete gCF(G)[key];G.state.activeView=-1;gPersist(G);gRenderList(G);if(G.cfg.onColFilter)G.cfg.onColFilter(G);}
 function gSumWidths(G,cols){cols=cols||gVisibleCols(G);const wa=gWidthsActive(G);return cols.reduce((a,c)=>a+((G.state.widths&&G.state.widths[c.key])||(wa?130:0)),0);}
 function gColMenuHTML(G){const vis=gVisibleKeys(G),hidden=G.cfg.cols.filter(c=>!vis.includes(c.key));
  const row=(c,idx,shown)=>`<div class="grow"><label style="flex:1;display:flex;align-items:center;gap:6px;margin:0"><input type="checkbox" style="width:auto" ${shown?'checked':''} ${c.core?'disabled':''} onchange="gToggleCol('${G.id}','${c.key}',this.checked)"> ${esc(c.label||'Actions')}${c.core?' <span class="lab">core</span>':''}</label>${(shown&&!c.core)?`<button class="btn x sm" ${idx===0?'disabled':''} onclick="gMoveCol('${G.id}','${c.key}',-1)">▲</button><button class="btn x sm" onclick="gMoveCol('${G.id}','${c.key}',1)">▼</button>`:''}</div>`;
@@ -1482,11 +1538,11 @@ function gMoveCol(id,key,dir){const G=GRIDS[id];let keys=gVisibleKeys(G);const i
 function gResetCols(id){const G=GRIDS[id];G.state.cols=null;G.state.widths={};try{localStorage.removeItem(G.sk+'_cols');localStorage.removeItem(G.sk+'_widths');}catch(e){}gRenderCols(G);gRenderList(G);}
 function gColsBtn(G){return `<details class="gcfg"><summary class="btn sm">⚙ Columns</summary><div class="gpop" id="${G.cfg.colsMenuId}"></div></details>`;}
 function gViewsHTML(G){return `<div><label>Views</label><div class="row" style="gap:6px;align-items:center"><select onchange="gApplyView('${G.id}',this.value)" style="max-width:150px"><option value="">— saved views —</option>${G.state.views.map((v,i)=>`<option value="${i}" ${G.state.activeView===i?'selected':''}>${esc(v.name)}</option>`).join('')}</select><button class="btn sm" onclick="gSaveView('${G.id}')">Save view</button><button class="btn sm" onclick="gResetFilters('${G.id}')">Reset</button>${G.state.views.length?`<button class="btn x sm" title="Rename selected" onclick="var G=GRIDS['${G.id}'];G.state.activeView>=0?gRenameView('${G.id}',G.state.activeView):toast('Select a view first')">✎</button><button class="btn x sm" title="Delete selected" onclick="var G=GRIDS['${G.id}'];G.state.activeView>=0?gDeleteView('${G.id}',G.state.activeView):toast('Select a view first')">✕</button>`:''}</div></div>`;}
-function gSaveView(id){const G=GRIDS[id];const name=prompt(G.cfg.viewPrompt||'Name this view');if(name==null||!name.trim())return;G.state.views.push({name:name.trim(),filters:Object.assign({},G.state.filters),cols:gVisibleKeys(G),sort:Object.assign({},G.state.sort),widths:Object.assign({},G.state.widths||{})});G.state.activeView=G.state.views.length-1;gPersist(G);G.cfg.render();toast('View saved');}
-function gApplyView(id,idx){const G=GRIDS[id];const v=G.state.views[+idx];if(!v)return;G.state.activeView=+idx;G.state.filters=Object.assign({},G.cfg.defaultFilters||{},v.filters||{});if(Array.isArray(v.cols)&&v.cols.length)G.state.cols=v.cols.slice();if(v.sort)G.state.sort=Object.assign({},v.sort);G.state.widths=v.widths?Object.assign({},v.widths):{};gPersist(G);if(G.cfg.onApply)G.cfg.onApply(G);G.cfg.render();toast('Applied “'+v.name+'”');}
+function gSaveView(id){const G=GRIDS[id];const name=prompt(G.cfg.viewPrompt||'Name this view');if(name==null||!name.trim())return;G.state.views.push({name:name.trim(),filters:Object.assign({},G.state.filters),colFilters:JSON.parse(JSON.stringify(G.state.colFilters||{})),cols:gVisibleKeys(G),sort:Object.assign({},G.state.sort),widths:Object.assign({},G.state.widths||{})});G.state.activeView=G.state.views.length-1;gPersist(G);G.cfg.render();toast('View saved');}
+function gApplyView(id,idx){const G=GRIDS[id];const v=G.state.views[+idx];if(!v)return;G.state.activeView=+idx;G.state.filters=Object.assign({},G.cfg.defaultFilters||{},v.filters||{});G.state.colFilters=v.colFilters?JSON.parse(JSON.stringify(v.colFilters)):{};if(Array.isArray(v.cols)&&v.cols.length)G.state.cols=v.cols.slice();if(v.sort)G.state.sort=Object.assign({},v.sort);G.state.widths=v.widths?Object.assign({},v.widths):{};gPersist(G);if(G.cfg.onApply)G.cfg.onApply(G);G.cfg.render();toast('Applied “'+v.name+'”');}
 function gRenameView(id,idx){const G=GRIDS[id];const v=G.state.views[+idx];if(!v)return;const n=prompt('Rename view',v.name);if(n==null)return;v.name=n.trim()||v.name;gPersist(G);G.cfg.render();}
 function gDeleteView(id,idx){const G=GRIDS[id];const v=G.state.views[+idx];if(!v||!confirm('Delete view “'+v.name+'”?'))return;G.state.views.splice(+idx,1);G.state.activeView=-1;gPersist(G);G.cfg.render();}
-function gResetFilters(id){const G=GRIDS[id];G.state.filters=Object.assign({},G.cfg.defaultFilters||{});G.state.widths={};G.state.activeView=-1;try{localStorage.removeItem(G.sk+'_widths');}catch(e){}gPersist(G);if(G.cfg.onApply)G.cfg.onApply(G);G.cfg.render();toast('Reset — filters & column widths');}
+function gResetFilters(id){const G=GRIDS[id];G.state.filters=Object.assign({},G.cfg.defaultFilters||{});G.state.colFilters={};G.state.widths={};G.state.activeView=-1;try{localStorage.removeItem(G.sk+'_widths');localStorage.removeItem(G.sk+'_colf');}catch(e){}gPersist(G);if(G.cfg.onApply)G.cfg.onApply(G);G.cfg.render();toast('Reset — column filters, sort & widths');}
 function dataHub(){
  /* Tab bar now lives in the top-level sub-nav; this just renders the active module into #dtc. */
  if(dataTab==='team'&&ROLE!=='admin')dataTab='overview';
@@ -1522,32 +1578,31 @@ function invRollup(items){items=items||invView();let cost=0,market=0,committed=0
 const INV_COLS=[
  {key:'name',label:'Item',core:true,first:true,type:'text',sortable:true,sortVal:i=>(i.name||'').toLowerCase(),
   cell:(i,admin)=>{const sold=(+i.soldQty||0)>0?`<div class="lab" style="text-transform:none;letter-spacing:0;color:var(--mut2)">sold ${i.soldQty} · ${money(i.soldProceeds||0)}</div>`:'';return `<td><b>${esc(i.name)}</b> <span class="pill" style="margin:0">${esc(i.cat)}</span>${sold}</td>`;}},
- {key:'cat',label:'Category',type:'text',sortable:true,sortVal:i=>(i.cat||'').toLowerCase(),cell:i=>`<td>${esc(i.cat||'')||'—'}</td>`},
- {key:'set',label:'Set',type:'text',sortable:true,sortVal:i=>(i.set||'').toLowerCase(),cell:i=>`<td>${esc(i.set||'')||'—'}</td>`},
- {key:'gradingCompany',label:'Grading',type:'text',sortable:true,sortVal:i=>(i.gradingCompany||''),cell:i=>`<td>${i.gradingCompany?`<span class="pill" style="margin:0">${esc(i.gradingCompany)}</span>`:'<span class="lab">—</span>'}</td>`},
- {key:'grade',label:'Grade',type:'num',sortable:true,sortVal:i=>(i.grade!==''&&i.grade!=null)?+i.grade:-1,cell:i=>`<td class="mono">${(i.grade!==''&&i.grade!=null)?esc(''+i.grade):'—'}</td>`},
+ {key:'cat',label:'Category',type:'text',filter:'enum',enumGet:i=>i.cat||'',sortable:true,sortVal:i=>(i.cat||'').toLowerCase(),cell:i=>`<td>${esc(i.cat||'')||'—'}</td>`},
+ {key:'set',label:'Set',type:'text',filter:'enum',enumGet:i=>i.set||'',sortable:true,sortVal:i=>(i.set||'').toLowerCase(),cell:i=>`<td>${esc(i.set||'')||'—'}</td>`},
+ {key:'gradingCompany',label:'Grading',type:'text',filter:'enum',enumGet:i=>i.gradingCompany||'',sortable:true,sortVal:i=>(i.gradingCompany||''),cell:i=>`<td>${i.gradingCompany?`<span class="pill" style="margin:0">${esc(i.gradingCompany)}</span>`:'<span class="lab">—</span>'}</td>`},
+ {key:'grade',label:'Grade',type:'num',filterGet:i=>(i.grade!==''&&i.grade!=null)?+i.grade:null,sortable:true,sortVal:i=>(i.grade!==''&&i.grade!=null)?+i.grade:-1,cell:i=>`<td class="mono">${(i.grade!==''&&i.grade!=null)?esc(''+i.grade):'—'}</td>`},
  {key:'cardNumber',label:'Card #',type:'text',sortable:true,sortVal:i=>(i.cardNumber||''),cell:i=>`<td class="mono">${esc(i.cardNumber||'')||'—'}</td>`},
- {key:'year',label:'Year',type:'num',sortable:true,sortVal:i=>+i.year||0,cell:i=>`<td class="mono">${i.year?esc(''+i.year):'—'}</td>`},
- {key:'cond',label:'Condition',type:'text',sortable:true,sortVal:i=>(i.cond||'').toLowerCase(),cell:i=>`<td>${esc(i.cond||'')||'—'}</td>`},
+ {key:'year',label:'Year',type:'num',filterGet:i=>i.year?+i.year:null,sortable:true,sortVal:i=>+i.year||0,cell:i=>`<td class="mono">${i.year?esc(''+i.year):'—'}</td>`},
+ {key:'cond',label:'Condition',type:'text',filter:'enum',enumGet:i=>i.cond||'',sortable:true,sortVal:i=>(i.cond||'').toLowerCase(),cell:i=>`<td>${esc(i.cond||'')||'—'}</td>`},
  {key:'onhand',label:'On hand / Free',type:'num',sortable:true,sortVal:i=>invAvailable(i),cell:i=>{const q=+i.qty||0,av=invAvailable(i),rsv=invReserved(i);return `<td class="mono">${q} / <b style="color:${av>0?'#0a8a4a':'var(--mut2)'}">${av}</b>${rsv?` <span class="lab">(${rsv} res)</span>`:''}</td>`;}},
  {key:'qty',label:'Qty',type:'num',sortable:true,sortVal:i=>+i.qty||0,cell:i=>`<td class="mono">${+i.qty||0}</td>`},
  {key:'reserved',label:'Reserved',type:'num',sortable:true,sortVal:i=>invReserved(i),cell:i=>`<td class="mono">${invReserved(i)}</td>`},
  {key:'cost',label:'Unit cost',type:'num',sortable:true,sortVal:i=>+i.cost||0,cell:i=>`<td class="mono">${money(+i.cost||0)}</td>`},
  {key:'market',label:'Market',type:'num',sortable:true,sortVal:i=>+i.value||0,cell:i=>`<td class="mono">${money(+i.value||0)}</td>`},
  {key:'gain',label:'Gain',type:'num',sortable:true,sortVal:i=>((+i.value||0)-(+i.cost||0))*(+i.qty||1),cell:i=>{const g=((+i.value||0)-(+i.cost||0))*(+i.qty||0);return `<td class="mono" style="color:${g>=0?'#0a8a4a':'var(--red)'}">${g>=0?'+':''}${money(g)}</td>`;}},
- {key:'alloc',label:'Allocated to',type:'text',sortable:true,sortVal:i=>invReserved(i),cell:(i,admin)=>{const pills=(i.reservations||[]).map(r=>`<span class="pill" style="margin:2px">${esc(r.showLabel||'show')} ×${r.qty}${(admin||r.streamerUid===MEID)?` <a onclick="releaseReservation('${i.id}','${r.showId}','${r.streamerUid}')" style="color:var(--red)">✕</a>`:''}</span>`).join('')||'<span class="lab">—</span>';return `<td>${pills}</td>`;}},
+ {key:'alloc',label:'Allocated to',type:'text',filter:false,sortable:true,sortVal:i=>invReserved(i),cell:(i,admin)=>{const pills=(i.reservations||[]).map(r=>`<span class="pill" style="margin:2px">${esc(r.showLabel||'show')} ×${r.qty}${(admin||r.streamerUid===MEID)?` <a onclick="releaseReservation('${i.id}','${r.showId}','${r.streamerUid}')" style="color:var(--red)">✕</a>`:''}</span>`).join('')||'<span class="lab">—</span>';return `<td>${pills}</td>`;}},
  {key:'age',label:'Age',type:'num',sortable:true,sortVal:i=>invAge(i),cell:i=>{const age=invAge(i);return `<td class="mono" style="${age>30?'color:var(--red)':''}">${age}d${age>30?' ⚠':''}</td>`;}},
- {key:'owner',label:'Owner',type:'text',sortable:true,sortVal:i=>ownerName(i.owner).toLowerCase(),cell:i=>`<td>${esc(ownerName(i.owner))}</td>`},
- {key:'status',label:'Status',type:'text',sortable:true,sortVal:i=>{const av=invAvailable(i);return av>0?'0free':(invReserved(i)>0?'1reserved':((+i.soldQty||0)>0?'2sold':'3none'));},cell:i=>{const av=invAvailable(i),rsv=invReserved(i),sold=(+i.soldQty||0)>0;return `<td><span class="lab">${av>0?'Free':(rsv>0?'Reserved':(sold?'Sold':'—'))}</span></td>`;}},
+ {key:'owner',label:'Owner',type:'text',filter:'enum',enumGet:i=>ownerName(i.owner),sortable:true,sortVal:i=>ownerName(i.owner).toLowerCase(),cell:i=>`<td>${esc(ownerName(i.owner))}</td>`},
+ {key:'status',label:'Status',type:'text',filter:'enum',enumGet:i=>{const av=invAvailable(i),rsv=invReserved(i),sold=(+i.soldQty||0)>0;return av>0?'Free':(rsv>0?'Reserved':(sold?'Sold':'—'));},sortable:true,sortVal:i=>{const av=invAvailable(i);return av>0?'0free':(invReserved(i)>0?'1reserved':((+i.soldQty||0)>0?'2sold':'3none'));},cell:i=>{const av=invAvailable(i),rsv=invReserved(i),sold=(+i.soldQty||0)>0;return `<td><span class="lab">${av>0?'Free':(rsv>0?'Reserved':(sold?'Sold':'—'))}</span></td>`;}},
  {key:'actions',label:'',core:true,sortable:false,cell:(i,admin)=>`<td style="white-space:nowrap">${/box|case|etb|pack|sealed/i.test(i.cat||'')?`<button class="btn sm" title="Model a break from this product + its checklist" onclick="buildBreakFromProduct('${i.id}')">⚡ Break</button> `:''}${hasCap('act.inventory_edit')?`<button class="btn sm" title="Edit this item" onclick="invEdit('${i.id}')">Edit</button> `:''}<button class="btn sm" onclick="reserveModal('${i.id}')">Reserve</button> <button class="btn sm" onclick="sellModal('${i.id}')">Sold</button>${admin?` <select style="max-width:110px;font-size:11px" onchange="reassignInv('${i.id}',this.value)">${ownerOpts(i.owner)}</select>`:''} <button class="btn x" onclick="delInv('${i.id}')">✕</button></td>`},
 ];
 const INV_DEFAULT_COLS=['name','cat','set','gradingCompany','grade','onhand','cost','market','gain','alloc','age','actions'];
-const invGridCfg={sk:'e10_inv',cols:INV_COLS,defaultCols:INV_DEFAULT_COLS,defaultSort:{col:'name',dir:1},
- defaultFilters:{search:'',cat:'',set:'',status:'all',gc:'',gradeMin:'',year:'',owner:'mine'},
+const invGridCfg={sk:'e10_inv',cols:INV_COLS,defaultCols:INV_DEFAULT_COLS,defaultSort:{col:'name',dir:1},colFilters:true,
+ defaultFilters:{search:'',owner:'mine'},
  listBoxId:'invListBox',colsMenuId:'invColsMenu',viewPrompt:'Name this view (e.g. "PSA 10s", "Aging slabs", "Free sealed boxes")',
  base:(G)=>{invFilter=G.state.filters.owner||'mine';return invView();},
- searchFn:(i,q)=>(i.name||'').toLowerCase().includes(q),
- filter:(i,f)=>{if(f.cat&&i.cat!==f.cat)return false;if(f.set&&(i.set||'')!==f.set)return false;if(f.gc&&(i.gradingCompany||'')!==f.gc)return false;if(f.gradeMin!==''&&f.gradeMin!=null&&!(i.grade!==''&&i.grade!=null&&(+i.grade)>=(+f.gradeMin)))return false;if(f.year!==''&&f.year!=null&&(''+(i.year||''))!==(''+f.year))return false;const st=f.status;if(st==='onhand')return (+i.qty||0)>0;if(st==='sold')return (+i.soldQty||0)>0;if(st==='free')return invAvailable(i)>0;if(st==='reserved')return invReserved(i)>0;return true;},
+ searchFn:(i,q)=>(i.name||'').toLowerCase().includes(q)||(i.set||'').toLowerCase().includes(q)||(i.cat||'').toLowerCase().includes(q),
  footer:(rows,admin)=>`<div class="lab" style="margin-top:8px">${rows.length} shown · reservations hard-lock units to a show (app-enforced). ${admin?'Admin: reassign owner, reserve beyond free, release anyone.':'You can release only your own reservations.'}</div>`,
  onApply:(G)=>{invFilter=G.state.filters.owner||'mine';try{localStorage.setItem('e10_invfilter',invFilter);}catch(e){}},
  render:()=>dInventory(),
@@ -1592,14 +1647,9 @@ function dInventory(){const admin=ROLE==='admin';const canEdit=hasCap('act.inven
    <div class="metric"><div class="n" style="color:${realizedMargin(invView())>=0?'#0a8a4a':'var(--red)'}">${realizedMargin(invView())>=0?'+':''}${money(realizedMargin(invView()))}</div><div class="l">Realized (sold)</div></div></div>`;
  const F=INVG.state.filters;
  h+=`<div class="card" style="margin-top:16px"><div class="etool">
-     <div style="flex:2;min-width:140px"><label>Search</label><input value="${esc(F.search||'')}" placeholder="item name…" oninput="INVG.state.filters.search=this.value;gRenderList(INVG)"></div>
+     <div style="flex:2;min-width:160px"><label>Search</label><input value="${esc(F.search||'')}" placeholder="search name / set / category…" oninput="INVG.state.filters.search=this.value;gRenderBody(INVG)"></div>
      <div><label>Owner</label><div class="eseg"><button class="${F.owner==='mine'?'on':''}" onclick="if(INVG.state.filters.owner!=='mine'){INVG.state.filters.owner='mine';invFilter='mine';localStorage.setItem('e10_invfilter','mine');gPersist(INVG);dInventory();}">Mine</button><button class="${F.owner==='all'?'on':''}" onclick="if(INVG.state.filters.owner!=='all'){INVG.state.filters.owner='all';invFilter='all';localStorage.setItem('e10_invfilter','all');gPersist(INVG);dInventory();}">Everyone</button></div></div>
-     <div><label>Category</label><select onchange="INVG.state.filters.cat=this.value;gRenderList(INVG)"><option value="">All</option>${INVCATS.map(c=>`<option ${F.cat===c?'selected':''}>${c}</option>`).join('')}</select></div>
-     <div><label>Set</label><select onchange="INVG.state.filters.set=this.value;gRenderList(INVG)"><option value="">All</option>${sets.map(s=>`<option ${F.set===s?'selected':''}>${esc(s)}</option>`).join('')}</select></div>
-     <div><label>Grading</label><select onchange="INVG.state.filters.gc=this.value;gRenderList(INVG)"><option value="">All</option>${TPG.map(g=>`<option ${F.gc===g?'selected':''}>${g}</option>`).join('')}</select></div>
-     <div><label>Grade ≥</label><input type="number" step="0.5" value="${esc(F.gradeMin||'')}" placeholder="any" style="max-width:80px" oninput="INVG.state.filters.gradeMin=this.value;gRenderList(INVG)"></div>
-     <div><label>Year</label><select onchange="INVG.state.filters.year=this.value;gRenderList(INVG)"><option value="">All</option>${years.map(y=>`<option ${(''+(F.year||''))===(''+y)?'selected':''}>${esc(''+y)}</option>`).join('')}</select></div>
-     <div><label>Status</label><select onchange="INVG.state.filters.status=this.value;gRenderList(INVG)">${[['all','All'],['onhand','On hand'],['free','Has free'],['reserved','Reserved'],['sold','Sold']].map(([v,l])=>`<option value="${v}" ${F.status===v?'selected':''}>${l}</option>`).join('')}</select></div>
+     <div style="align-self:flex-end"><span class="lab" style="text-transform:none;letter-spacing:0">Category · Set · Grading · Grade · Year · Status → filter in the row under the column headers ↓</span></div>
    </div>
    <div class="etool" style="margin-top:8px;align-items:center">${gColsBtn(INVG)}${gViewsHTML(INVG)}</div>
    <div id="invListBox"></div></div>`;
@@ -1927,10 +1977,10 @@ async function chaseApply(clId,l,mode){try{let cleared=0;
   return {matched:matched.size,cleared};
  }catch(e){toast('Apply failed: '+e.message);return null;}}
 /* Bulk chase in the open checklist grid — applies to the CURRENT filter (search / set / player-name / etc.) */
-async function scBulkChase(val){if(!SRV||SRV.scopeCol!=='checklist_id')return;const F=SRV.G.state.filters;const filtered=dbCardFiltered({search:F.search,filters:F});
+async function scBulkChase(val){if(!SRV||SRV.scopeCol!=='checklist_id')return;const F=SRV.G.state.filters,CF=SRV.G.state.colFilters;const filtered=dbCardFiltered({search:F.search,filters:F,colFilters:CF});
  if(!filtered&&!confirm((val?'Mark':'Unmark')+' ALL cards in this checklist as chase? No filter is active.'))return;
  const btn=event&&event.target;if(btn)btn.disabled=true;
- try{let q=sb.from('e10_cards').update({chase:!!val}).eq('checklist_id',SRV.scopeId);q=dbCardFilters(q,{search:F.search,filters:F});const{data,error}=await q.select('id');if(error)throw error;const n=(data||[]).length;scCacheClear();scFetch();toast((val?'Marked ':'Unmarked ')+n+' card'+(n===1?'':'s')+' chase'+(filtered?' (filtered)':''));}catch(e){toast('Bulk chase failed: '+e.message);}
+ try{let q=sb.from('e10_cards').update({chase:!!val}).eq('checklist_id',SRV.scopeId);q=dbCardFilters(q,{search:F.search,filters:F,colFilters:CF});const{data,error}=await q.select('id');if(error)throw error;const n=(data||[]).length;scCacheClear();scFetch();toast((val?'Marked ':'Unmarked ')+n+' card'+(n===1?'':'s')+' chase'+(filtered?' (filtered)':''));}catch(e){toast('Bulk chase failed: '+e.message);}
  if(btn)btn.disabled=false;}
 function chaseApplyFromGrid(){if(!(S.chaseLists&&S.chaseLists.length)){toast('No chase lists yet — create one on the Checklists page first');return;}
  const cl=(SRV&&SRV.scopeId)||'';$('modal').innerHTML=`<h3 style="font-size:17px">Apply a chase list</h3><div class="lab" style="text-transform:none;letter-spacing:0;margin:4px 0 10px">Pick a list to apply to this checklist.</div><div style="max-height:320px;overflow:auto">${S.chaseLists.map(l=>`<div class="row" style="margin-bottom:6px"><button class="btn" style="flex:1;text-align:left" onclick="closeM();chaseApplyModal('${l.id}','${cl}')">🎯 ${esc(l.name)} · ${(l.players||[]).length} players${[l.sport,l.league].filter(Boolean).length?(' · '+[l.sport,l.league].filter(Boolean).join('/')):''}</button></div>`).join('')}</div><div class="row" style="margin-top:8px"><button class="btn sm" onclick="closeM()">Cancel</button></div>`;$('ov').style.display='flex';}

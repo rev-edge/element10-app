@@ -504,3 +504,28 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 -- Verified live (UI drive + SQL/DOM read): B teams 'argentina'/'ARGENTINA' → same existing id + new team
 --   created, no rollback; A3 reserved=2; A2 qty 1 → reserved clamped to 1, available 0; A1 3 rich slots
 --   (Argentina:A:120 …) + proj 140/300/660; C5 chaseboard bottom 1632; C6 span $80→$999 in place, focus kept.
+
+-- ─────────────────────────────────────────────────────────────
+-- CLIENT-ONLY (no schema/RLS change): Excel-style per-column filtering in the shared grid engine.
+--   Built once into the engine (gRenderList now emits thead[header + a .gfilt filter row] / tbody, plus a
+--   focus-preserving gRenderBody that refreshes only the data rows). Each column declares filter via
+--   `filter`: 'text' | 'num' | 'enum' | false (default text; num when type==='num'); values read via
+--   filterGet||sortVal, enum distinct via enumGet||sortVal or a fixed enumVals. Text ops: contains
+--   (default) / not-contains / equals / starts / ends / is-empty / not-empty. Num ops: = ≠ ≥ ≤ between.
+--   Enum: multi-select checkboxes + All/Clear. AND across columns, coexists with header-click SORT;
+--   per-column ✕ clear + global Reset; saved views capture colFilters. Push-down: client grids filter the
+--   in-memory array (gApplyColFilters); the server-backed 55k card grid translates each filter into the
+--   Supabase query (dbCardColFilters: ilike / not.ilike / in / eq/neq/gte/lte/range / is-null) so it
+--   filters the FULL dataset across all pages, keeping the trigram path.
+--   Wired + verified: INVENTORY (folded its Category/Set/Grading/Grade≥/Year/Status top-band into column
+--   filters; top bar slimmed to Search + Owner + Columns/Views/Reset) — text contains/not-contains, num ≥
+--   and between, enum multi-select, combined all pass. CARD GRID — Type=insert → 431 (SQL-matched), name
+--   contains "Messi" on 55,677 cards → 204 (SQL-matched) in ~250ms; top-band folded into column filters.
+-- COVERAGE MAP (every list/table surface → status):
+--   already-on-shared-grid (get filtering now): Inventory, Checklist cards (e10_cards grid), Import-review
+--     grid (opt-in pending — flagged). Migrate-recommended (FLAGGED, engine ready): Buy list, Reporting
+--     tables (by-category etc.), Players list, Teams list, Whatnot export, Ship/fulfillment detail,
+--     Break/Format chase-pool & product/auction lists, Copy sets, Break-models, Checklists list,
+--     Attachments. Intentionally bespoke (leave): Schedule calendar (day/week/month), Live-break mobile
+--     worklist (touch cockpit), Home cockpit cards, buyer-GROUPED fulfillment (grouping is the point),
+--     Break tier-band editor & spot-plan (form/derived, not a record list), To-dos (checklist UI).
