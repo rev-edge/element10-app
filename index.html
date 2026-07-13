@@ -1083,6 +1083,7 @@ function renderChecklistReview(){const cl=PENDING_CL;if(!cl){clReviewMode=false;
    ${(m.unmapped&&m.unmapped.length)?`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:4px;color:var(--mut)">Unmapped columns kept in “extra”: ${m.unmapped.map(esc).join(', ')}.</div>`:''}
    ${(m.flags&&m.flags.length)?`<div class="out" style="margin-top:8px">⚠ ${m.flags.length} row(s) to check: ${m.flags.slice(0,6).map(f=>'row '+f.row+' — '+esc(f.msg)).join('; ')}${m.flags.length>6?' …':''}</div>`:''}
    <div class="row" style="margin-top:12px;gap:8px;align-items:center;flex-wrap:wrap"><span class="lab">Name</span><input value="${esc(cl.name||'')}" style="max-width:240px" oninput="PENDING_CL.name=this.value"><span class="lab">Set</span><div style="min-width:180px;max-width:230px">${entityPicker('clSet',{icon:'🗂',server:true,minChars:2,freeText:true,placeholder:'search sets…',value:cl.set?{id:(cl.setId||null),label:cl.set}:null,search:dbSetSearch,onpick:(sid,label)=>{PENDING_CL.set=label;PENDING_CL.setId=sid;},onclear:()=>{PENDING_CL.set='';PENDING_CL.setId=null;}})}</div><label style="display:flex;align-items:center;gap:5px;margin:0"><input type="checkbox" style="width:auto" ${cl._resolve!==false?'checked':''} onchange="PENDING_CL._resolve=this.checked"> <span class="lab">Resolve player entities (sports)</span></label></div>
+   ${(S.chaseLists&&S.chaseLists.length)?`<div class="out" style="margin-top:10px;padding:8px 10px"><div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><span class="lab" style="text-transform:none;letter-spacing:0">🎯 Apply a chase list to this import?</span><select id="clRevChase" style="font-size:12px;max-width:240px">${S.chaseLists.map(l=>`<option value="${l.id}" ${chaseListSuggested(l,cl)?'selected':''}>${esc(l.name)}${[l.sport,l.league].filter(Boolean).length?(' · '+[l.sport,l.league].filter(Boolean).join('/')):''} (${(l.players||[]).length})</option>`).join('')}</select><button class="btn sm" onclick="clApplyChaseListToImport()">Apply to import</button><span class="lab" style="text-transform:none;letter-spacing:0;font-size:11px">flags matching-name cards — edit before you commit</span></div></div>`:''}
    <div class="etool" style="margin-top:12px">
      <div style="flex:2;min-width:140px"><label>Search</label><input value="${esc(F.search||'')}" placeholder="name / # / parallel…" oninput="clRevSet('search',this.value)"></div>
      <div><label>Rarity</label><select onchange="clRevSet('rarity',this.value)"><option value="">All</option>${rarities.map(r=>`<option ${F.rarity===r?'selected':''}>${esc(r)}</option>`).join('')}</select></div>
@@ -1202,7 +1203,7 @@ function scPager(){const el=$('scPager');if(!el||!SRV)return;const known=SRV.cou
 function renderCardGridShell(){const G=SRV.G,F=G.state.filters;const player=SRV.mode==='player';
  let h=`<div class="card"><div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
    <div class="row" style="gap:8px;align-items:center"><button class="btn sm" onclick="closeCardGrid()">← ${player?'Players':'Checklists'}</button><h3 style="font-size:15px">${player?'👤 ':''}${esc(SRV.name)}</h3>${player&&window._plMeta&&window._plMeta.team?`<span class="lab">${esc(window._plMeta.team||'')}${window._plMeta.nationality?' · '+esc(window._plMeta.nationality):''}</span>`:''}</div>
-   <div class="row" style="gap:6px">${player?'':`<button class="btn sm" onclick="buildBreakFromChecklist('${SRV.scopeId}')" title="Preload the break modeler with chase cards">⚡ Model a break</button><button class="btn v sm" onclick="scAddCard()">+ Add card</button>`}</div></div>
+   <div class="row" style="gap:6px;flex-wrap:wrap">${player?'':`<button class="btn sm" onclick="scBulkChase(true)" title="Flag every card matching the current filter/search as chase">🎯 Mark filtered chase</button><button class="btn sm" onclick="scBulkChase(false)" title="Clear chase on the filtered cards">Unmark filtered</button><button class="btn sm" onclick="chaseApplyFromGrid()" title="Apply a saved player chase list to this checklist">Apply chase list…</button><button class="btn sm" onclick="chaseSaveFromChecklist('${SRV.scopeId}')" title="Save this checklist's chase players as a reusable list">＋ Save chases as list</button><button class="btn sm" onclick="buildBreakFromChecklist('${SRV.scopeId}')" title="Preload the break modeler with chase cards">⚡ Model a break</button><button class="btn v sm" onclick="scAddCard()">+ Add card</button>`}</div></div>
    <div class="etool" style="margin-top:12px">
      <div style="flex:2;min-width:160px"><label>Search all fields</label><input value="${esc(F.search||'')}" placeholder="name / set / parallel / color / #…" oninput="scFilter('search',this.value)"></div>
      <div><label>Set</label><input value="${esc(F.set||'')}" placeholder="type…" style="max-width:130px" oninput="scFilter('set',this.value)"></div>
@@ -1840,6 +1841,75 @@ function renderChecklistGrid(cl){const G=GRIDS['cl:'+cl.id]||makeGrid('cl:'+cl.i
    <div class="etool" style="margin-top:8px;align-items:center">${gColsBtn(G)}${gViewsHTML(G)}</div>
    <div id="clListBox"></div></div>`;
  $('dtc').innerHTML=h;gRenderCols(G);gRenderList(G);}
+/* ===== Player chase lists — reusable named player lists (by sport/league), stored in the scoped
+   workspace (like breaks/copySets). Chase stays a card-level flag (e10_cards.chase) — applying a list just
+   sets it in bulk, so the break chase board + planner (which already read chase) pick it up automatically.
+   Match order: linked player (player_id) first, else normalized card name for cards with no linked player. ===== */
+function chaseNorm(s){return (s||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();}
+function chaseListById(id){return (S.chaseLists||[]).find(x=>x.id===id);}
+function chaseListSuggested(l,cl){const hay=((cl&&cl.name||'')+' '+(cl&&cl.set||'')).toLowerCase();return !!((l.sport&&hay.includes(l.sport.toLowerCase()))||(l.league&&hay.includes(l.league.toLowerCase())));}
+function chaseCreate(){if(!canEditScoped())return roGuard();S.chaseLists=S.chaseLists||[];const l={id:'chl'+Math.random().toString(36).slice(2),name:'New chase list',sport:'',league:'',players:[]};S.chaseLists.unshift(l);save();dChecklists();chaseEdit(l.id);}
+function chaseDelete(id){if(!canEditScoped())return roGuard();const l=chaseListById(id);if(!l)return;if(!confirm('Delete chase list “'+l.name+'”? This cannot be undone.'))return;S.chaseLists=(S.chaseLists||[]).filter(x=>x.id!==id);save();dChecklists();toast('Chase list deleted');}
+function chaseListsHTML(){const lists=S.chaseLists||[];const admin=canEditScoped();
+ return `<div class="card" style="margin-top:16px"><div class="row" style="justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px"><div><h3 style="font-size:15px">🎯 Chase lists</h3><div class="lab" style="text-transform:none;letter-spacing:0">Reusable player lists (by sport / league). Apply one to any checklist to flag matching cards as chase — it carries to the break chase board &amp; planner automatically.</div></div>${admin?'<button class="btn v sm" onclick="chaseCreate()">+ New list</button>':''}</div>
+   <div style="margin-top:10px">${lists.length?lists.map(l=>`<div class="out" style="margin-top:8px;padding:10px"><div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px"><div style="min-width:0"><b>${esc(l.name)}</b> <span class="lab" style="text-transform:none;letter-spacing:0">${[l.sport,l.league].filter(Boolean).join(' · ')||'no sport/league'} · ${(l.players||[]).length} player${(l.players||[]).length===1?'':'s'}</span></div>${admin?`<div class="row" style="gap:4px"><button class="btn sm" onclick="chaseEdit('${l.id}')">Edit</button><button class="btn v sm" onclick="chaseApplyModal('${l.id}')">Apply →</button><button class="btn x sm" onclick="chaseDelete('${l.id}')">✕</button></div>`:''}</div></div>`).join(''):'<div class="lab" style="text-transform:none;letter-spacing:0;padding:6px 0">No chase lists yet — <b>+ New list</b>, add players, then apply to a checklist.</div>'}</div></div>`;}
+function chasePlayersHTML(l){const ps=l.players||[];return ps.length?`<div class="row" style="gap:6px;flex-wrap:wrap">${ps.map((p,i)=>`<span class="pill" style="margin:0">${esc(p.name)}${p.id?' 🔗':''} <a onclick="chaseRemovePlayer('${l.id}',${i})" style="color:var(--red);cursor:pointer">✕</a></span>`).join('')}</div>`:'<div class="lab" style="text-transform:none;letter-spacing:0">No players yet — search below to add.</div>';}
+function chaseEdit(id){const l=chaseListById(id);if(!l)return;if(!canEditScoped())return roGuard();
+ $('modal').innerHTML=`<h3 style="font-size:17px">Edit chase list</h3>
+   <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:4px"><div style="flex:2;min-width:150px"><label>Name</label><input id="chlName" value="${esc(l.name)}" oninput="var x=chaseListById('${id}');if(x)x.name=this.value" onkeydown="if(event.key==='Enter')chaseSaveMeta('${id}')"></div>
+     <div style="flex:1;min-width:100px"><label>Sport</label><input id="chlSport" value="${esc(l.sport||'')}" placeholder="Baseball…" oninput="var x=chaseListById('${id}');if(x)x.sport=this.value"></div>
+     <div style="flex:1;min-width:100px"><label>League</label><input id="chlLeague" value="${esc(l.league||'')}" placeholder="MLB…" oninput="var x=chaseListById('${id}');if(x)x.league=this.value"></div></div>
+   <label style="margin-top:10px">Players (${(l.players||[]).length})</label>
+   <div id="chlPlayers" style="margin-top:4px">${chasePlayersHTML(l)}</div>
+   <div style="margin-top:8px">${entityPicker('chlPick',{icon:'👤',server:true,minChars:2,placeholder:'search a player to add…',search:dbPlayerSearch,onpick:(pid,label)=>chaseAddPlayer(id,pid,label)})}</div>
+   <div class="row" style="margin-top:14px;gap:8px"><button class="btn v" onclick="chaseSaveMeta('${id}')">Done</button></div>`;
+ $('ov').style.display='flex';setTimeout(()=>{const e=$('chlName');if(e){e.focus();e.select();}},50);}
+function chaseAddPlayer(id,pid,label){const l=chaseListById(id);if(!l)return;label=(label||'').trim();if(!label)return;l.players=l.players||[];
+ if(l.players.some(p=>(pid&&p.id===pid)||chaseNorm(p.name)===chaseNorm(label))){toast('Already in the list');return;}
+ l.players.push({id:pid||null,name:label});const box=$('chlPlayers');if(box)box.innerHTML=chasePlayersHTML(l);const ep=EP['chlPick'];if(ep){ep.value=null;epRender('chlPick');const inp=$('epi_chlPick');if(inp){inp.value='';inp.focus();}}}
+function chaseRemovePlayer(id,i){const l=chaseListById(id);if(!l)return;(l.players||[]).splice(i,1);const box=$('chlPlayers');if(box)box.innerHTML=chasePlayersHTML(l);}
+function chaseSaveMeta(id){const l=chaseListById(id);if(!l)return;if(!(l.name||'').trim()){toast('Name is required');const e=$('chlName');if(e)e.focus();return;}save();closeM();dChecklists();toast('Chase list saved');}
+/* Collect the checklist's current chase players into a new reusable list */
+async function chaseSaveFromChecklist(clId){if(!canEditScoped())return roGuard();const name=(SRV&&SRV.name)||'Checklist';
+ let rows=[];try{const{data,error}=await sb.from('e10_cards').select('name,player_id,player:player_id(id,name)').eq('checklist_id',clId).eq('chase',true).limit(2000);if(error)throw error;rows=data||[];}catch(e){toast(e.message);return;}
+ if(!rows.length){toast('No chase-flagged cards in this checklist yet');return;}
+ const seen=new Set(),players=[];rows.forEach(r=>{const id=(r.player&&r.player.id)||r.player_id||null;const nm=(r.player&&r.player.name)||r.name||'';if(!nm)return;const key=id?('id:'+id):('nm:'+chaseNorm(nm));if(seen.has(key))return;seen.add(key);players.push({id:id||null,name:nm});});
+ const l={id:'chl'+Math.random().toString(36).slice(2),name:name+' chases',sport:'',league:'',players};S.chaseLists=S.chaseLists||[];S.chaseLists.unshift(l);save();toast('Saved '+players.length+' player'+(players.length===1?'':'s')+' as a chase list');chaseEdit(l.id);}
+/* APPLY a chase list to a checklist → set chase=true on matching cards (id-match then name-match) */
+function chaseApplyModal(id,presetCl){const l=chaseListById(id);if(!l)return;if(!canEditScoped())return roGuard();
+ dbChecklists().then(cls=>{
+  $('modal').innerHTML=`<h3 style="font-size:17px">Apply “${esc(l.name)}”</h3>
+    <div class="lab" style="text-transform:none;letter-spacing:0;margin:4px 0 10px">Flags cards whose player matches one of the list's ${(l.players||[]).length} players — by linked player, else by normalized name — scoped to the chosen checklist.</div>
+    <label>Checklist</label><select id="chlApplyCL" style="width:100%">${cls.map(c=>`<option value="${c.id}" ${presetCl===c.id?'selected':''}>${esc(c.name)} · ${(c.card_count||0).toLocaleString()} cards</option>`).join('')||'<option value="">— no checklists —</option>'}</select>
+    <div style="margin-top:10px"><label style="display:flex;gap:6px;align-items:center;margin:2px 0"><input type="radio" name="chlmode" value="add" checked style="width:auto"> <span>Apply additively (keep existing chases)</span></label>
+    <label style="display:flex;gap:6px;align-items:center;margin:2px 0"><input type="radio" name="chlmode" value="replace" style="width:auto"> <span>Apply + clear other chases first</span></label></div>
+    <div class="row" style="margin-top:14px;gap:8px"><button class="btn v" id="chlApplyBtn" onclick="chaseApplyGo('${id}')">Apply</button><button class="btn sm" onclick="closeM()">Cancel</button></div>`;
+  $('ov').style.display='flex';});}
+async function chaseApplyGo(id){const l=chaseListById(id);if(!l)return;const clSel=$('chlApplyCL'),clId=clSel?clSel.value:'';if(!clId){toast('Pick a checklist');return;}
+ const mode=(document.querySelector('input[name=chlmode]:checked')||{}).value||'add';const btn=$('chlApplyBtn');if(btn){btn.disabled=true;btn.textContent='Applying…';}
+ const res=await chaseApply(clId,l,mode);if(btn){btn.disabled=false;btn.textContent='Apply';}
+ if(res){closeM();toast('Applied “'+l.name+'” — '+res.matched+' card'+(res.matched===1?'':'s')+' flagged chase'+(mode==='replace'?(' · cleared '+res.cleared):''));if(SRV&&SRV.scopeCol==='checklist_id'&&SRV.scopeId===clId){scCacheClear();scFetch();}}}
+async function chaseApply(clId,l,mode){try{let cleared=0;
+  if(mode==='replace'){const{data,error}=await sb.from('e10_cards').update({chase:false}).eq('checklist_id',clId).eq('chase',true).select('id');if(error)throw error;cleared=(data||[]).length;}
+  const matched=new Set();
+  const ids=[...new Set((l.players||[]).map(p=>p.id).filter(Boolean))];
+  for(let i=0;i<ids.length;i+=100){const batch=ids.slice(i,i+100);const{data,error}=await sb.from('e10_cards').update({chase:true}).eq('checklist_id',clId).in('player_id',batch).select('id');if(error)throw error;(data||[]).forEach(r=>matched.add(r.id));}
+  const names=[...new Set((l.players||[]).map(p=>(p.name||'').trim()).filter(Boolean))];
+  for(const nm of names){const pat=nm.replace(/[%_]/g,' ');const{data,error}=await sb.from('e10_cards').update({chase:true}).eq('checklist_id',clId).is('player_id',null).ilike('name',pat).select('id');if(error)throw error;(data||[]).forEach(r=>matched.add(r.id));}
+  return {matched:matched.size,cleared};
+ }catch(e){toast('Apply failed: '+e.message);return null;}}
+/* Bulk chase in the open checklist grid — applies to the CURRENT filter (search / set / player-name / etc.) */
+async function scBulkChase(val){if(!SRV||SRV.scopeCol!=='checklist_id')return;const F=SRV.G.state.filters;const filtered=dbCardFiltered({search:F.search,filters:F});
+ if(!filtered&&!confirm((val?'Mark':'Unmark')+' ALL cards in this checklist as chase? No filter is active.'))return;
+ const btn=event&&event.target;if(btn)btn.disabled=true;
+ try{let q=sb.from('e10_cards').update({chase:!!val}).eq('checklist_id',SRV.scopeId);q=dbCardFilters(q,{search:F.search,filters:F});const{data,error}=await q.select('id');if(error)throw error;const n=(data||[]).length;scCacheClear();scFetch();toast((val?'Marked ':'Unmarked ')+n+' card'+(n===1?'':'s')+' chase'+(filtered?' (filtered)':''));}catch(e){toast('Bulk chase failed: '+e.message);}
+ if(btn)btn.disabled=false;}
+function chaseApplyFromGrid(){if(!(S.chaseLists&&S.chaseLists.length)){toast('No chase lists yet — create one on the Checklists page first');return;}
+ const cl=(SRV&&SRV.scopeId)||'';$('modal').innerHTML=`<h3 style="font-size:17px">Apply a chase list</h3><div class="lab" style="text-transform:none;letter-spacing:0;margin:4px 0 10px">Pick a list to apply to this checklist.</div><div style="max-height:320px;overflow:auto">${S.chaseLists.map(l=>`<div class="row" style="margin-bottom:6px"><button class="btn" style="flex:1;text-align:left" onclick="closeM();chaseApplyModal('${l.id}','${cl}')">🎯 ${esc(l.name)} · ${(l.players||[]).length} players${[l.sport,l.league].filter(Boolean).length?(' · '+[l.sport,l.league].filter(Boolean).join('/')):''}</button></div>`).join('')}</div><div class="row" style="margin-top:8px"><button class="btn sm" onclick="closeM()">Cancel</button></div>`;$('ov').style.display='flex';}
+/* Import-review offer: flag matching-name cards on the pending import from a chase list (name-only — players resolve at commit) */
+function clApplyChaseListToImport(){const sel=$('clRevChase'),id=sel?sel.value:'';const l=chaseListById(id),cl=PENDING_CL;if(!l||!cl)return;
+ const names=new Set((l.players||[]).map(p=>chaseNorm(p.name)));let n=0;(cl.cards||[]).forEach(c=>{if(names.has(chaseNorm(c.name))&&!c.chase){c.chase=true;n++;}});
+ renderChecklistReview();toast(n?('Flagged '+n+' card'+(n===1?'':'s')+' as chase from “'+l.name+'”'):('No card names matched “'+l.name+'”'));}
 function dChecklists(){if(clReviewMode&&PENDING_CL)return renderChecklistReview();if(clOpenId==='sc'&&SRV){renderCardGridShell();scFetch();return;}if(clOpenId){const cl=clCur();if(cl)return renderChecklistGrid(cl);clOpenId=null;}
  const lm=[['characters','Chase characters'],['sets','Sets / products'],['formats','Show formats'],['diff','Trust / hooks']];
  let h=`<div class="card"><h3 style="font-size:15px">Checklists</h3>
@@ -1851,6 +1921,7 @@ function dChecklists(){if(clReviewMode&&PENDING_CL)return renderChecklistReview(
    </div>
    <input id="clFile" type="file" accept=".csv,.tsv,.txt,.xlsx,.xls" style="display:none" onchange="clImportFile(this)">
    <div id="clListArea" style="margin-top:12px"><div class="lab" style="padding:8px 0">Loading checklists…</div></div></div>`;
+ h+=chaseListsHTML();
  h+=`<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Attachments</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">Images, PDFs, docs. Small files stored in-browser; large ones referenced only (move to cloud when hosted).</div>
    <div class="drop" onclick="$('atFile').click()">Click to upload a file</div><input id="atFile" type="file" style="display:none" onchange="uploadAttach(this)">
    <div style="margin-top:12px">${S.attachments.length?`<div class="egrid"><table><tr><th>Attachment</th><th>Size</th><th></th></tr>${S.attachments.map((a,i)=>`<tr><td>📎 ${esc(a.name)}</td><td class="lab" style="text-transform:none;letter-spacing:0">${(a.size/1024).toFixed(0)} KB${a.data?'':' · reference'}</td><td><div class="actions">${a.data?`<a class="btn sm" href="${a.data}" download="${esc(a.name)}">Download</a>`:''}<button class="btn x" onclick="S.attachments.splice(${i},1);save();dChecklists()">✕</button></div></td></tr>`).join('')}</table></div>`:'<div style="color:var(--mut);font-size:13px">No attachments.</div>'}</div></div>`;
@@ -2035,11 +2106,11 @@ let sb=null,ME=null,MEID=null,_st=null,_applyingRemote=false;
 let SHARED={},SCOPED={},SCOPED_ID='',REVS={},MEMBERS=[];
 let SCOPE=localStorage.getItem('e10_scope')||'mine';         // 'mine' | 'universal' | '<uid>'
 let invFilter=localStorage.getItem('e10_invfilter')||'mine'; // 'mine' | 'all'
-const SCOPED_KEYS=['shows','breaks','copySets','dashCfg','sales'];
+const SCOPED_KEYS=['shows','breaks','copySets','dashCfg','sales','chaseLists'];
 const SHARED_KEYS=['comments','todos','streamers','lists','attachments','checklists','inventory','repacks'];
 
 function blankShared(){return{comments:[],todos:[],streamers:['Trent'],lists:JSON.parse(JSON.stringify(DEF_LISTS)),attachments:[],checklists:[],inventory:[],repacks:[]};}
-function blankScoped(){return{shows:{},breaks:[],copySets:[],dashCfg:{catValue:true,costMarket:true,movement:true},sales:null};}
+function blankScoped(){return{shows:{},breaks:[],copySets:[],dashCfg:{catValue:true,costMarket:true,movement:true},sales:null,chaseLists:[]};}
 function normShared(o){o=o||{};if(!o.comments)o.comments=[];if(!o.todos)o.todos=[];o.todos.forEach(t=>{if(t.desc==null)t.desc='';if(!t.comments)t.comments=[];});if(!o.streamers)o.streamers=['Trent'];if(!o.lists)o.lists=JSON.parse(JSON.stringify(DEF_LISTS));['characters','sets','formats','diff','invcats','grading','conditions'].forEach(k=>{if(!o.lists[k])o.lists[k]=(DEF_LISTS[k]||[]).slice();});['attachments','checklists','inventory','repacks'].forEach(k=>{if(!o[k])o[k]=[];});o.inventory.forEach(it=>{if(!it.id)it.id='i'+Math.random().toString(36).slice(2);if(!('owner'in it))it.owner=null;if(!(+it.qty>=0))it.qty=(+it.qty||1);if(!Array.isArray(it.reservations))it.reservations=[];it.reservations.forEach(r=>{r.qty=+r.qty||0;});if(!it.addedAt)it.addedAt=Date.now();
   if(!('cardId'in it))it.cardId=null;if(!('playerId'in it))it.playerId=null;if(!('parallel'in it))it.parallel='';/* links to e10_cards / e10_players when added from the library */
   /* box/case model (v2): wax tracks stock in boxes; boxesPerCase for case-bought product; perBoxCost
@@ -2053,6 +2124,7 @@ function normScoped(o){o=o||{};if(!o.shows)o.shows={};if(!o.breaks)o.breaks=[];i
  Object.keys(o.shows).forEach(k=>{(o.shows[k]||[]).forEach(s=>{if(!s.id)s.id='sh'+Math.random().toString(36).slice(2);if(s.notes==null)s.notes='';if(!('titleSet'in s))s.titleSet=null;if(!('breakModel'in s))s.breakModel=null;if(!Array.isArray(s.inventoryAlloc))s.inventoryAlloc=[];if(!('repackRef'in s))s.repackRef=null;if(!Array.isArray(s.needs))s.needs=[];});});
  o.breaks.forEach(b=>{if(!b.id)b.id='bk'+Math.random().toString(36).slice(2);if(!('ts'in b))b.ts=null;});
  o.copySets.forEach(c=>{if(!c.id)c.id='cs'+Math.random().toString(36).slice(2);});
+ if(!Array.isArray(o.chaseLists))o.chaseLists=[];o.chaseLists.forEach(l=>{if(!l.id)l.id='chl'+Math.random().toString(36).slice(2);if(!Array.isArray(l.players))l.players=[];if(l.sport==null)l.sport='';if(l.league==null)l.league='';});
  return o;}
 function splitLegacy(d){const sh=blankShared(),sc=blankScoped();if(d&&typeof d==='object'){SHARED_KEYS.forEach(k=>{if(d[k]!=null)sh[k]=d[k];});SCOPED_KEYS.forEach(k=>{if(d[k]!=null)sc[k]=d[k];});}return{sh:normShared(sh),sc:normScoped(sc)};}
 
@@ -2068,9 +2140,9 @@ function roGuard(){toast('Read-only — switch to “My space” to edit');retur
 
 function rebuildS(){normShared(SHARED);normScoped(SCOPED);
  S={comments:SHARED.comments,todos:SHARED.todos,streamers:SHARED.streamers,lists:SHARED.lists,attachments:SHARED.attachments,checklists:SHARED.checklists,inventory:SHARED.inventory,repacks:SHARED.repacks,
-    shows:SCOPED.shows,breaks:SCOPED.breaks,copySets:SCOPED.copySets,dashCfg:SCOPED.dashCfg,sales:SCOPED.sales,user:ME};}
+    shows:SCOPED.shows,breaks:SCOPED.breaks,copySets:SCOPED.copySets,dashCfg:SCOPED.dashCfg,sales:SCOPED.sales,chaseLists:SCOPED.chaseLists,user:ME};}
 function pushFromS(){SHARED.comments=S.comments;SHARED.todos=S.todos;SHARED.streamers=S.streamers;SHARED.lists=S.lists;SHARED.attachments=S.attachments;SHARED.checklists=S.checklists;SHARED.inventory=S.inventory;SHARED.repacks=S.repacks;
- SCOPED.shows=S.shows;SCOPED.breaks=S.breaks;SCOPED.copySets=S.copySets;SCOPED.dashCfg=S.dashCfg;SCOPED.sales=S.sales;}
+ SCOPED.shows=S.shows;SCOPED.breaks=S.breaks;SCOPED.copySets=S.copySets;SCOPED.dashCfg=S.dashCfg;SCOPED.sales=S.sales;SCOPED.chaseLists=S.chaseLists;}
 function currentRender(){const on=document.querySelector('.sec.on');const s=on?on.id.replace('sec-',''):'home';({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData,repack:renderRepack,live:renderLive,fulfill:renderFulfill}[s]||renderHome)();}
 /* Preserve typing across realtime updates: defer a section re-render while an input is focused. */
 let _pendingRender=false;
@@ -2087,7 +2159,7 @@ function cloudSave(){if(!sb||_applyingRemote)return;pushFromS();clearTimeout(_st
 async function doCloudWrite(){_st=null;
  const shared={comments:S.comments,todos:S.todos,streamers:S.streamers,lists:S.lists,attachments:S.attachments,checklists:S.checklists,inventory:S.inventory,repacks:S.repacks};
  const sj=JSON.stringify(shared);if(sj!==_lastShared){_lastShared=sj;await writeRow('shared',null,shared);}
- if(canEditScoped()){const scoped={shows:S.shows,breaks:S.breaks,copySets:S.copySets,dashCfg:S.dashCfg,sales:S.sales};const cj=JSON.stringify(scoped);
+ if(canEditScoped()){const scoped={shows:S.shows,breaks:S.breaks,copySets:S.copySets,dashCfg:S.dashCfg,sales:S.sales,chaseLists:S.chaseLists};const cj=JSON.stringify(scoped);
   if(cj!==_lastScoped){_lastScoped=cj;const owner=(SCOPE==='mine')?MEID:(SCOPE==='universal'?null:SCOPE);await writeRow(SCOPED_ID,owner,scoped);}}
 }
 /* Reservation-critical writes go through a read-modify-write on the shared row: re-read the latest

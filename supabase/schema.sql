@@ -432,3 +432,24 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --   liveActiveHTML + one placard branch in overlay.html placardsHTML. A new "See 2 pick 1" toggle sits with
 --   stash/case/trade. overlay.html: a compression-safe SEE 2 PICK 1 placard (pl-see) shows on the on-cam
 --   layout only when see_2_pick_1 is on; the other three placards are unchanged.
+
+-- ─────────────────────────────────────────────────────────────
+-- CLIENT-ONLY (no schema / no RLS change): player-driven chase lists + bulk chase assignment.
+--   Chase stays a card-level flag (e10_cards.chase) — the source of truth the break chase board
+--   (liveLoadChases) + planner (dbPreloadCards) already read. Applying a list just sets that flag in bulk,
+--   so it carries to breaks with no new wiring (verified: applied chases appear in the planner pool).
+--   • Chase list = { id, name, sport, league, players:[{id,name}] } stored in the SCOPED workspace JSONB
+--     (added 'chaseLists' to SCOPED_KEYS / blankScoped / normScoped / rebuildS / pushFromS / doCloudWrite —
+--     persisted exactly like breaks/copySets, no new table). Manager on the Checklists page: create / rename
+--     (inline) / delete (confirm) / add-remove players via the existing player picker (dbPlayerSearch).
+--   • APPLY (chaseApply): id-match first — update chase=true where checklist_id=CL and player_id in the
+--     list's linked player ids; then name-match — for cards with null player_id, ilike the list player names
+--     (case-insensitive). Additive, or "clear other chases first" (replace). Reports matched (+cleared).
+--     All writes go through the existing e10_cards UPDATE policy (same one the per-row chase checkbox uses).
+--   • Bulk in the grid (scBulkChase): Mark / Unmark chase across the CURRENT filter/search (one UPDATE
+--     scoped by the same dbCardFilters the grid uses), reversible, count toasted; whole-checklist needs a
+--     confirm. "Save chases as list" collects the checklist's distinct chase players into a new list.
+--   • Import review offers a matching chase list (auto-selected when its sport/league appears in the
+--     checklist name/set) and flags matching-name cards on the pending import — suggest, never forced.
+--   Standing UX pass in scope: destructive confirms (delete list) + toasts on every mutation + Enter-to-
+--   submit (list name) + async button-disable while applying + terse empty states; shared grid untouched.
