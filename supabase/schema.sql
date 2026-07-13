@@ -546,3 +546,24 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --   purpose-descriptions on Attachments / Whatnot-export intro / Ship / pre-flight-review / auth sign-in.
 --   Kept with reason: the add-member workflow note (genuinely non-obvious steps). A full sweep of every
 --   remaining section description across all surfaces is FLAGGED for a continued pass.
+
+-- ─────────────────────────────────────────────────────────────
+-- COSMETIC/CLIENT-ONLY (no schema/RLS change): grid-migration pass #1 — IMPORT-REVIEW GRID.
+--   Opted the checklist import-review grid into the shared engine's column filters (clReviewGridCfg
+--   colFilters:true); CL_COLS Type/Chase now declare enum filters (base/parallel/insert; Yes/No), other
+--   columns inherit text/num from their type. Folded the review top band (Rarity/Type/Value≥) into the
+--   column filter row, leaving only Search + Add card; dropped the 🎯 from the chase-list offer label.
+--   Verified live (client grid — no SQL): filter row renders; Type=insert → 2/5, Value≥40 → 2/5; every
+--   prior action preserved — per-row field edits persist + are filterable, chase toggle, + Add card (5→6),
+--   the Set entity picker, Approve & commit, and the "apply a chase list to this import" offer.
+-- UPDATED COVERAGE MAP:
+--   already-on-grid: Inventory, Checklist cards (e10_cards 55k grid).
+--   migrated-this-pass: Import-review grid (#1 above). ✓
+--   FLAGGED — not done this pass (each needs its own migrate + verify + preserve-actions, deferred to keep
+--     this a small verified diff rather than a big unverified one):
+--     · Buy list — move onto grid; preserve schedule-driven needs / manual add / mark-purchased / remove.
+--     · Reporting tables — grid the by-category/top tables; preserve export/drill-through.
+--     · Players list — grid it; preserve player-page link + edit/remove.
+--     · Teams — add column filter/sort to the roster list INSIDE the sport→league view (keep the hierarchy).
+--     · Ship/fulfillment — keep the buyer-GROUPED view; grid only a flat "all sold line-items" view if added.
+--     · Break-planner chase-pool/product/auction lists — small editable lists; grid only if it clearly helps.
