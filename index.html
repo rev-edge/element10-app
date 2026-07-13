@@ -2305,6 +2305,23 @@ async function liveSlotCaseHit(id){const sl=LIVE.slots.find(x=>x.id===id);if(!sl
 }
 async function liveDelSlot(id){const sl=LIVE.slots.find(x=>x.id===id);const warn=(sl&&sl.state==='sold')?('This spot is SOLD to '+(sl.buyer_handle||'a buyer')+' for '+money(+sl.price||0)+'. Remove it anyway? The buyer/price will be lost.'):('Remove spot “'+((sl&&sl.label)||'')+'”?');if(!confirm(warn))return;
  try{const{error}=await sb.from('e10_break_slots').delete().eq('id',id);if(error)throw error;}catch(e){toast(e.message);return;}LIVE.slots=LIVE.slots.filter(x=>x.id!==id);renderLive();toast('Spot removed');}
+/* ===== Incentive registry (Phase C) — the single source of truth for what incentives exist and how to
+   read whether each is currently active on a session. TO ADD A NEW INCENTIVE: append one row here (key,
+   label, active(session)); add its toggle button in liveActiveHTML; and add one placard branch in
+   overlay.html placardsHTML. activeIncentives(session) resolves the live-active set at any moment and is
+   what gets stamped onto a slot at sale time. Existing states are reused as-is (nothing renamed). ===== */
+const INCENTIVES=[
+ {key:'stash_or_pass',label:'Stash-or-pass',active:s=>!!(s&&s.stash_or_pass)},
+ {key:'case_hit',label:'Case hit',active:s=>!!(s&&(s.case_hit_open||s.case_hit))},
+ {key:'trade_block',label:'Trade block',active:s=>!!(s&&s.trade_open)},
+ {key:'see_2_pick_1',label:'See 2 pick 1',active:s=>!!(s&&s.see_2_pick_1)}
+];
+function activeIncentives(s){return INCENTIVES.filter(i=>i.active(s)).map(i=>i.key);}
+function incentiveLabel(k){const i=INCENTIVES.find(x=>x.key===k);return i?i.label:k;}
+async function liveToggleSee2(){if(!LIVE.session)return;const v=!LIVE.session.see_2_pick_1;
+ try{await sb.from('e10_break_sessions').update({see_2_pick_1:v}).eq('id',LIVE.session.id);}catch(e){toast(e.message);return;}
+ LIVE.session.see_2_pick_1=v;await liveEvent('see2pick1_toggled',null,{see_2_pick_1:v});renderLive();toast('See 2 pick 1: '+(v?'ON':'off'));
+}
 async function liveToggleStash(){if(!LIVE.session)return;const v=!LIVE.session.stash_or_pass;
  try{await sb.from('e10_break_sessions').update({stash_or_pass:v}).eq('id',LIVE.session.id);}catch(e){toast(e.message);return;}
  LIVE.session.stash_or_pass=v;await liveEvent('stash_toggled',null,{stash_or_pass:v});renderLive();
@@ -2379,6 +2396,7 @@ function liveActiveHTML(){const s=LIVE.session;const dir=liveDirUrl();const over
    <button class="btn sm ${s.trade_open?'v':''}" onclick="liveToggleTrade()">Trade block: <b>${s.trade_open?'OPEN':'off'}</b></button>
    <button class="btn sm ${s.case_hit?'d':''}" onclick="liveCaseHit()">${s.case_hit?'🔥 Case hit — flash':'Flash case hit'}</button>
    <button class="btn sm ${s.case_hit_open?'d':''}" onclick="liveToggleCaseOpen()">Case placard: <b>${s.case_hit_open?'UP':'off'}</b></button>
+   <button class="btn sm ${s.see_2_pick_1?'v':''}" onclick="liveToggleSee2()">See 2 pick 1: <b>${s.see_2_pick_1?'ON':'off'}</b></button>
    <a class="btn sm" onclick="go('fulfill')">📦 Ship list</a></div>
    <div class="lab" style="text-transform:none;letter-spacing:0;margin-top:6px;font-size:12px">Stash / Trade / Case placards pop up on the on-cam overlay when live. <b>Flash</b> = momentary case-hit banner; <b>Case placard</b> stays up while the box is in play. Set the current spot with <b>● Now</b> below.</div></div>
  <div class="card" style="margin-bottom:12px"><div id="prodBox">${productEditorHTML()}</div></div>
@@ -2460,7 +2478,8 @@ function liveSpotCard(sl,i){const openS=sl.state!=='sold';
  const price=+sl.price||0,dl=price-target;const vsTarget=target>0?(` · target ${money(target)} · <b style="color:${dl>=0?'#0a8a4a':'#e8332b'}">${dl>=0?'+':''}${money(dl)} ${dl>=0?'▲ over':'▼ under'}</b>`):'';
  return `<div class="out" style="margin-top:8px;padding:12px;border-left:3px solid ${target>0?(dl>=0?'#0a8a4a':'#e8332b'):'#0a8a4a'}"><div class="row" style="justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
    <div style="min-width:0;flex:1"><div style="font-weight:700;font-size:15px">${i+1}. ${esc(sl.label||'Spot')} <span style="color:#0a8a4a">✓ sold</span></div>
-     <div class="lab" style="text-transform:none;letter-spacing:0;font-size:12.5px">👤 <b>${esc(sl.buyer_handle||'?')}</b>${sl.buyer_uid?' 🔗':''} · <b>${money(price)}</b>${vsTarget}</div></div>
+     <div class="lab" style="text-transform:none;letter-spacing:0;font-size:12.5px">👤 <b>${esc(sl.buyer_handle||'?')}</b>${sl.buyer_uid?' 🔗':''} · <b>${money(price)}</b>${vsTarget}</div>
+     ${(sl.incentives&&sl.incentives.length)?`<div class="lab" style="text-transform:none;letter-spacing:0;font-size:11.5px;margin-top:2px">🎁 ${sl.incentives.map(k=>'<span class="pill" style="margin:1px 2px 0 0">'+esc(incentiveLabel(k))+'</span>').join('')}</div>`:''}</div>
    <div class="row" style="gap:6px"><button class="btn sm" onclick="liveMarkSold('${sl.id}')">Edit</button><button class="btn sm" onclick="liveReopen('${sl.id}')">Reopen</button></div></div></div>`;
 }
 async function dbBuyerSearch(q){if(!LIVE.session)return[];try{const{data}=await sb.rpc('e10_buyer_suggest',{p_session:LIVE.session.id,p_q:q||''});return (data||[]).map(x=>({id:x.id||null,label:x.label,sub:x.sub==='roster'?'in roster':'past buyer'}));}catch(e){return[];}}
@@ -2480,14 +2499,15 @@ async function liveConfirmSold(id){const sl=LIVE.slots.find(x=>x.id===id);if(!sl
  const buyerUid=(picked&&picked.label&&picked.label.trim()===handle)?(picked.id||null):null;
  const price=+(($('soldPrice')&&$('soldPrice').value)||0)||0;
  if(!handle){toast('Enter a winner handle');const inp=$('epi_soldBuyer');if(inp)inp.focus();return;}
- const patch={buyer_handle:handle,buyer_uid:buyerUid,price,state:'sold',sold_at:new Date().toISOString(),updated_at:new Date().toISOString()};
+ const incentives=activeIncentives(LIVE.session);/* Phase C: snapshot the live-active incentives onto the slot */
+ const patch={buyer_handle:handle,buyer_uid:buyerUid,price,state:'sold',incentives,sold_at:new Date().toISOString(),updated_at:new Date().toISOString()};
  try{const{error}=await sb.from('e10_break_slots').update(patch).eq('id',id);if(error)throw error;}catch(err){toast(err.message);return;}
- Object.assign(sl,patch);await liveEvent('spot_sold',id,{buyer_handle:handle,buyer_uid:buyerUid,price,team_id:sl.team_id,player_id:sl.player_id,label:sl.label});
- closeM();renderLive();toast('Sold to '+handle+' · '+money(price));
+ Object.assign(sl,patch);await liveEvent('spot_sold',id,{buyer_handle:handle,buyer_uid:buyerUid,price,team_id:sl.team_id,player_id:sl.player_id,label:sl.label,incentives});
+ closeM();renderLive();toast('Sold to '+handle+' · '+money(price)+(incentives.length?(' · '+incentives.map(incentiveLabel).join(', ')):''));
 }
 async function liveReopen(id){const sl=LIVE.slots.find(x=>x.id===id);if(!sl)return;
- try{const{error}=await sb.from('e10_break_slots').update({state:'available',sold_at:null,updated_at:new Date().toISOString()}).eq('id',id);if(error)throw error;}catch(e){toast(e.message);return;}
- sl.state='available';sl.sold_at=null;await liveEvent('spot_reopened',id,{label:sl.label});renderLive();toast('Reopened '+(sl.label||'spot'));
+ try{const{error}=await sb.from('e10_break_slots').update({state:'available',sold_at:null,incentives:[],updated_at:new Date().toISOString()}).eq('id',id);if(error)throw error;}catch(e){toast(e.message);return;}
+ sl.state='available';sl.sold_at=null;sl.incentives=[];/* clear the stamp on un-sell; a re-sell re-stamps */await liveEvent('spot_reopened',id,{label:sl.label});renderLive();toast('Reopened '+(sl.label||'spot'));
 }
 /* ===== Box/case model + break-cost engine (Phase A) ===== */
 function itemBoxesPerCase(it){return Math.max(1,+(it&&it.boxesPerCase)||1);}

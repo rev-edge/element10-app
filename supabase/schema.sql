@@ -414,3 +414,21 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --   • Per-slot: slotTarget(sl) = band_expected (phase-2 tier) if the format is tiered, else the break-even
 --     share cost ÷ slot count. OPEN slots show the target; SOLD slots show hammer vs target with a signed
 --     delta + ▲ over / ▼ under (and a green/red left border).
+
+-- ─────────────────────────────────────────────────────────────
+-- APPLIED (migration e10_phase_c_incentive_attribution): Live Break Phase C — incentive attribution.
+--   e10_break_slots.incentives jsonb NOT NULL default '[]'  — the incentive keys that were active when the
+--     slot sold (Phase D can split slot performance by incentive: `where incentives ? 'stash_or_pass'`).
+--   e10_break_sessions.see_2_pick_1 boolean (nullable) — the new "see 2 pick 1" incentive state; the
+--     existing stash_or_pass / case_hit(_open) / trade_open booleans are untouched (backward compatible).
+--   RLS UNCHANGED — both tables keep their InitPlan-wrapped policies (slots: owner + (select
+--     e10_has_cap('act.live_run')) for ins/upd/del, e10_can_read_session for select; sessions likewise).
+--     New columns inherit those policies — no policy loosened.
+-- Client (index.html): an INCENTIVE REGISTRY is the single source of truth —
+--   INCENTIVES = [{key,label,active(session)}] for stash_or_pass, case_hit (case_hit_open||case_hit),
+--   trade_block (trade_open), see_2_pick_1. activeIncentives(session) resolves the live-active set;
+--   liveConfirmSold stamps it onto slot.incentives, liveReopen clears it (a re-sell re-stamps). Sold slots
+--   render their incentive tags. TO ADD A NEW INCENTIVE: append one INCENTIVES row + one toggle button in
+--   liveActiveHTML + one placard branch in overlay.html placardsHTML. A new "See 2 pick 1" toggle sits with
+--   stash/case/trade. overlay.html: a compression-safe SEE 2 PICK 1 placard (pl-see) shows on the on-cam
+--   layout only when see_2_pick_1 is on; the other three placards are unchanged.

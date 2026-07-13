@@ -54,6 +54,7 @@ html,body{width:1080px;height:1920px;background:transparent;font-family:var(--fo
 .placard.pl-stash{background:var(--volt);color:#000}
 .placard.pl-case{background:var(--gold);color:#000}
 .placard.pl-trade{background:var(--red);color:#fff;border-color:#fff}
+.placard.pl-see{background:#2f9bff;color:#000}
 .placard.pop{animation:placpop .5s cubic-bezier(.2,1.55,.4,1) both}
 @keyframes placpop{0%{transform:scale(.55) rotate(var(--rot,0deg));opacity:0}70%{transform:scale(1.06) rotate(var(--rot,0deg))}100%{transform:scale(1) rotate(var(--rot,0deg));opacity:1}}
 /* ---- chase board (A) — live cross-off ---- */
@@ -230,6 +231,7 @@ function placardsHTML(){const items=[];
  if(SESSION.stash_or_pass)items.push({k:'stash',big:'STASH<br>OR PASS?',sub:'cast your vote in the app',rot:-2.5});
  if(SESSION.case_hit_open||SESSION.case_hit)items.push({k:'case',big:'CASE<br>HIT!',sub:'live case-hit box in play',rot:1.8});
  if(SESSION.trade_open)items.push({k:'trade',big:'TRADE BLOCK<br>OPEN',sub:'DM to deal on cam',rot:-1.6});
+ if(SESSION.see_2_pick_1)items.push({k:'see',big:'SEE 2<br>PICK 1',sub:'winner picks their hit',rot:2.2});
  if(!items.length){prevPlac=new Set();return '';}
  const rows=items.map(i=>{const isNew=!prevPlac.has(i.k);return `<div class="placard pl-${i.k} ${isNew?'pop':''}" style="--rot:${i.rot}deg"><div class="pl-big">${i.big}</div><div class="pl-sub">${esc(i.sub)}</div></div>`;}).join('');
  prevPlac=new Set(items.map(i=>i.k));
