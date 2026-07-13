@@ -400,3 +400,17 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --     Enter-to-submit on the inventory add name, reserve-units, show-reserve qty, and the break planner
 --     product/chase/auction add-rows. Empty-state "None yet." fallbacks on the break planner
 --     product/chase/auction/inventory panels. Currency stays money()-formatted app-wide (audited).
+
+-- ─────────────────────────────────────────────────────────────
+-- CLIENT-ONLY (no schema change): Live Break Phase B — live ROI% + per-slot target vs actual.
+--   Streamer-facing only (liveProgressHTML / liveSpotCard in index.html) — the public overlay is untouched.
+--   Everything is computed from existing columns: e10_break_sessions.cost / proj_* and e10_break_slots
+--   hammer price / band_expected / tier. Re-renders on every sale, reopen, and cost change via renderLive
+--   (product edits) and the realtime e10_break_sessions subscription — no new wiring.
+--   • Header: ROI% = (Σ sold hammer − cost) / cost, red→green at break-even, beside Net/vs-cost. A remaining
+--     line: "To break even: $A more · avg $B/remaining slot" and (when proj_expected > cost) "To margin goal
+--     ($exp): $C more" — proj_expected is the phase-2 margin-goal revenue target (no targetMargin column
+--     needed). A pacing line: sold Σhammer vs Σ(their targets), beating/trailing.
+--   • Per-slot: slotTarget(sl) = band_expected (phase-2 tier) if the format is tiered, else the break-even
+--     share cost ÷ slot count. OPEN slots show the target; SOLD slots show hammer vs target with a signed
+--     delta + ▲ over / ▼ under (and a green/red left border).

@@ -2417,39 +2417,50 @@ function liveActiveHTML(){const s=LIVE.session;const dir=liveDirUrl();const over
      <span class="lab" style="text-transform:none;letter-spacing:0">Entries <b>${(+g.entries||0)}</b></span>
      <button class="btn sm" onclick="liveGiveaway('minus')">−</button><button class="btn sm" onclick="liveGiveaway('plus')">+1</button></div>`;})()}`;})()}</details>`;
 }
+/* Phase B: a slot's target = its phase-2 tier expected band if the format has tiers, else the
+   break-even share (cost ÷ slot count). Streamer-facing only — never surfaced on the public overlay. */
+function slotTarget(sl){if(sl&&+sl.band_expected>0)return +sl.band_expected;const s=LIVE.session,n=LIVE.slots.length;return (s&&+s.cost>0&&n>0)?((+s.cost)/n):0;}
 function liveProgressHTML(){const s=LIVE.session;const sold=LIVE.slots.filter(x=>x.state==='sold');
- const actual=sold.reduce((a,x)=>a+(+x.price||0),0),N=LIVE.slots.length,nSold=sold.length;
+ const actual=sold.reduce((a,x)=>a+(+x.price||0),0),N=LIVE.slots.length,nSold=sold.length,openN=N-nSold;
  const low=+s.proj_low||0,exp=+s.proj_expected||0,high=+s.proj_high||0,cost=+s.cost||0;
  const hasProj=exp>0||low>0||high>0;const pc=v=>v>=0?'#0a8a4a':'#e8332b';
  const margin=actual>0?((actual-cost)/actual*100):0;
+ const roi=cost>0?((actual-cost)/cost*100):null;
  let h=`<div class="card" style="margin-bottom:12px"><div class="row" style="gap:10px;flex-wrap:wrap">
    <div class="metric" style="flex:1;min-width:120px"><div class="n" style="font-size:22px">${money(actual)}</div><div class="l">Actual hammer · ${nSold}/${N} sold</div></div>`;
  if(hasProj)h+=`<div class="metric" style="flex:1;min-width:150px"><div class="n" style="font-size:15px">${money(low)} / <b>${money(exp)}</b> / ${money(high)}</div><div class="l">Projection L / E / H</div></div>`;
  const avgT=avgSlotTarget(cost,N);
  if(avgT>0)h+=`<div class="metric" style="flex:1;min-width:130px"><div class="n" style="font-size:18px;color:var(--red)">${money(avgT)}</div><div class="l">Avg slot target · break-even (${money(cost)} ÷ ${N})</div></div>`;
- if(cost>0)h+=`<div class="metric" style="flex:1;min-width:130px"><div class="n" style="font-size:18px;color:${pc(actual-cost)}">${actual>=cost?'+':''}${money(actual-cost)}</div><div class="l">vs cost ${money(cost)}${actual>0?(' · '+margin.toFixed(0)+'%'):''}</div></div>`;
+ if(cost>0)h+=`<div class="metric" style="flex:1;min-width:130px"><div class="n" style="font-size:18px;color:${pc(actual-cost)}">${actual>=cost?'+':''}${money(actual-cost)}</div><div class="l">Net vs cost ${money(cost)}${actual>0?(' · '+margin.toFixed(0)+'% mgn'):''}</div></div>`;
+ if(roi!=null)h+=`<div class="metric" style="flex:1;min-width:110px"><div class="n" style="font-size:22px;color:${pc(roi)}">${roi>=0?'+':''}${roi.toFixed(0)}%</div><div class="l">ROI · live</div></div>`;
  h+=`</div>`;
- if(hasProj||cost>0){const clr=hasProj?(actual>=exp?['#0a8a4a','✓ At/above EXPECTED']:(actual>=low?['#b8860b','On track — between LOW and EXPECTED']:['#e8332b','Below LOW so far'])):null;
-   const cst=cost>0?(actual>=cost?' · clearing cost ✓':' · not yet covering cost'):'';
-   h+=`<div class="lab" style="margin-top:8px;text-transform:none;letter-spacing:0;font-size:12.5px${clr?';color:'+clr[0]:''}">${clr?clr[1]:''}${cst}</div>`;}
+ if(cost>0){const toBE=Math.max(0,cost-actual),perRem=openN>0?toBE/openN:0;const goals=[];
+   goals.push(toBE>0?('To break even: <b>'+money(toBE)+'</b> more'+(openN>0?(' · avg <b>'+money(perRem)+'</b>/remaining slot'):'')):'Break-even cleared <b style="color:#0a8a4a">✓</b>');
+   if(exp>cost){const toGoal=Math.max(0,exp-actual);goals.push(toGoal>0?('To margin goal ('+money(exp)+'): <b>'+money(toGoal)+'</b> more'):'Margin goal <b style="color:#0a8a4a">hit ✓</b>');}
+   h+=`<div class="lab" style="margin-top:8px;text-transform:none;letter-spacing:0;font-size:12.5px">${goals.join(' &nbsp;·&nbsp; ')}</div>`;}
+ if(nSold>0){const st=sold.reduce((a,x)=>a+slotTarget(x),0);if(st>0){const d=actual-st;h+=`<div class="lab" style="margin-top:6px;text-transform:none;letter-spacing:0;font-size:12.5px;color:${pc(d)}">Pacing: sold <b>${money(actual)}</b> vs target <b>${money(st)}</b> · ${d>=0?'+':''}${money(d)} (${d>=0?'beating':'trailing'} target)</div>`;}}
+ if(hasProj){const clr=actual>=exp?['#0a8a4a','✓ At/above EXPECTED']:(actual>=low?['#b8860b','On track — between LOW and EXPECTED']:['#e8332b','Below LOW so far']);
+   h+=`<div class="lab" style="margin-top:6px;text-transform:none;letter-spacing:0;font-size:12.5px;color:${clr[0]}">${clr[1]}</div>`;}
  return h+`</div>`;
 }
 function liveSpotCard(sl,i){const openS=sl.state!=='sold';
  const tier=sl.tier?(' · '+esc(sl.tier)):'';
- const band=(sl.band_expected!=null&&(+sl.band_expected||sl.method))?('exp '+money(+sl.band_expected||0)+tier):(sl.method?esc(sl.method)+tier:'');
+ const target=slotTarget(sl),tsrc=(+sl.band_expected>0)?'tier':'be';
  const cards=(sl.plan&&sl.plan.cards)||[],cc=(sl.plan&&sl.plan.cardCount);
  const cardline=cards.length?('🃏 '+cards.slice(0,3).map(c=>esc(c.name)).join(', ')+((cc&&cc>cards.length)?(' +'+(cc-cards.length)+' more'):(cards.length>3?' …':''))):(sl.plan&&sl.plan.remainder?'🧺 Field / remainder':'');
  if(openS){
   const isNow=LIVE.session&&LIVE.session.active_slot_id===sl.id;
+  const targetLine=target>0?('🎯 <b>'+money(target)+'</b> target'+(tsrc==='tier'?tier:' · avg break-even share')):(sl.method?(esc(sl.method)+tier):'');
   return `<div class="out" style="margin-top:8px;padding:12px${isNow?';border-left:4px solid var(--red)':''}"><div class="row" style="justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
     <div style="min-width:0;flex:1"><div style="font-weight:700;font-size:15px">${i+1}. ${esc(sl.label||'Spot')}${isNow?' <span style="color:var(--red)">● LIVE NOW</span>':''}</div>
-      ${band?`<div class="lab" style="text-transform:none;letter-spacing:0;font-size:12px">${band}</div>`:''}
+      ${targetLine?`<div class="lab" style="text-transform:none;letter-spacing:0;font-size:12px">${targetLine}</div>`:''}
       ${cardline?`<div class="lab" style="text-transform:none;letter-spacing:0;font-size:11.5px;margin-top:2px">${cardline}</div>`:''}</div>
     <div class="row" style="gap:6px"><button class="btn sm ${isNow?'d':''}" style="white-space:nowrap" onclick="liveSetActive('${isNow?'':sl.id}')" title="Set the spot being auctioned now">${isNow?'● Now':'○ Now'}</button><button class="btn v" style="padding:12px 18px;font-size:14px;white-space:nowrap" onclick="liveMarkSold('${sl.id}')">Mark sold</button><button class="btn x sm" onclick="liveDelSlot('${sl.id}')" title="Remove spot">✕</button></div></div></div>`;
  }
- return `<div class="out" style="margin-top:8px;padding:12px;border-left:3px solid #0a8a4a"><div class="row" style="justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+ const price=+sl.price||0,dl=price-target;const vsTarget=target>0?(` · target ${money(target)} · <b style="color:${dl>=0?'#0a8a4a':'#e8332b'}">${dl>=0?'+':''}${money(dl)} ${dl>=0?'▲ over':'▼ under'}</b>`):'';
+ return `<div class="out" style="margin-top:8px;padding:12px;border-left:3px solid ${target>0?(dl>=0?'#0a8a4a':'#e8332b'):'#0a8a4a'}"><div class="row" style="justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
    <div style="min-width:0;flex:1"><div style="font-weight:700;font-size:15px">${i+1}. ${esc(sl.label||'Spot')} <span style="color:#0a8a4a">✓ sold</span></div>
-     <div class="lab" style="text-transform:none;letter-spacing:0;font-size:12.5px">👤 <b>${esc(sl.buyer_handle||'?')}</b>${sl.buyer_uid?' 🔗':''} · <b>${money(+sl.price||0)}</b>${band?(' · '+band):''}</div></div>
+     <div class="lab" style="text-transform:none;letter-spacing:0;font-size:12.5px">👤 <b>${esc(sl.buyer_handle||'?')}</b>${sl.buyer_uid?' 🔗':''} · <b>${money(price)}</b>${vsTarget}</div></div>
    <div class="row" style="gap:6px"><button class="btn sm" onclick="liveMarkSold('${sl.id}')">Edit</button><button class="btn sm" onclick="liveReopen('${sl.id}')">Reopen</button></div></div></div>`;
 }
 async function dbBuyerSearch(q){if(!LIVE.session)return[];try{const{data}=await sb.rpc('e10_buyer_suggest',{p_session:LIVE.session.id,p_q:q||''});return (data||[]).map(x=>({id:x.id||null,label:x.label,sub:x.sub==='roster'?'in roster':'past buyer'}));}catch(e){return[];}}
