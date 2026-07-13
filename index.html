@@ -6,6 +6,10 @@
 :root{--bg:#faf9f5;--surface:#ffffff;--surface2:#f0efea;--ink:#0A0B0D;--mut:#6b6d73;--mut2:#9a9a93;--line:#e4e2da;--volt:#C6FF3A;--blue:#1F5EFF;--red:#E8332B;--r:14px;--rp:999px;
 --disp:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;--sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace}
 *{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px}
+/* CASING CONVENTION (source written clean; display cased by CSS):
+   · Section/card titles h1/h2/h3 → UPPERCASE (CSS text-transform, consistent app-wide); source in Sentence case, no decorative emojis.
+   · .lab helper/field labels → UPPERCASE (CSS); source Sentence case.
+   · <label> field labels, <button> text, values → Sentence case, terse. Placeholders only when the input is non-obvious. */
 h1,h2,h3{font-family:var(--disp);font-weight:700;text-transform:uppercase;letter-spacing:.02em;margin:0}
 .mono{font-family:var(--mono)}a{color:var(--blue);text-decoration:none;cursor:pointer}
 header{display:flex;align-items:center;gap:22px;padding:16px 26px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#faf9f5f2;backdrop-filter:blur(6px);z-index:30}
@@ -291,7 +295,7 @@ function go(s){document.querySelectorAll('.sec').forEach(x=>x.classList.remove('
 renderNav();
 $('foot').textContent='Element 10 · Command · shared team workspace · synced live';
 function renderWho(){$('who').innerHTML=S.user?`<button class="btn sm" onclick="signIn()">👤 ${esc(S.user)}</button>`:`<button class="btn v sm" onclick="signIn()">Sign in</button>`;}
-function signIn(cb){window._siCb=(typeof cb==='function')?cb:null;$('modal').innerHTML=`<h3 style="font-size:18px">Sign in</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:6px 0 12px">Your name tags your notes and comments so the team knows who did what. Real email logins arrive when we host the shared version.</div><label>Your name</label><input id="siName" value="${esc(S.user||'')}" placeholder="e.g. Trent" onkeydown="if(event.key==='Enter')doSignIn()"><div class="row" style="margin-top:16px"><button class="btn v" onclick="doSignIn()">Save</button>${S.user?'<button class="btn sm" onclick="closeM()">Cancel</button>':''}</div>`;$('ov').style.display='flex';setTimeout(()=>{const el=$('siName');if(el)el.focus();},60);}
+function signIn(cb){window._siCb=(typeof cb==='function')?cb:null;$('modal').innerHTML=`<h3 style="font-size:18px">Sign in</h3><label>Your name</label><input id="siName" value="${esc(S.user||'')}" onkeydown="if(event.key==='Enter')doSignIn()"><div class="row" style="margin-top:16px"><button class="btn v" onclick="doSignIn()">Save</button>${S.user?'<button class="btn sm" onclick="closeM()">Cancel</button>':''}</div>`;$('ov').style.display='flex';setTimeout(()=>{const el=$('siName');if(el)el.focus();},60);}
 function doSignIn(){const v=$('siName').value.trim();if(!v)return;S.user=v;save();renderWho();closeM();const cb=window._siCb;window._siCb=null;if(cb)cb();else currentRender();}
 function requireUser(cb){if(S.user)cb();else signIn(cb);}
 renderWho();
@@ -313,7 +317,7 @@ function newShow(k){if(!canEditScoped())return roGuard();showModal(null,k||(DAYS
 function editShow(k,i){const s=S.shows[k]&&S.shows[k][i];if(!s)return;showDetail(s.id);}
 function showModal(ex,k){ex=ex||{name:'',fmt:L('formats')[0],dur:90,host:S.streamers[0]||''};const[day,dp]=k.split('|');
  $('modal').innerHTML=`<h3 style="font-size:18px">${ex.k!=null?'Edit':'New'} show</h3>
-  <div style="margin-top:12px"><label>Show name</label><input id="mname" value="${esc(ex.name)}" placeholder="e.g. Ascended Heroes Ceiling Ladder"></div>
+  <div style="margin-top:12px"><label>Show name</label><input id="mname" value="${esc(ex.name)}"></div>
   <div class="row" style="margin-top:10px"><div style="flex:1"><label>Day</label><select id="mday">${DAYS.map(d=>`<option ${d===day?'selected':''}>${d}</option>`).join('')}</select></div>
   <div style="flex:1"><label>Daypart</label><select id="mdp">${DAYPARTS.map(d=>`<option ${d[0]===dp?'selected':''}>${d[0]}</option>`).join('')}</select></div></div>
   <div class="row" style="margin-top:10px"><div style="flex:1"><label>Format</label>${pickInput({id:'mfmt',list:'formats',value:ex.fmt||''})}</div>
@@ -1236,7 +1240,7 @@ function scPager(){const el=$('scPager');if(!el||!SRV)return;const known=SRV.cou
  el.innerHTML=`${SRV.loading?'<span style="color:#0a8a4a;font-weight:600">⟳ searching…</span> ':''}<span>${from.toLocaleString()}–${to.toLocaleString()} of <b>${known?SRV.count.toLocaleString():'…'}</b>${(SRV.ms!=null&&!SRV.loading)?' · '+SRV.ms+'ms':''}</span> <button class="btn x sm" ${SRV.page<=0?'disabled':''} onclick="scPage(-1)">‹ Prev</button> <span class="mono">${SRV.page+1}${pages?'/'+pages:''}</span> <button class="btn x sm" ${(known?SRV.page>=pages-1:(SRV.rows||[]).length<CARD_PAGE)?'disabled':''} onclick="scPage(1)">Next ›</button>`;}
 function renderCardGridShell(){const G=SRV.G,F=G.state.filters;const player=SRV.mode==='player';
  let h=`<div class="card"><div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-   <div class="row" style="gap:8px;align-items:center"><button class="btn sm" onclick="closeCardGrid()">← ${player?'Players':'Checklists'}</button><h3 style="font-size:15px">${player?'👤 ':''}${esc(SRV.name)}</h3>${player&&window._plMeta&&window._plMeta.team?`<span class="lab">${esc(window._plMeta.team||'')}${window._plMeta.nationality?' · '+esc(window._plMeta.nationality):''}</span>`:''}</div>
+   <div class="row" style="gap:8px;align-items:center"><button class="btn sm" onclick="closeCardGrid()">← ${player?'Players':'Checklists'}</button><h3 style="font-size:15px">${esc(SRV.name)}</h3>${player&&window._plMeta&&window._plMeta.team?`<span class="lab">${esc(window._plMeta.team||'')}${window._plMeta.nationality?' · '+esc(window._plMeta.nationality):''}</span>`:''}</div>
    <div class="row" style="gap:6px;flex-wrap:wrap">${player?'':`<button class="btn sm" onclick="scBulkChase(true)" title="Flag every card matching the current filter/search as chase">🎯 Mark filtered chase</button><button class="btn sm" onclick="scBulkChase(false)" title="Clear chase on the filtered cards">Unmark filtered</button><button class="btn sm" onclick="chaseApplyFromGrid()" title="Apply a saved player chase list to this checklist">Apply chase list…</button><button class="btn sm" onclick="chaseSaveFromChecklist('${SRV.scopeId}')" title="Save this checklist's chase players as a reusable list">＋ Save chases as list</button><button class="btn sm" onclick="buildBreakFromChecklist('${SRV.scopeId}')" title="Preload the break modeler with chase cards">⚡ Model a break</button><button class="btn v sm" onclick="scAddCard()">+ Add card</button>`}</div></div>
    <div class="etool" style="margin-top:12px">
      <div style="flex:2;min-width:200px"><label>Search all fields</label><input value="${esc(F.search||'')}" placeholder="name / set / parallel / color / #…" oninput="scFilter('search',this.value)"></div>
@@ -1248,7 +1252,7 @@ function renderCardGridShell(){const G=SRV.G,F=G.state.filters;const player=SRV.
 /* ---------- Players view ---------- */
 let PLR={search:'',page:0,rows:null,count:0,ms:null},_plT=null;
 async function dPlayers(){$('dtc').innerHTML=`<div class="card"><div class="row" style="justify-content:space-between;align-items:center"><h3 style="font-size:15px">Players</h3><div class="lab">Master records — every card of a player across all sets/years</div></div>
-   <div class="etool" style="margin-top:12px"><div style="flex:2;min-width:180px"><label>Search players</label><input value="${esc(PLR.search||'')}" placeholder="e.g. Messi" oninput="plSearch(this.value)"></div><div id="plPager" class="lab" style="margin-left:auto;align-self:flex-end;text-transform:none;letter-spacing:0"></div></div>
+   <div class="etool" style="margin-top:12px"><div style="flex:2;min-width:180px"><label>Search players</label><input value="${esc(PLR.search||'')}" oninput="plSearch(this.value)"></div><div id="plPager" class="lab" style="margin-left:auto;align-self:flex-end;text-transform:none;letter-spacing:0"></div></div>
    <div id="plListBox" style="margin-top:10px"></div></div>`;
  plFetch();}
 function plSearch(v){PLR.search=v;PLR.page=0;clearTimeout(_plT);_plT=setTimeout(plFetch,250);}
@@ -1274,7 +1278,7 @@ function tmDatalists(){const dir=TM.dir||{};const sports=Object.keys(dir).filter
 async function dTeams(){$('dtc').innerHTML=`<div class="card">
    <div class="row" style="justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px"><div><h3 style="font-size:15px">Teams</h3><div class="lab">Browse the league rosters — Sport → League → teams. ${ROLE==='admin'?'Edit names, add/remove teams &amp; leagues, and attach logos (rendered on the graphics overlay board).':'Read-only for your role — an admin manages teams &amp; logos.'}</div></div>
      ${ROLE==='admin'?`<div class="row" style="gap:6px"><button class="btn sm" onclick="tmAddLeague()">+ League / set</button><button class="btn v sm" onclick="tmAdd()">+ Add team</button></div>`:''}</div>
-   <div class="etool" style="margin-top:12px"><div style="flex:2;min-width:180px"><label>Search all teams</label><input id="tmSearch" value="${esc(TM.search||'')}" placeholder="e.g. Lakers, Argentina" oninput="tmSearchIn(this.value)"></div><div id="tmCount" class="lab" style="margin-left:auto;align-self:flex-end;text-transform:none;letter-spacing:0"></div></div>
+   <div class="etool" style="margin-top:12px"><div style="flex:2;min-width:180px"><label>Search all teams</label><input id="tmSearch" value="${esc(TM.search||'')}" oninput="tmSearchIn(this.value)"></div><div id="tmCount" class="lab" style="margin-left:auto;align-self:flex-end;text-transform:none;letter-spacing:0"></div></div>
    <div id="tmSports" style="margin-top:10px"></div>
    <div id="tmLeagues"></div>
    <div id="tmBody" style="margin-top:12px"><div class="lab" style="padding:12px">Loading…</div></div>
@@ -1330,7 +1334,7 @@ async function tmEditSave(id){const name=($('tmeName').value||'').trim();if(!nam
 function tmAdd(sport,league){if(ROLE!=='admin'){toast('Admin only');return;}
  const sp=(typeof sport==='string'?sport:(TM.search?'':TM.sport))||'',lg=(typeof league==='string'?league:(TM.search?'':TM.league))||'';
  $('modal').innerHTML=`<h3 style="font-size:17px">Add team</h3>
-   <label>Name</label><input id="tmaName" placeholder="e.g. New York Yankees, or a character" style="width:100%" onkeydown="if(event.key==='Enter')tmAddSave()">
+   <label>Name</label><input id="tmaName" style="width:100%" onkeydown="if(event.key==='Enter')tmAddSave()">
    <div class="row" style="gap:8px;margin-top:8px"><div style="flex:1"><label>Sport / set type</label><input id="tmaSport" list="dl_tmsport" value="${esc(sp==='Other'?'':sp)}" placeholder="Baseball, or Anime…" style="width:100%"></div><div style="flex:1"><label>League / set</label><input id="tmaLeague" list="dl_tmleague" value="${esc(lg==='(no league)'?'':lg)}" placeholder="MLB, or One Piece…" style="width:100%"></div></div>
    <label style="margin-top:8px">Logo (optional)</label><div class="row" style="gap:6px"><input id="tmaLogo" placeholder="paste URL or upload" style="flex:1" onchange="tmaPv()"><button class="btn sm" onclick="tmAddUpload()">⬆ Upload</button></div>
    <div style="margin-top:8px"><img id="tmaLogoPv" style="height:52px;border-radius:6px;border:1px solid var(--line);background:#fff;display:none"></div>
@@ -1577,7 +1581,7 @@ function invRollup(items){items=items||invView();let cost=0,market=0,committed=0
    its own state/localStorage keys (see extension note near dInventory). */
 const INV_COLS=[
  {key:'name',label:'Item',core:true,first:true,type:'text',sortable:true,sortVal:i=>(i.name||'').toLowerCase(),
-  cell:(i,admin)=>{const sold=(+i.soldQty||0)>0?`<div class="lab" style="text-transform:none;letter-spacing:0;color:var(--mut2)">sold ${i.soldQty} · ${money(i.soldProceeds||0)}</div>`:'';return `<td><b>${esc(i.name)}</b> <span class="pill" style="margin:0">${esc(i.cat)}</span>${sold}</td>`;}},
+  cell:(i,admin)=>{const sold=(+i.soldQty||0)>0?`<div class="lab" style="text-transform:none;letter-spacing:0;color:var(--mut2)">sold ${i.soldQty} · ${money(i.soldProceeds||0)}</div>`:'';return `<td><b>${esc(i.name)}</b>${sold}</td>`;}},
  {key:'cat',label:'Category',type:'text',filter:'enum',enumGet:i=>i.cat||'',sortable:true,sortVal:i=>(i.cat||'').toLowerCase(),cell:i=>`<td>${esc(i.cat||'')||'—'}</td>`},
  {key:'set',label:'Set',type:'text',filter:'enum',enumGet:i=>i.set||'',sortable:true,sortVal:i=>(i.set||'').toLowerCase(),cell:i=>`<td>${esc(i.set||'')||'—'}</td>`},
  {key:'gradingCompany',label:'Grading',type:'text',filter:'enum',enumGet:i=>i.gradingCompany||'',sortable:true,sortVal:i=>(i.gradingCompany||''),cell:i=>`<td>${i.gradingCompany?`<span class="pill" style="margin:0">${esc(i.gradingCompany)}</span>`:'<span class="lab">—</span>'}</td>`},
@@ -1615,20 +1619,20 @@ const INVG=makeGrid('inv',invGridCfg);
 function dInventory(){const admin=ROLE==='admin';const canEdit=hasCap('act.inventory_edit');const rl=invRollup();const sets=[...new Set(S.inventory.map(i=>i.set).filter(Boolean))].sort();const years=[...new Set(S.inventory.map(i=>i.year).filter(Boolean))].sort();
  let h=canEdit?`<div class="card"><h3 style="font-size:15px">Add inventory</h3>
    <div style="margin-top:10px;position:relative">
-     <label>🔎 Find a card in your library <span class="lab" style="text-transform:none;letter-spacing:0">— autofills &amp; links this item to the card</span></label>
-     <input id="ivCardSearch" placeholder="type a player, card, or set… e.g. Messi, Prizm Silver, Charizard" autocomplete="off" oninput="invCardSearch(this.value)" onfocus="invCardSearch(this.value)">
+     <label>Find a card in your library</label>
+     <input id="ivCardSearch" placeholder="Search cards" autocomplete="off" oninput="invCardSearch(this.value)" onfocus="invCardSearch(this.value)">
      <div id="ivCardResults" style="position:absolute;left:0;right:0;z-index:30"></div>
    </div>
    <div id="ivLinkChip" style="margin-top:8px"></div>
    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(128px,1fr));margin-top:10px">
-   <div><label>Name</label><input id="ivN" placeholder="e.g. Ascended Heroes Box" onkeydown="if(event.key==='Enter')addInv()"></div>
-   <div><label>Category</label>${pickInput({id:'ivC',list:'invcats',value:'',placeholder:'category'})}</div>
+   <div><label>Name</label><input id="ivN" onkeydown="if(event.key==='Enter')addInv()"></div>
+   <div><label>Category</label>${pickInput({id:'ivC',list:'invcats',value:'',placeholder:''})}</div>
    <div style="min-width:150px"><label>Set / product</label>${entityPicker('ivSet',{icon:'🗂',placeholder:'search sets…',minChars:2,server:true,freeText:true,value:ivSetLink,search:dbSetSearch,onpick:(sid,label)=>{ivSetLink={id:sid,label};},onclear:()=>{ivSetLink=null;}})}</div>
    <div><label>Qty (boxes on hand)</label><input id="ivQ" type="number" value="1" title="How many BOXES you hold. One full case = boxes/case. Two cases of 12 = 24."></div>
    <div><label>Cost $</label><input id="ivCo" type="number" placeholder="0" oninput="ivBoxHint()"></div>
    <div><label>Cost basis</label><select id="ivBasis" onchange="ivBoxHint()"><option value="perbox">per box / unit</option><option value="percase">per case</option></select></div>
    <div><label>Boxes / case</label><input id="ivBPC" type="number" min="1" value="1" oninput="ivBoxHint()" title="For sealed product bought by the case — boxes per case (e.g. Prizm WC = 12). Leave 1 for singles / slabs."></div>
-   <div style="align-self:end"><label>&nbsp;</label><div id="ivPBHint" class="lab" style="text-transform:none;letter-spacing:0;font-size:12px;padding-bottom:9px">= $0/box</div></div>
+   <div style="align-self:end"><label>&nbsp;</label><div id="ivPBHint" class="lab" style="text-transform:none;letter-spacing:0;font-size:12px;padding-bottom:9px"></div></div>
    <div><label>Market $</label><input id="ivV" type="number" placeholder="0"></div>
    <div><label>Grading co.</label>${pickInput({id:'ivGC',list:'grading',value:'',placeholder:'raw/sealed'})}</div>
    <div><label>Grade</label><input id="ivGrade" placeholder="10 / 9.5"></div>
@@ -1665,7 +1669,7 @@ function buyListHTML(){
    (s.inventoryAlloc||[]).forEach(a=>bump(setOfItem(a.itemId)||a.set,+a.qty||1,label,+a.cost||0));
    (s.needs||[]).forEach(n=>bump(n.set,+n.qty||1,label,+n.approxCost||0));});
  const names=Object.keys(demand);
- if(!names.length)return `<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Buy list from the schedule</h3><div class="lab" style="margin-top:8px;text-transform:none;letter-spacing:0">No demand yet. Attach a break model to a show (Data → Break / Format → attach to show) or add a “needs” line in a show’s detail, and this fills with exactly what to buy.</div></div>`;
+ if(!names.length)return `<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Buy list from the schedule</h3><div class="lab" style="margin-top:8px;text-transform:none;letter-spacing:0">No demand from the schedule yet.</div></div>`;
  const freeOf=set=>S.inventory.filter(i=>(i.set||'(unspecified)')===set).reduce((a,i)=>a+invAvailable(i),0);
  const avgCostOf=set=>{const arr=S.inventory.filter(i=>(i.set||'(unspecified)')===set&&(+i.cost||0)>0);return arr.length?arr.reduce((a,i)=>a+(+i.cost||0),0)/arr.length:0;};
  let projected=0;
@@ -1689,7 +1693,7 @@ function addInv(){const n=$('ivN').value.trim();if(!n){toast('Name is required')
    cardId:L2.cardId||null,playerId:L2.playerId||null,parallel:L2.parallel||'',rarity:L2.rarity||'',addedAt:Date.now()});
  ivLinked=null;ivSetLink=null;save();dInventory();toast('Added'+(L2.cardId?' · linked to card':''));}
 function ivBoxHint(){const el=$('ivPBHint');if(!el)return;const raw=+($('ivCo')&&$('ivCo').value)||0,bpc=Math.max(1,+($('ivBPC')&&$('ivBPC').value)||1),basis=(($('ivBasis')&&$('ivBasis').value)||'perbox');const pbc=(basis==='percase'&&bpc>1)?(raw/bpc):raw;
- el.textContent='= '+money(pbc)+'/box'+((basis==='percase'&&bpc>1)?(' · case '+money(raw)):'');el.style.color=pbc>0?'var(--red)':'';}
+ el.textContent=pbc>0?('= '+money(pbc)+'/box'+((basis==='percase'&&bpc>1)?(' · case '+money(raw)):'')):'';el.style.color=pbc>0?'var(--red)':'';}
 /* ---- In-place inventory edit (same cost-basis-aware fields as the add form; corrects legacy items) ---- */
 function invEdit(id){if(!hasCap('act.inventory_edit')){toast('Editing inventory is restricted for your role');return;}
  const it=(S.inventory||[]).find(x=>x.id===id);if(!it)return;
@@ -1929,8 +1933,8 @@ function chaseListSuggested(l,cl){const hay=((cl&&cl.name||'')+' '+(cl&&cl.set||
 function chaseCreate(){if(!canEditScoped())return roGuard();S.chaseLists=S.chaseLists||[];const l={id:'chl'+Math.random().toString(36).slice(2),name:'New chase list',sport:'',league:'',players:[]};S.chaseLists.unshift(l);save();dChecklists();chaseEdit(l.id);}
 function chaseDelete(id){if(!canEditScoped())return roGuard();const l=chaseListById(id);if(!l)return;if(!confirm('Delete chase list “'+l.name+'”? This cannot be undone.'))return;S.chaseLists=(S.chaseLists||[]).filter(x=>x.id!==id);save();dChecklists();toast('Chase list deleted');}
 function chaseListsHTML(){const lists=S.chaseLists||[];const admin=canEditScoped();
- return `<div class="card" style="margin-top:16px"><div class="row" style="justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px"><div><h3 style="font-size:15px">🎯 Chase lists</h3><div class="lab" style="text-transform:none;letter-spacing:0">Reusable player lists (by sport / league). Apply one to any checklist to flag matching cards as chase — it carries to the break chase board &amp; planner automatically.</div></div>${admin?'<button class="btn v sm" onclick="chaseCreate()">+ New list</button>':''}</div>
-   <div style="margin-top:10px">${lists.length?lists.map(l=>`<div class="out" style="margin-top:8px;padding:10px"><div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px"><div style="min-width:0"><b>${esc(l.name)}</b> <span class="lab" style="text-transform:none;letter-spacing:0">${[l.sport,l.league].filter(Boolean).join(' · ')||'no sport/league'} · ${(l.players||[]).length} player${(l.players||[]).length===1?'':'s'}</span></div>${admin?`<div class="row" style="gap:4px"><button class="btn sm" onclick="chaseEdit('${l.id}')">Edit</button><button class="btn v sm" onclick="chaseApplyModal('${l.id}')">Apply →</button><button class="btn x sm" onclick="chaseDelete('${l.id}')">✕</button></div>`:''}</div></div>`).join(''):'<div class="lab" style="text-transform:none;letter-spacing:0;padding:6px 0">No chase lists yet — <b>+ New list</b>, add players, then apply to a checklist.</div>'}</div></div>`;}
+ return `<div class="card" style="margin-top:16px"><div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="font-size:15px">Chase lists</h3>${admin?'<button class="btn v sm" onclick="chaseCreate()">+ New list</button>':''}</div>
+   <div style="margin-top:10px">${lists.length?lists.map(l=>`<div class="out" style="margin-top:8px;padding:10px"><div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px"><div style="min-width:0"><b>${esc(l.name)}</b> <span class="lab" style="text-transform:none;letter-spacing:0">${[l.sport,l.league].filter(Boolean).join(' · ')||'no sport/league'} · ${(l.players||[]).length} player${(l.players||[]).length===1?'':'s'}</span></div>${admin?`<div class="row" style="gap:4px"><button class="btn sm" onclick="chaseEdit('${l.id}')">Edit</button><button class="btn v sm" onclick="chaseApplyModal('${l.id}')">Apply →</button><button class="btn x sm" onclick="chaseDelete('${l.id}')">✕</button></div>`:''}</div></div>`).join(''):'<div class="lab" style="text-transform:none;letter-spacing:0;padding:6px 0">No chase lists yet.</div>'}</div></div>`;}
 function chasePlayersHTML(l){const ps=l.players||[];return ps.length?`<div class="row" style="gap:6px;flex-wrap:wrap">${ps.map((p,i)=>`<span class="pill" style="margin:0">${esc(p.name)}${p.id?' 🔗':''} <a onclick="chaseRemovePlayer('${l.id}',${i})" style="color:var(--red);cursor:pointer">✕</a></span>`).join('')}</div>`:'<div class="lab" style="text-transform:none;letter-spacing:0">No players yet — search below to add.</div>';}
 function chaseEdit(id){const l=chaseListById(id);if(!l)return;if(!canEditScoped())return roGuard();
  $('modal').innerHTML=`<h3 style="font-size:17px">Edit chase list</h3>
@@ -2002,7 +2006,7 @@ function dChecklists(){if(clReviewMode&&PENDING_CL)return renderChecklistReview(
    <input id="clFile" type="file" accept=".csv,.tsv,.txt,.xlsx,.xls" style="display:none" onchange="clImportFile(this)">
    <div id="clListArea" style="margin-top:12px"><div class="lab" style="padding:8px 0">Loading checklists…</div></div></div>`;
  h+=chaseListsHTML();
- h+=`<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Attachments</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">Images, PDFs, docs. Small files stored in-browser; large ones referenced only (move to cloud when hosted).</div>
+ h+=`<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Attachments</h3>
    <div class="drop" onclick="$('atFile').click()">Click to upload a file</div><input id="atFile" type="file" style="display:none" onchange="uploadAttach(this)">
    <div style="margin-top:12px">${S.attachments.length?`<div class="egrid"><table><tr><th>Attachment</th><th>Size</th><th></th></tr>${S.attachments.map((a,i)=>`<tr><td>📎 ${esc(a.name)}</td><td class="lab" style="text-transform:none;letter-spacing:0">${(a.size/1024).toFixed(0)} KB${a.data?'':' · reference'}</td><td><div class="actions">${a.data?`<a class="btn sm" href="${a.data}" download="${esc(a.name)}">Download</a>`:''}<button class="btn x" onclick="S.attachments.splice(${i},1);save();dChecklists()">✕</button></div></td></tr>`).join('')}</table></div>`:'<div style="color:var(--mut);font-size:13px">No attachments.</div>'}</div></div>`;
  $('dtc').innerHTML=h;dChecklistsList();}
@@ -2092,7 +2096,7 @@ function dPerms(){
  if(ROLE!=='admin'){$('dtc').innerHTML='<div class="card" style="color:var(--mut)">Admin only — permissions are configured by admins.</div>';return;}
  const roles=permRoles();
  const capRow=(cap,label)=>`<tr><td style="text-align:left"><b>${esc(label)}</b> <span class="lab" style="text-transform:none;letter-spacing:0">${esc(cap)}</span></td>${roles.map(role=>{const lock=(role==='admin');const on=lock||!permDenied(role,cap);return `<td style="text-align:center"><input type="checkbox" ${on?'checked':''} ${lock?'disabled':''} onchange="permToggle('${role}','${esc(cap)}',this.checked)"></td>`;}).join('')}</tr>`;
- let h=`<div class="card"><div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="font-size:15px">Roles &amp; permissions</h3><div class="row" style="gap:6px"><input id="permNewRole" placeholder="new role (e.g. viewer)" style="max-width:180px" onkeydown="if(event.key==='Enter')permAddRole()"><button class="btn sm" onclick="permAddRole()">+ Role</button></div></div>
+ let h=`<div class="card"><div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="font-size:15px">Roles &amp; permissions</h3><div class="row" style="gap:6px"><input id="permNewRole" placeholder="New role name" style="max-width:180px" onkeydown="if(event.key==='Enter')permAddRole()"><button class="btn sm" onclick="permAddRole()">+ Role</button></div></div>
    <div class="lab" style="text-transform:none;letter-spacing:0;margin-top:4px">Uncheck to <b>restrict</b> a role — default is full access; admin is always full and can't be reduced. Enforced server-side (RLS), not just in the UI.</div>
    <div class="egrid" style="margin-top:10px;overflow:auto"><table><tr><th style="text-align:left">Capability</th>${roles.map(r=>`<th>${esc(r)}${r==='admin'?' 🔒':''}</th>`).join('')}</tr>
    <tr><td colspan="${roles.length+1}" class="lab" style="text-transform:none;letter-spacing:0;padding-top:10px"><b>Module access</b></td></tr>
@@ -2548,7 +2552,7 @@ function liveStartHTML(){const seed=LIVE_SEED;const defName=(seed&&seed.show)?(s
    <div class="row" style="gap:8px;align-items:flex-start"><div style="flex:2;min-width:0">${entityPicker('liveFmt',{icon:'📊',placeholder:'search your saved formats…',search:liveFormatSearch,onpick:(id)=>{window._liveFmtId=id;},onclear:()=>{window._liveFmtId=null;}})}</div><button class="btn v" onclick="liveStartPickedFormat()">▶ Start live board</button></div></div>`:''}
  <div class="card" style="max-width:560px"><h3 style="font-size:15px">${fmts.length?'Or start a blank session':'Start a session'}</h3>
   ${seed?`<div class="out" style="margin-top:10px">Seeding from show <b>${esc(seed.show||'')}</b>${seed.model?` · model <b>${esc(seed.model.name)}</b> (${seed.model.slots} slots)`:' · no model attached — add spots manually'}</div>`:''}
-  <div style="margin-top:12px"><label>Session name</label><input id="liveName" value="${esc(defName)}" placeholder="e.g. Friday Ascended Heroes Case Break"></div>
+  <div style="margin-top:12px"><label>Session name</label><input id="liveName" value="${esc(defName)}"></div>
   <div class="row" style="margin-top:16px"><button class="btn ${fmts.length?'':'v'}" onclick="liveStart()">▶ ${blankLabel}</button></div>
   <div class="lab" style="margin-top:10px">Only you (and admin) can control your sessions. Viewers see only the spots they're in.</div></div>`;
 }
@@ -2556,7 +2560,7 @@ function liveFormatSearch(q){q=(q||'').toLowerCase();return (S.breaks||[]).filte
 function liveStartPickedFormat(){const e=EP['liveFmt'];const id=(e&&e.value&&e.value.id)||window._liveFmtId;if(!id){toast('Pick a saved format first');return;}liveStartFromFormat(id);}
 function liveChasesHTML(){const chs=LIVE.chases||[];if(!chs.length)return '';
  const hit=new Set((LIVE.session.chases_hit)||[]);const remaining=chs.length-chs.filter(c=>hit.has(c.id)).length;
- return `<div class="card" style="margin-bottom:12px"><div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="font-size:15px">🎯 Chases on the board — ${remaining} of ${chs.length} left</h3><span class="lab" style="text-transform:none;letter-spacing:0">Tap a chase when it's pulled — it crosses off live on the overlay</span></div>
+ return `<div class="card" style="margin-bottom:12px"><div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="font-size:15px">Chases on the board — ${remaining} of ${chs.length} left</h3><span class="lab" style="text-transform:none;letter-spacing:0">Tap a chase when it's pulled — it crosses off live on the overlay</span></div>
    <div style="margin-top:8px">${chs.map(c=>{const h=hit.has(c.id);return `<div class="row" style="justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line)${h?';opacity:.55':''}">
      <div style="min-width:0;flex:1"><b style="${h?'text-decoration:line-through':''}">${esc(c.name||'')}</b> ${(+c.value>0)?('<span class="lab" style="text-transform:none;letter-spacing:0">'+money(c.value)+'</span>'):''}${h?' <span style="color:var(--red);font-weight:800">HIT</span>':''}</div>
      <button class="btn sm ${h?'':'d'}" onclick="liveToggleChaseHit('${c.id}')">${h?'↩ Un-hit':'Mark hit'}</button></div>`;}).join('')}</div></div>`;}
@@ -2593,15 +2597,15 @@ function liveActiveHTML(){const s=LIVE.session;const dir=liveDirUrl();const over
      <input id="ovShow" placeholder="Show title" value="${esc(cfg.showTitle||'')}" style="flex:1;min-width:150px;font-size:12px">
      <input id="ovTicker" placeholder="Ticker text (On-cam)" value="${esc(cfg.ticker||'')}" style="flex:2;min-width:200px;font-size:12px"></div>
    <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">
-     <input id="ovHL" placeholder="Name-plate left (e.g. @host)" value="${esc(cfg.handleLeft||'')}" style="flex:1;min-width:150px;font-size:12px">
-     <input id="ovHR" placeholder="Name-plate right (e.g. @cohost)" value="${esc(cfg.handleRight||'')}" style="flex:1;min-width:150px;font-size:12px"></div>
+     <input id="ovHL" placeholder="Left name-plate @handle" value="${esc(cfg.handleLeft||'')}" style="flex:1;min-width:150px;font-size:12px">
+     <input id="ovHR" placeholder="Right name-plate @handle" value="${esc(cfg.handleRight||'')}" style="flex:1;min-width:150px;font-size:12px"></div>
    <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">
-     <input id="ovTag" placeholder="Format tagline (Graphics rails, e.g. PICK 2 · KEEP 1)" value="${esc(cfg.tagline||'')}" style="flex:2;min-width:220px;font-size:12px">
-     <input id="ovSoc" placeholder="Socials (e.g. @element10)" value="${esc(cfg.socials||'')}" style="flex:1;min-width:140px;font-size:12px">
+     <input id="ovTag" placeholder="Format tagline — e.g. PICK 2 · KEEP 1" value="${esc(cfg.tagline||'')}" style="flex:2;min-width:220px;font-size:12px">
+     <input id="ovSoc" placeholder="Socials @handle" value="${esc(cfg.socials||'')}" style="flex:1;min-width:140px;font-size:12px">
      <button class="btn v sm" onclick="liveSaveOverlayCfg()">Save branding</button></div>
    ${(function(){const g=cfg.giveaway||{};return `<div class="lab" style="text-transform:none;letter-spacing:0;margin:12px 0 4px"><b>Giveaway</b> (Graphics overlay · Element 10-run) ${g.on?'<span style="color:#0a8a4a">● LIVE</span>':''}</div>
    <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center">
-     <input id="gvLabel" placeholder="Label (e.g. FREE SLAB)" value="${esc(g.label||'')}" style="flex:1;min-width:150px;font-size:12px">
+     <input id="gvLabel" placeholder="Giveaway label" value="${esc(g.label||'')}" style="flex:1;min-width:150px;font-size:12px">
      <input id="gvMins" type="number" min="1" placeholder="min" value="5" style="width:64px;font-size:12px">
      <button class="btn v sm" onclick="liveGiveaway('start')">▶ Start</button>
      <button class="btn sm" onclick="liveGiveaway('stop')">■ Stop</button>
@@ -2735,7 +2739,7 @@ function prodRowHTML(p,i){const it=(S.inventory||[]).find(x=>x.id===p.itemId);co
      ${p.slice==='boxes'?`<input type="number" min="1" value="${p.n||1}" style="width:64px;font-size:12px" onchange="prodSlice(${i},'boxes',this.value)">`:''}
      <button class="btn x sm" onclick="prodRemove(${i})" title="Remove (returns boxes to stock)">✕</button></div></div>`;}
 function productEditorHTML(){const arr=prodArr(),cost=breakCost(arr);
- return `<div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="font-size:15px">📦 Products / cost</h3><b id="breakCostVal" style="font-size:17px">Break cost: ${money(cost)}</b></div>
+ return `<div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="font-size:15px">Products / cost</h3><b id="breakCostVal" style="font-size:17px">Break cost: ${money(cost)}</b></div>
    <div class="lab" style="text-transform:none;letter-spacing:0;margin-top:2px">Include sealed product by full case / half case / N boxes. ${LIVE.session?'Adding decrements on-hand boxes; removing returns them.':'Boxes are committed (decremented) when you go live.'}</div>
    <div style="margin-top:8px">${arr.map((p,i)=>prodRowHTML(p,i)).join('')||'<div class="lab" style="text-transform:none;letter-spacing:0">No products yet.</div>'}</div>
    <div class="row" style="margin-top:10px;gap:8px;align-items:flex-start"><div style="flex:2;min-width:0">${entityPicker('prodPick',{icon:'📦',placeholder:'search inventory to add…',search:invItemSearch,onpick:(id)=>{prodAdd(id);}})}</div></div>`;}
@@ -2762,7 +2766,7 @@ function liveStartFromFormat(modelId){const model=(S.breaks||[]).find(b=>b.id===
 function liveCancelReview(){REVIEW=null;renderLive();}
 function liveReviewHTML(){const model=(S.breaks||[]).find(b=>b.id===REVIEW.modelId)||{};const proj=computeProjection();
  const nSlots=(BK.slots||[]).length,brkCost=breakCost(REVIEW.products),avgT=avgSlotTarget(brkCost,nSlots);
- return `<div class="hero"><div><h1>Review break — pre-flight</h1><div class="sub">Set title, hosts, products &amp; cost. Load or tweak slots. Then confirm to go live.</div></div><button class="btn x" onclick="liveCancelReview()">Cancel</button></div>
+ return `<div class="hero"><div><h1>Review break — pre-flight</h1></div><button class="btn x" onclick="liveCancelReview()">Cancel</button></div>
   <div class="card" style="margin-bottom:12px"><div class="lab" style="text-transform:none;letter-spacing:0;font-size:13px">Format: <b>${esc(model.name||'—')}</b> · ${esc(BK.breakType||'team')} break · <b>${nSlots}</b> spots · ${(BK.tierBands||[]).length} tiers · projection ${money(proj.low)} / <b>${money(proj.exp)}</b> / ${money(proj.high)}</div>
    ${avgT>0?`<div class="lab" style="text-transform:none;letter-spacing:0;font-size:13px;margin-top:4px">Break cost <b>${money(brkCost)}</b> ÷ ${nSlots} spots = <b style="color:var(--red)">${money(avgT)}</b> avg slot target to break even</div>`:''}</div>
   <div class="card" style="margin-bottom:12px"><label>Stream title</label><input id="rvTitle" value="${esc(REVIEW.title)}" oninput="REVIEW.title=this.value" style="font-size:16px;width:100%;max-width:520px"></div>
@@ -2811,7 +2815,7 @@ function modelProjection(model){const slots=(model.ruleSlots||[]),tb=model.tierB
 /* ===== Buyer-grouped fulfillment / ship list — flips sold spots by-buyer, across sessions ===== */
 let FULFILL={groups:{},sess:{}};
 async function renderFulfill(){const el=$('sec-fulfill');if(!el)return;if(!sb){el.innerHTML='<div class="card">Connecting…</div>';return;}
- el.innerHTML=`<div class="hero"><div><h1>Ship — buyer fulfillment</h1><div class="sub">Every won spot grouped by buyer, across all your breaks</div></div><button class="btn sm" onclick="renderFulfill()">↻ Refresh</button></div><div id="fulfillBody"><div class="card"><div class="lab" style="text-transform:none;letter-spacing:0">Loading…</div></div></div>`;
+ el.innerHTML=`<div class="hero"><div><h1>Ship — buyer fulfillment</h1></div><button class="btn sm" onclick="renderFulfill()">↻ Refresh</button></div><div id="fulfillBody"><div class="card"><div class="lab" style="text-transform:none;letter-spacing:0">Loading…</div></div></div>`;
  let sessions=[];try{const{data}=await sb.from('e10_break_sessions').select('id,name,created_at,cost,streamer_uid').order('created_at',{ascending:false});sessions=(data||[]).filter(s=>ROLE==='admin'||s.streamer_uid===MEID);}catch(e){}
  FULFILL.sess={};sessions.forEach(s=>FULFILL.sess[s.id]=s);
  const sids=sessions.map(s=>s.id);
@@ -2834,7 +2838,7 @@ function fulfillBuyerHTML(g){const st=g.lines.map(l=>l.ship_state||'open');
  const allShipped=st.every(s=>s==='shipped'),allPacked=st.every(s=>s==='packed'||s==='shipped');
  const badge=allShipped?['#0a8a4a','shipped']:(allPacked?['#b8860b','packed']:['#8a8f98','open']);
  let h=`<div class="card" style="margin-bottom:12px"><div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-   <h3 style="font-size:16px">👤 ${esc(g.handle)} <span class="pill" style="margin-left:6px;background:${badge[0]}22;color:${badge[0]};border-color:${badge[0]}">${badge[1]}</span></h3>
+   <h3 style="font-size:16px">${esc(g.handle)} <span class="pill" style="margin-left:6px;background:${badge[0]}22;color:${badge[0]};border-color:${badge[0]}">${badge[1]}</span></h3>
    <div class="row" style="gap:6px;align-items:center"><b>${money(g.total)}</b> · ${g.lines.length} spot${g.lines.length===1?'':'s'}
      <button class="btn sm" onclick="shipBuyerAll('${g.key}','packed')">Mark all packed</button><button class="btn v sm" onclick="shipBuyerAll('${g.key}','shipped')">Mark all shipped</button></div></div>
    <div class="egrid wide" style="margin-top:8px"><table><tr><th>Show / date</th><th>Spot</th><th>Cards to pull</th><th>Hammer</th><th>Status</th><th>Tracking / note</th></tr>`;

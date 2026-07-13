@@ -529,3 +529,20 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --     Attachments. Intentionally bespoke (leave): Schedule calendar (day/week/month), Live-break mobile
 --     worklist (touch cockpit), Home cockpit cards, buyer-GROUPED fulfillment (grouping is the point),
 --     Break tier-band editor & spot-plan (form/derived, not a record list), To-dos (checklist UI).
+
+-- ─────────────────────────────────────────────────────────────
+-- COSMETIC/COPY ONLY (no behavior/data/RLS change): tidiness pass.
+--   Casing convention documented inline in the <style> head: h1/h2/h3 + .lab display UPPERCASE via CSS
+--   (already consistent app-wide); source written Sentence case, no decorative emojis; <label>/<button>/
+--   values Sentence case + terse. Applied: removed decorative header emojis (🎯 Chase lists, 🎯 Chases on
+--   the board, 📦 Products / cost, 👤 card-grid & fulfillment-buyer headers); removed the Chase-lists
+--   purpose paragraph + made its empty state one line ("No chase lists yet."); dropped the Add-Inventory
+--   "🔎 … — autofills & links this item to the card" helper + trimmed its search placeholder to "Search
+--   cards"; removed label-duplicating "e.g. …" placeholders (Name / Show name / Session name / player &
+--   team search) and trimmed placeholder-as-label "(e.g. …)" hints (role, overlay name-plates / socials /
+--   giveaway) to minimal, keeping ONE format example only where non-obvious (grade "10 / 9.5", card#
+--   "199/191", tagline "PICK 2 · KEEP 1"); removed the redundant Category pill from the inventory name cell
+--   (Category column already shows it); the "= $/box" hint now renders only when non-zero; removed
+--   purpose-descriptions on Attachments / Whatnot-export intro / Ship / pre-flight-review / auth sign-in.
+--   Kept with reason: the add-member workflow note (genuinely non-obvious steps). A full sweep of every
+--   remaining section description across all surfaces is FLAGGED for a continued pass.
