@@ -453,3 +453,31 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --     checklist name/set) and flags matching-name cards on the pending import — suggest, never forced.
 --   Standing UX pass in scope: destructive confirms (delete list) + toasts on every mutation + Enter-to-
 --   submit (list name) + async button-disable while applying + terse empty states; shared grid untouched.
+
+-- ─────────────────────────────────────────────────────────────
+-- CLIENT-ONLY (no schema/RLS change): end-to-end workflow QA fix pass. The pricing engine math was
+-- hand-verified sound (margin resolves to exactly targetMargin, all divisors guarded); fixes below are
+-- integrity / stale-render / silent-failure bugs found auditing all 7 workflows.
+--   SILENT DB FAILURES surfaced (were empty catch → false success): liveEnd (kept session on failed end),
+--     livePatchSession (kept local proj/checklist diverging from DB), liveConfirmReview + liveStart per-slot
+--     inserts (now count + warn "N spot(s) failed"), commitImport card_count, dbEnsureSet (unlinked set),
+--     resolveTeams (warns N teams unlinked), writeRow cloud upsert (was console.warn-only → toast).
+--   STALE / CARRY-OVER: overlay.html slot-realtime now re-runs loadTeams() so team spots added after the
+--     overlay loaded show their logos (were stuck on monogram until reload); show builder product edit now
+--     re-renders the builder so the hero break-cost updates (was #prodBox only).
+--   CORRECTNESS: bkPreRankTiers (+ computePlan label) tier quantile assigned the wrong band when slots <
+--     tiers (n=2 gave S then B, skipping A) → now top-tiers-first; genSchedule pushed shows with NO id so
+--     showById(undefined) always resolved the LAST generated show → now unique id + products/needs; scEdit
+--     rejects NaN/negative card values and reverts the row on a failed write; liveNextPos() bases new slot
+--     position/label on max(position)+1 (was array length → collisions after a delete); liveReopen now also
+--     nulls buyer_handle/uid/price (stale winner no longer resurfaces in the sold modal); addInv stamps
+--     addedAt (aging was measured from last reload); liveProgressHTML no longer says "On track" when there
+--     is no LOW band. Plus: scAddCard success toast.
+-- FLAGGED FOR FOLLOW-UP (bigger / design calls, not done): case-insensitive player/team import dedup +
+--   atomic batch (lower(name) expression index blocks a clean upsert-onConflict — needs a normalized column);
+--   chaseApply name-match should use the same chaseNorm as the import preview (normalized column);
+--   reservation-vs-qty reconciliation (markSold/breakConsume reduce qty but leave reservations → phantom
+--   available); reserveModelToShow SET-vs-+= under-reserves on duplicate invItems; on-cam overlay chaseboard
+--   (bottom 1728) + now-bar (1740) intrude into the bottom-15% keep-clear zone; liveStart-from-show seeds
+--   only projection rows, dropping ruleSlots' team_id/bands (route show-start through liveLoadFormat);
+--   bkTierField/bkSlotOverride stale per-slot band spans (targeted span update to avoid focus loss).

@@ -198,7 +198,7 @@ function hitSet(){return new Set((SESSION&&SESSION.chases_hit)||[]);}
 function stateMap(){const m={};SLOTS.forEach(s=>m[s.id]=s.state);return m;}
 function subscribe(){if(chan)sb.removeChannel(chan);
  chan=sb.channel('ov_'+SESSION.id)
-  .on('postgres_changes',{event:'*',schema:'public',table:'e10_break_slots',filter:'session_id=eq.'+SESSION.id},async()=>{await loadSlots();detectSold();render();})
+  .on('postgres_changes',{event:'*',schema:'public',table:'e10_break_slots',filter:'session_id=eq.'+SESSION.id},async()=>{await loadSlots();await loadTeams();/* roster/team spots added after the overlay loaded must refresh logos */detectSold();render();})
   .on('postgres_changes',{event:'*',schema:'public',table:'e10_break_sessions',filter:'id=eq.'+SESSION.id},async p=>{const before=SESSION?SESSION.checklist_id:null;if(p.new){SESSION=p.new;}if(SESSION.checklist_id!==before)await loadChase();render();})
   .subscribe();}
 function detectSold(){if(!PREV){PREV=stateMap();return;}

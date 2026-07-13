@@ -580,7 +580,7 @@ function genSchedule(){if(!canEditScoped())return roGuard();if(Object.values(S.s
    const pool=dp==='Evening'?evening:dp==='Afternoon'?afternoon:dp==='Late night'?late:morning;
    const fmt=dp==='Evening'?flag:(pool.filter(f=>L('formats').includes(f))[0]||rand(L('formats')));
    const d={set,char:rand(L('characters')),fmt,price:rand(['1','2']),host:S.streamers[hi++%S.streamers.length]||'',diff:rand(L('diff')),time:DAYPARTS.find(x=>x[0]===dp)[2].replace(/:00.*/,'')};
-   (S.shows[day+'|'+dp]=S.shows[day+'|'+dp]||[]).push({name:fill(rand(TITLE_TPL.search),d),fmt,dur:dur[fmt]||60,host:d.host});
+   (S.shows[day+'|'+dp]=S.shows[day+'|'+dp]||[]).push({id:'sh'+Math.random().toString(36).slice(2),name:fill(rand(TITLE_TPL.search),d),fmt,dur:dur[fmt]||60,host:d.host,notes:'',products:[],needs:[]});
  });});
  save();const total=Object.values(S.shows).flat().length;
  $('gout').innerHTML=`<div class="out" style="margin-top:14px"><b>${total} shows placed across ${days.length} days.</b> Flagship <b>${esc(flag)}</b> in evening primetime. <a onclick="go('schedule')">Open the Schedule ↗</a> to drag, rename or reassign.</div>`;
@@ -723,7 +723,10 @@ function bkPreRankTiers(render){
  const valOf=s=>{if(BK._slotEval&&BK._slotEval.slots){const i=(BK.slots||[]).indexOf(s);const sv=BK._slotEval.slots.find(x=>x.i===i);if(sv&&+sv.value>0)return +sv.value;}return +s._modelVal||0;};
  const ranked=(BK.slots||[]).filter(s=>(s.method||'$1auction')!=='fixed').slice().sort((a,b)=>valOf(b)-valOf(a));
  const n=ranked.length||1;
- ranked.forEach((s,idx)=>{const q=Math.min(tiers.length-1,Math.floor(idx/(n/tiers.length)));s.tierId=tiers[q].id;});
+ /* When there are fewer slots than tiers, assign the TOP tiers first (slot0→S, slot1→A…) instead of the
+    old quantile which skipped tiers (n=2 gave S then B, under-banding the 2nd slot). Quantile only kicks in
+    once slots outnumber tiers. */
+ ranked.forEach((s,idx)=>{const q=Math.min(tiers.length-1,(n<=tiers.length)?idx:Math.floor(idx*tiers.length/n));s.tierId=tiers[q].id;});
  if(render!==false){renderSlotBuilder();renderProjection();}
 }
 function bkAddTier(){BK.tierBands=BK.tierBands||[];BK.tierBands.push({id:'tr'+Math.random().toString(36).slice(2),name:'Tier '+(BK.tierBands.length+1),low:0,expected:0,high:0});renderSlotBuilder();renderProjection();}
@@ -884,7 +887,7 @@ function computePlan(){
  buckets.forEach(b=>{const w=sumV>0?(b.val/sumV):(1/spotCount);b.price=floor+surplus*w;});
  if(fmt==='random'){const p=Math.max(floor,R/spotCount);buckets.forEach(b=>b.price=p);}
  buckets.forEach(b=>b.price=Math.round(b.price));
- const tl=['S','A','B','C'],byPrice=buckets.slice().sort((a,b)=>b.price-a.price);byPrice.forEach((b,i)=>{b.tier=tl[Math.min(3,Math.floor(i/(byPrice.length/4)))];});
+ const tl=['S','A','B','C'],byPrice=buckets.slice().sort((a,b)=>b.price-a.price),nb=byPrice.length;byPrice.forEach((b,i)=>{b.tier=tl[Math.min(3,(nb<=4)?i:Math.floor(i*4/nb))];});
  const revenue=buckets.reduce((s,b)=>s+b.price,0),fees=revenue*f,shipping=shipPer*spotCount,totalCost=P+fees+shipping,net=revenue-totalCost,margin=revenue>0?net/revenue:0,roi=P>0?net/P:0;
  const perSpotNet=buckets.map(b=>b.price*(1-f)-shipPer).sort((a,b)=>b-a);let cum=0,be=0;for(const n of perSpotNet){if(cum>=P)break;cum+=n;be++;}const breakeven=P<=0?0:Math.min(be,spotCount);
  const netAt=r=>revenue*r*(1-f)-P-shipPer*spotCount*Math.min(1,r);
@@ -1131,17 +1134,19 @@ async function dbCards(scopeCol,scopeId,o){o=o||{};try{
  const{data,error}=await q;if(error)throw error;return{rows:data||[]};
 }catch(e){toast('Load cards: '+e.message);return{rows:[]};}}
 async function dbCardCount(scopeCol,scopeId,o){try{let q=sb.from('e10_cards').select('id',{count:'exact',head:true}).eq(scopeCol,scopeId);q=dbCardFilters(q,o);const{count,error}=await q;if(error)throw error;return count||0;}catch(e){return null;}}
-async function scEdit(id,field,val){const col=CARD_COL[field];if(!col)return;let v=val;if(field==='value'){const c=(''+val).replace(/[^0-9.\-]/g,'');v=c===''?null:+c;}else if(field==='chase'||field==='rookie')v=!!val;else v=(v===''?null:v);
- const row=SRV&&SRV.rows.find(r=>r.id===id);if(row)row[col]=v;scCacheClear();
+async function scEdit(id,field,val){const col=CARD_COL[field];if(!col)return;let v=val;
+ if(field==='value'){const c=(''+val).replace(/[^0-9.\-]/g,'');if(c===''){v=null;}else{v=+c;if(isNaN(v)){toast('Value must be a number');return;}if(v<0){toast('Value can’t be negative');return;}}}
+ else if(field==='chase'||field==='rookie')v=!!val;else v=(v===''?null:v);
+ const row=SRV&&SRV.rows.find(r=>r.id===id);const prev=row?row[col]:undefined,prevTid=row?row.team_id:undefined;if(row)row[col]=v;scCacheClear();
  const patch=(field==='team')?{team:v,team_id:null}:{[col]:v}; /* typing a team name is free text — drop any stale link */
  if(field==='team'&&row)row.team_id=null;
- try{const{error}=await sb.from('e10_cards').update(patch).eq('id',id);if(error)toast(error.message);}catch(e){toast(e.message);}}
+ try{const{error}=await sb.from('e10_cards').update(patch).eq('id',id);if(error)throw error;}catch(e){toast('Save failed: '+e.message);if(row){row[col]=prev;if(field==='team')row.team_id=prevTid;if(SRV)gRenderList(SRV.G);}}}
 /* Team link: entityPicker over dbTeamSearch → stores {team_id, team} on the card (same UX as player picker). */
 function scTeamLink(id){$('modal').innerHTML=`<h3 style="font-size:16px">Link a team</h3><div class="lab" style="text-transform:none;letter-spacing:0;margin:6px 0 10px">Search teams — picking links this card (stores team_id) and sets the team label. Or type a team name in the cell to keep it as free text.</div><div style="min-height:200px">${entityPicker('scTeamPick',{icon:'🏳',server:true,minChars:2,freeText:true,placeholder:'search teams…',search:dbTeamSearch,onpick:(tid,label)=>{scSetTeam(id,tid,label);closeM();}})}</div><div class="row" style="margin-top:12px"><button class="btn sm" onclick="closeM()">Cancel</button></div>`;$('ov').style.display='flex';setTimeout(()=>{const e=$('epi_scTeamPick');if(e)e.focus();},60);}
 async function scSetTeam(id,teamId,label){const row=SRV&&SRV.rows.find(r=>r.id===id);if(row){row.team=label;row.team_id=teamId||null;}scCacheClear();try{const{error}=await sb.from('e10_cards').update({team:label,team_id:teamId||null}).eq('id',id);if(error){toast(error.message);return;}}catch(e){toast(e.message);return;}if(SRV)gRenderList(SRV.G);toast('Team linked: '+label);}
 function scBumpTotal(d){if(!SRV)return;if(SRV.knownTotal!=null)SRV.knownTotal=Math.max(0,SRV.knownTotal+d);if(SRV.count!=null)SRV.count=Math.max(0,SRV.count+d);if(SRV.scopeCol==='checklist_id'&&window._clCount&&window._clCount[SRV.scopeId]!=null)window._clCount[SRV.scopeId]=Math.max(0,window._clCount[SRV.scopeId]+d);}
 async function scDel(id){if(!confirm('Delete this card?'))return;try{await sb.from('e10_cards').delete().eq('id',id);}catch(e){toast(e.message);return;}scCacheClear();if(SRV){SRV.rows=SRV.rows.filter(r=>r.id!==id);scBumpTotal(-1);gRenderList(SRV.G);scPager();}}
-async function scAddCard(){if(!SRV||SRV.scopeCol!=='checklist_id')return;try{const{error}=await sb.from('e10_cards').insert({checklist_id:SRV.scopeId,name:'New card',card_type:'base'});if(error){toast(error.message);return;}}catch(e){toast(e.message);return;}scCacheClear();scBumpTotal(1);SRV.page=0;scFetch();}
+async function scAddCard(){if(!SRV||SRV.scopeCol!=='checklist_id')return;try{const{error}=await sb.from('e10_cards').insert({checklist_id:SRV.scopeId,name:'New card',card_type:'base'});if(error){toast(error.message);return;}}catch(e){toast(e.message);return;}scCacheClear();scBumpTotal(1);SRV.page=0;scFetch();toast('Card added');}
 const SC_COLS=[
  {key:'num',label:'Card #',sortable:true,sortVal:c=>c.num||'',cell:c=>`<td class="mono"><input value="${esc(c.num||'')}" style="width:78px;font-size:12px" onchange="scEdit('${c.id}','num',this.value)"></td>`},
  {key:'name',label:'Name',core:true,first:true,sortable:true,sortVal:c=>(c.name||'').toLowerCase(),cell:c=>`<td><input value="${esc(c.name||'')}" style="min-width:150px" onchange="scEdit('${c.id}','name',this.value)"></td>`},
@@ -1331,7 +1336,7 @@ function tmAddLeagueGo(){const sport=($('tmlSport').value||'').trim(),league=($(
 async function dbEnsureSet(name,sport){name=(name||'').trim();if(!name)return null;try{
  const{data:ex}=await sb.from('e10_sets').select('id').ilike('name',name).limit(1);if(ex&&ex.length)return ex[0].id;
  const yr=(name.match(/\d{4}/)||[null])[0];const{data,error}=await sb.from('e10_sets').insert({name,year:yr?+yr:null,sport:sport||null}).select('id').single();if(error)throw error;return data.id;
-}catch(e){return null;}}
+}catch(e){toast('Set “'+name+'” could not be linked ('+e.message+') — importing unlinked');return null;}}
 async function dbInsertCards(clId,setId,cards,onProgress){let done=0;const B=500;for(let i=0;i<cards.length;i+=B){const chunk=cards.slice(i,i+B).map(c=>({checklist_id:clId,set_id:setId||null,player_id:c.player_id||null,team_id:c.team_id||null,team:c.team||null,num:c.num||null,name:c.name||null,set_name:c.set_name||c.set||null,rarity:c.rarity||null,value:(c.value===''||c.value==null)?null:+c.value,parallel:c.parallel||null,card_type:c.cardType||c.card_type||'base',serial:c.serial||null,color:c.color||null,rookie:c.rookie==null?null:!!c.rookie,chase:!!c.chase,attrs:c.extra||{}}));const{error}=await sb.from('e10_cards').insert(chunk);if(error)throw error;done+=chunk.length;if(onProgress)onProgress(done,cards.length);}return done;}
 /* Team resolution on import: dedup by exact (case-insensitive) name against e10_teams — links
    team_id to the existing team, or creates one (admin) so no duplicate teams are made. Mirrors the
@@ -1339,7 +1344,8 @@ async function dbInsertCards(clId,setId,cards,onProgress){let done=0;const B=500
 async function resolveTeams(cards){const names=[...new Set(cards.map(c=>(c.team||'').trim()).filter(Boolean))];if(!names.length)return;const map={};
  for(let i=0;i<names.length;i+=150){const batch=names.slice(i,i+150);try{const{data}=await sb.from('e10_teams').select('id,name').in('name',batch);(data||[]).forEach(t=>map[t.name.toLowerCase()]=t.id);}catch(e){}}
  const need=names.filter(n=>!(n.toLowerCase() in map));
- for(let i=0;i<need.length;i+=200){const batch=need.slice(i,i+200).map(nm=>({name:nm}));try{const{data}=await sb.from('e10_teams').insert(batch).select('id,name');(data||[]).forEach(t=>map[t.name.toLowerCase()]=t.id);}catch(e){/* likely non-admin (RLS) or unique conflict → refetch to link existing */try{const{data}=await sb.from('e10_teams').select('id,name').in('name',need.slice(i,i+200));(data||[]).forEach(t=>map[t.name.toLowerCase()]=t.id);}catch(_){}}}
+ for(let i=0;i<need.length;i+=200){const batch=need.slice(i,i+200).map(nm=>({name:nm}));try{const{data,error}=await sb.from('e10_teams').insert(batch).select('id,name');if(error)throw error;(data||[]).forEach(t=>map[t.name.toLowerCase()]=t.id);}catch(e){/* batch may roll back on a case-variant conflict, or RLS for non-admin → refetch to link whatever exists */try{const{data}=await sb.from('e10_teams').select('id,name').in('name',need.slice(i,i+200));(data||[]).forEach(t=>map[t.name.toLowerCase()]=t.id);}catch(_){}}}
+ const unresolved=names.filter(n=>!(n.toLowerCase() in map));if(unresolved.length)toast('⚠ '+unresolved.length+' team(s) not linked (name case or permissions) — cards kept, team_id blank');
  cards.forEach(c=>{const k=(c.team||'').trim().toLowerCase();if(k&&map[k])c.team_id=map[k];});}
 /* Resolution: match distinct card names to existing players (case-insensitive exact = confident auto-link);
    surface likely-but-uncertain matches (a player whose name shares the last token) for the user to confirm. */
@@ -1360,7 +1366,7 @@ async function commitImport(cl,setId,linkMap){toast('Committing '+cl.cards.lengt
  // checklist row
  let clId;try{const{data,error}=await sb.from('e10_checklists').insert({name:cl.name||'Imported checklist',set_id:setId,source:(cl._meta&&cl._meta.mode)||'import'}).select('id').single();if(error)throw error;clId=data.id;}catch(e){toast('Create checklist failed: '+e.message);return;}
  try{await dbInsertCards(clId,setId,cl.cards,(d,t)=>{if(d%2000===0||d===t)toast('Inserted '+d.toLocaleString()+'/'+t.toLocaleString());});}catch(e){toast('Insert failed: '+e.message);return;}
- try{await sb.from('e10_checklists').update({card_count:cl.cards.length}).eq('id',clId);}catch(e){}
+ try{const{error}=await sb.from('e10_checklists').update({card_count:cl.cards.length}).eq('id',clId);if(error)throw error;}catch(e){toast('Card count not updated ('+e.message+') — reopen to refresh');}
  clReviewMode=false;PENDING_CL=null;delete GRIDS['cl:__review__'];toast('Checklist added ('+cl.cards.length.toLocaleString()+' cards)');openServerChecklist(clId,cl.name);}
 function openResolveModal(cl,setId,plan){const P=plan;window._resolveState={cl,setId,linked:Object.assign({},plan.linked),plan};
  $('modal').innerHTML=`<h3 style="font-size:17px">Assign players</h3>
@@ -1614,7 +1620,7 @@ function addInv(){const n=$('ivN').value.trim();if(!n){toast('Name is required')
  if(vraw!==''&&(isNaN(+vraw)||+vraw<0)){toast('Market must be a number ≥ 0');return;}
  const rawCost=+craw||0,bpc=Math.max(1,+($('ivBPC')&&$('ivBPC').value)||1),basis=(($('ivBasis')&&$('ivBasis').value)||'perbox'),pbc=(basis==='percase'&&bpc>1)?(rawCost/bpc):rawCost;
  S.inventory.push({id:'i'+Date.now(),name:n,cat:gv('ivC'),set:(SL.label||''),setId:(SL.id||null),qty:(qraw===''?1:Math.max(0,+qraw||0)),cost:pbc,value:Math.max(0,+vraw||0),boxesPerCase:bpc,perBoxCost:pbc,gradingCompany:gv('ivGC'),grade:gv('ivGrade'),cardNumber:gv('ivNum'),year:gv('ivYear'),cond:gv('ivG'),img:$('ivImg').value,owner,
-   cardId:L2.cardId||null,playerId:L2.playerId||null,parallel:L2.parallel||'',rarity:L2.rarity||''});
+   cardId:L2.cardId||null,playerId:L2.playerId||null,parallel:L2.parallel||'',rarity:L2.rarity||'',addedAt:Date.now()});
  ivLinked=null;ivSetLink=null;save();dInventory();toast('Added'+(L2.cardId?' · linked to card':''));}
 function ivBoxHint(){const el=$('ivPBHint');if(!el)return;const raw=+($('ivCo')&&$('ivCo').value)||0,bpc=Math.max(1,+($('ivBPC')&&$('ivBPC').value)||1),basis=(($('ivBasis')&&$('ivBasis').value)||'perbox');const pbc=(basis==='percase'&&bpc>1)?(raw/bpc):raw;
  el.textContent='= '+money(pbc)+'/box'+((basis==='percase'&&bpc>1)?(' · case '+money(raw)):'');el.style.color=pbc>0?'var(--red)':'';}
@@ -2150,7 +2156,7 @@ function isEditing(){const a=document.activeElement;return !!a&&(a.tagName==='IN
 function safeRender(){if(isEditing()){_pendingRender=true;return;}currentRender();}
 document.addEventListener('focusout',()=>{setTimeout(()=>{if(_pendingRender&&!isEditing()){_pendingRender=false;currentRender();}},0);});
 
-async function writeRow(id,owner,data){const rev=(REVS[id]||0)+1;REVS[id]=rev;const row={id,data,rev,owner,updated_by:ME,updated_at:new Date().toISOString()};const{error}=await sb.from('e10_workspace').upsert(row);if(error)console.warn('save',id,error.message);}
+async function writeRow(id,owner,data){const rev=(REVS[id]||0)+1;REVS[id]=rev;const row={id,data,rev,owner,updated_by:ME,updated_at:new Date().toISOString()};const{error}=await sb.from('e10_workspace').upsert(row);if(error){console.warn('save',id,error.message);toast('⚠ Sync failed — your last change may not be saved ('+error.message+')');}}
 const _origSave=save;
 let _lsTimer=null;                        // debounce the localStorage mirror (was written on every keystroke)
 save=function(){clearTimeout(_lsTimer);_lsTimer=setTimeout(_origSave,400);cloudSave();};
@@ -2305,18 +2311,21 @@ async function liveStart(){const name=($('liveName')&&$('liveName').value.trim()
  const{data,error}=await sb.from('e10_break_sessions').insert({streamer_uid:MEID,name}).select().maybeSingle();
  if(error){toast('Could not start: '+error.message);return;}
  LIVE.session=data;LIVE.slots=[];await liveEvent('session_started',null,{name});
+ let seedFails=0;
  if(seedModel){const rows=(seedModel.rows&&seedModel.rows.length)?seedModel.rows:null;
    const n=rows?rows.length:Math.max(1,+seedModel.slots||1);
    for(let i=0;i<n;i++){const row=rows?rows[i]:null;const label=row?(row.label||('Spot '+(i+1))):('Spot '+(i+1));
      const ins={session_id:LIVE.session.id,label,position:i};if(row){if(row.price!=null)ins.price=row.price;if(row.tier)ins.tier=row.tier;}
-     try{const{data:sl}=await sb.from('e10_break_slots').insert(ins).select().maybeSingle();if(sl)LIVE.slots.push(sl);}catch(e){}}}
- LIVE_SEED=null;liveSubscribe();renderLive();toast('Live break started'+(seedModel?' — seeded '+LIVE.slots.length+' spots':''));
+     try{const{data:sl,error}=await sb.from('e10_break_slots').insert(ins).select().maybeSingle();if(error)throw error;if(sl)LIVE.slots.push(sl);}catch(e){seedFails++;}}}
+ LIVE_SEED=null;liveSubscribe();renderLive();toast('Live break started'+(seedModel?' — seeded '+LIVE.slots.length+' spots':'')+(seedFails?(' · ⚠ '+seedFails+' failed'):''));
 }
 async function liveEnd(){if(!LIVE.session||!confirm('End this live break session?'))return;
- try{await sb.from('e10_break_sessions').update({status:'ended',ended_at:new Date().toISOString()}).eq('id',LIVE.session.id);await liveEvent('session_ended',null,{});}catch(e){}
+ try{const{error}=await sb.from('e10_break_sessions').update({status:'ended',ended_at:new Date().toISOString()}).eq('id',LIVE.session.id);if(error)throw error;await liveEvent('session_ended',null,{});}catch(e){toast('Could not end session: '+e.message);return;}
  if(LIVE.chan){sb.removeChannel(LIVE.chan);LIVE.chan=null;}LIVE.session=null;LIVE.slots=[];LIVE.chases=[];renderLive();toast('Session ended');
 }
-async function liveAddSlot(){if(!LIVE.session)return;const label=($('slotLabel')&&$('slotLabel').value.trim())||'';const pos=LIVE.slots.length;
+/* next free position = one past the max existing (NOT array length, which collides after a delete) */
+function liveNextPos(){return (LIVE.slots||[]).reduce((m,s)=>Math.max(m,(+s.position||0)+1),0);}
+async function liveAddSlot(){if(!LIVE.session)return;const label=($('slotLabel')&&$('slotLabel').value.trim())||'';const pos=liveNextPos();
  const{data,error}=await sb.from('e10_break_slots').insert({session_id:LIVE.session.id,label:label||('Spot '+(pos+1)),position:pos}).select().maybeSingle();
  if(error){toast(error.message);return;}LIVE.slots.push(data);await liveEvent('assigned',data.id,{label:data.label});renderLive();
 }
@@ -2327,16 +2336,16 @@ async function liveInsertSlots(rows,evt){if(!rows.length)return;
  rows.forEach(r=>{if(r.plan==null)r.plan={};});
  try{const{data,error}=await sb.from('e10_break_slots').insert(rows).select();if(error)throw error;(data||[]).forEach(s=>LIVE.slots.push(s));}catch(e){toast(e.message);return false;}
  await liveEvent('slots_loaded',null,evt||{});renderLive();return true;}
-async function livePatchSession(patch){if(!Object.keys(patch).length)return;try{await sb.from('e10_break_sessions').update(patch).eq('id',LIVE.session.id);Object.assign(LIVE.session,patch);}catch(e){}}
+async function livePatchSession(patch){if(!Object.keys(patch).length)return;try{const{error}=await sb.from('e10_break_sessions').update(patch).eq('id',LIVE.session.id);if(error)throw error;Object.assign(LIVE.session,patch);}catch(e){toast('Session update failed: '+e.message);}}
 function liveLoadRosterPicked(ctx){const sp=($('sl_sport_'+ctx)||{}).value,lg=($('sl_league_'+ctx)||{}).value;if(!sp||!lg){toast('Pick a sport + league');return;}liveLoadRoster(sp,lg);}
 async function liveLoadRoster(sport,league){if(!LIVE.session)return;const teams=await dbLeagueTeams(sport,league);if(!teams.length){toast('No teams in '+league);return;}
- const base=LIVE.slots.length;const rows=teams.map((t,i)=>({session_id:LIVE.session.id,label:t.name,position:base+i,team_id:t.id,method:'$1auction'}));
+ const base=liveNextPos();const rows=teams.map((t,i)=>({session_id:LIVE.session.id,label:t.name,position:base+i,team_id:t.id,method:'$1auction'}));
  if(!LIVE.session.break_type)await livePatchSession({break_type:'team'});
  if(await liveInsertSlots(rows,{source:'roster',league,count:teams.length}))toast('Loaded '+teams.length+' '+league+' team spots');}
 function liveLoadFormatPicked(ctx){const id=($('sl_fmt_'+ctx)||{}).value;if(!id){toast('Pick a saved format');return;}liveLoadFormat(id);}
 async function liveLoadFormat(modelId){if(!LIVE.session)return;const model=(S.breaks||[]).find(b=>b.id===modelId);if(!model){toast('Format not found');return;}
  const rs=model.ruleSlots||[];if(!rs.length){toast('That format has no spots');return;}
- const tb=model.tierBands||[],base=LIVE.slots.length;let cardMap={};
+ const tb=model.tierBands||[],base=liveNextPos();let cardMap={};
  if(model.checklistId){try{const payload=rs.map(s=>({name:s.name||'',include:s.include||[],exclude:s.exclude||[],remainder:!!s.remainder}));const{data}=await sb.rpc('e10_slot_cards',{p_checklist:model.checklistId,p_slots:payload,p_limit:60});(data||[]).forEach(x=>{cardMap[x.i]={count:x.count,cards:x.cards||[]};});}catch(e){}}
  const rows=rs.map((s,i)=>{const take=modelTake(s,tb),tierName=(tb.find(t=>t.id===s.tierId)||{}).name||'';const teamC=(s.include||[]).find(c=>c.field==='team'&&c.valueId),playerC=(s.include||[]).find(c=>c.field==='player'&&c.valueId),cm=cardMap[i]||{count:null,cards:[]};
    return{session_id:LIVE.session.id,label:s.name||('Spot '+(base+i+1)),position:base+i,method:s.method||'$1auction',tier:tierName,band_low:take.low,band_expected:take.expected,band_high:take.high,team_id:teamC?teamC.valueId:null,player_id:playerC?playerC.valueId:null,price:((s.method==='fixed')?(+s.price||0):null),plan:{formatSlotId:s.id,breakType:model.breakType||'team',tierName,remainder:!!s.remainder,cardCount:cm.count,cards:cm.cards}};});
@@ -2352,14 +2361,14 @@ function liveLoadPlayerPicked(ctx){const id=window['_slCl_'+ctx];if(!id){toast('
 async function liveLoadByPlayer(checklistId){if(!LIVE.session)return;let facets=[];
  try{const{data,error}=await sb.rpc('e10_checklist_facet',{p_checklist:checklistId,p_dim:'player'});if(error)throw error;facets=data||[];}catch(e){toast('Generate failed: '+e.message);return;}
  if(!facets.length){toast('No player values on that checklist');return;}
- const CAP=40,top=facets.slice(0,CAP),base=LIVE.slots.length;
+ const CAP=40,top=facets.slice(0,CAP),base=liveNextPos();
  const rows=top.map((f,i)=>({session_id:LIVE.session.id,label:f.label||'(player)',position:base+i,player_id:f.id||null,method:'$1auction'}));
  rows.push({session_id:LIVE.session.id,label:'Field / remainder',position:base+top.length,method:'$1auction',plan:{remainder:true}});
  const patch={};if(!LIVE.session.checklist_id)patch.checklist_id=checklistId;if(!LIVE.session.break_type)patch.break_type='player';
  await livePatchSession(patch);if(patch.checklist_id)await liveLoadChases();
  if(await liveInsertSlots(rows,{source:'player',count:top.length}))toast('Loaded '+top.length+' player spots + Field'+(facets.length>CAP?(' · '+(facets.length-CAP)+' more fall into Field'):''));}
 function liveQuickAddPicked(ctx){const n=Math.max(1,Math.min(60,+(($('sl_qty_'+ctx)||{}).value)||1));liveQuickAddSpots(n);}
-async function liveQuickAddSpots(n){if(!LIVE.session)return;const base=LIVE.slots.length,rows=[];for(let i=0;i<n;i++)rows.push({session_id:LIVE.session.id,label:'Spot '+(base+i+1),position:base+i});
+async function liveQuickAddSpots(n){if(!LIVE.session)return;const base=liveNextPos(),rows=[];for(let i=0;i<n;i++)rows.push({session_id:LIVE.session.id,label:'Spot '+(base+i+1),position:base+i});
  if(await liveInsertSlots(rows,{source:'quickadd',count:n}))toast('Added '+n+' spots');}
 async function liveAssign(id){const sl=LIVE.slots.find(x=>x.id===id);if(!sl)return;
  const label=$('al_'+id)?$('al_'+id).value.trim():sl.label;const handle=$('ah_'+id)?$('ah_'+id).value.trim():sl.buyer_handle;
@@ -2529,7 +2538,7 @@ function liveProgressHTML(){const s=LIVE.session;const sold=LIVE.slots.filter(x=
    if(exp>cost){const toGoal=Math.max(0,exp-actual);goals.push(toGoal>0?('To margin goal ('+money(exp)+'): <b>'+money(toGoal)+'</b> more'):'Margin goal <b style="color:#0a8a4a">hit ✓</b>');}
    h+=`<div class="lab" style="margin-top:8px;text-transform:none;letter-spacing:0;font-size:12.5px">${goals.join(' &nbsp;·&nbsp; ')}</div>`;}
  if(nSold>0){const st=sold.reduce((a,x)=>a+slotTarget(x),0);if(st>0){const d=actual-st;h+=`<div class="lab" style="margin-top:6px;text-transform:none;letter-spacing:0;font-size:12.5px;color:${pc(d)}">Pacing: sold <b>${money(actual)}</b> vs target <b>${money(st)}</b> · ${d>=0?'+':''}${money(d)} (${d>=0?'beating':'trailing'} target)</div>`;}}
- if(hasProj){const clr=actual>=exp?['#0a8a4a','✓ At/above EXPECTED']:(actual>=low?['#b8860b','On track — between LOW and EXPECTED']:['#e8332b','Below LOW so far']);
+ if(hasProj){const clr=actual>=exp?['#0a8a4a','✓ At/above EXPECTED']:((low>0&&actual>=low)?['#b8860b','On track — between LOW and EXPECTED']:['#e8332b',low>0?'Below LOW so far':'Below expected so far']);
    h+=`<div class="lab" style="margin-top:6px;text-transform:none;letter-spacing:0;font-size:12.5px;color:${clr[0]}">${clr[1]}</div>`;}
  return h+`</div>`;
 }
@@ -2578,8 +2587,8 @@ async function liveConfirmSold(id){const sl=LIVE.slots.find(x=>x.id===id);if(!sl
  closeM();renderLive();toast('Sold to '+handle+' · '+money(price)+(incentives.length?(' · '+incentives.map(incentiveLabel).join(', ')):''));
 }
 async function liveReopen(id){const sl=LIVE.slots.find(x=>x.id===id);if(!sl)return;
- try{const{error}=await sb.from('e10_break_slots').update({state:'available',sold_at:null,incentives:[],updated_at:new Date().toISOString()}).eq('id',id);if(error)throw error;}catch(e){toast(e.message);return;}
- sl.state='available';sl.sold_at=null;sl.incentives=[];/* clear the stamp on un-sell; a re-sell re-stamps */await liveEvent('spot_reopened',id,{label:sl.label});renderLive();toast('Reopened '+(sl.label||'spot'));
+ try{const{error}=await sb.from('e10_break_slots').update({state:'available',sold_at:null,incentives:[],buyer_handle:null,buyer_uid:null,price:null,updated_at:new Date().toISOString()}).eq('id',id);if(error)throw error;}catch(e){toast(e.message);return;}
+ sl.state='available';sl.sold_at=null;sl.incentives=[];sl.buyer_handle=null;sl.buyer_uid=null;sl.price=null;/* clear the stamp + stale winner/hammer on un-sell; a re-sell re-stamps */await liveEvent('spot_reopened',id,{label:sl.label});renderLive();toast('Reopened '+(sl.label||'spot'));
 }
 /* ===== Box/case model + break-cost engine (Phase A) ===== */
 function itemBoxesPerCase(it){return Math.max(1,+(it&&it.boxesPerCase)||1);}
@@ -2609,7 +2618,7 @@ async function prodPersist(){if(!LIVE.session)return;LIVE.session.cost=breakCost
  try{await sb.from('e10_break_sessions').update({products:LIVE.session.products,cost:LIVE.session.cost}).eq('id',LIVE.session.id);}catch(e){toast(e.message);}}
 /* Re-render the whole surface so EVERY cost-derived field updates, not just the product box:
    live board → Break cost + Avg-slot-target + ROI header; review → its avg-slot-target header. */
-function afterProdChange(){if(LIVE.session)renderLive();else if(BUILDER){save();renderProductsUI();}else if(REVIEW)renderLive();else renderProductsUI();}
+function afterProdChange(){if(LIVE.session)renderLive();else if(BUILDER){save();renderShowBuilder(BUILDER.id);}else if(REVIEW)renderLive();else renderProductsUI();}
 async function prodAdd(itemId){const it=(S.inventory||[]).find(x=>x.id===itemId);if(!it){toast('Item not found');return;}
  const arr=prodArr();if(arr.some(p=>p.itemId===itemId)){toast('Already included');return;}
  const bpc=itemBoxesPerCase(it),pbc=itemPerBoxCost(it),slice=(bpc>1?'case':'boxes'),boxes=sliceToBoxes(slice,1,bpc);
@@ -2684,6 +2693,7 @@ async function liveConfirmReview(){if(!REVIEW)return;if(!canEditScoped())return 
    participants:REVIEW.participants||[],products:[]}).select().maybeSingle();
  if(error){toast('Could not start: '+error.message);return;}
  LIVE.session=sess;LIVE.slots=[];await liveEvent('session_started',null,{name:sess.name,format_id:REVIEW.modelId,participants:REVIEW.participants||[]});
+ let slotFails=0;
  for(let i=0;i<rs.length;i++){const s=rs[i],take=modelTake(s,tb),tierName=(tb.find(t=>t.id===s.tierId)||{}).name||'';
    const teamC=(s.include||[]).find(c=>c.field==='team'&&c.valueId),playerC=(s.include||[]).find(c=>c.field==='player'&&c.valueId),cm=cardMap[i]||{count:null,cards:[]};
    const ins={session_id:sess.id,label:s.name||('Spot '+(i+1)),position:i,method:s.method||'$1auction',tier:tierName,
@@ -2691,12 +2701,12 @@ async function liveConfirmReview(){if(!REVIEW)return;if(!canEditScoped())return 
      team_id:teamC?teamC.valueId:null,player_id:playerC?playerC.valueId:null,
      price:((s.method==='fixed')?(+s.price||0):null),
      plan:{formatSlotId:s.id,breakType,tierName,remainder:!!s.remainder,cardCount:cm.count,cards:cm.cards}};
-   try{const{data:sl}=await sb.from('e10_break_slots').insert(ins).select().maybeSingle();if(sl)LIVE.slots.push(sl);}catch(e){}}
+   try{const{data:sl,error}=await sb.from('e10_break_slots').insert(ins).select().maybeSingle();if(error)throw error;if(sl)LIVE.slots.push(sl);}catch(e){slotFails++;}}
  /* commit product boxes now — decrement inventory (idempotent via consumed=0 → boxes) */
  LIVE.session.products=[];
  for(const p of (REVIEW.products||[])){p.consumed=0;await breakConsume(p);LIVE.session.products.push(p);}
  await prodPersist();
- REVIEW=null;LIVE_SEED=null;await liveLoadChases();liveSubscribe();go('live');renderLive();toast('Live break started — '+LIVE.slots.length+' spots · cost '+money(LIVE.session.cost||0));
+ REVIEW=null;LIVE_SEED=null;await liveLoadChases();liveSubscribe();go('live');renderLive();toast('Live break started — '+LIVE.slots.length+' spots · cost '+money(LIVE.session.cost||0)+(slotFails?(' · ⚠ '+slotFails+' spot(s) failed to save'):''));
 }
 /* projection of a SAVED model (pure; mirrors phase-2 computeProjection, reads through the same band shape) */
 function modelBand(slot,tierBands){const o=slot.bandOverride;
