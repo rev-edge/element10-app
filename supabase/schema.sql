@@ -367,3 +367,21 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --   freezing. Swept the same "mutate state but don't re-render" pattern: afterProdChange() now re-renders
 --   the whole surface in the REVIEW context too (its avg-slot-target header lives outside #prodBox), so a
 --   product change updates every cost-derived field, not just the product box.
+
+-- ─────────────────────────────────────────────────────────────
+-- CLIENT-ONLY (no schema change): Teams management page under Inventory (dTeams).
+--   Reuses e10_teams as-is (name, sport, league, logo_url) and its existing RLS — read=(select
+--   e10_is_org()), insert/update/delete=(select e10_is_admin()). Members browse; only admins see the
+--   edit/add/remove/logo controls, and the DB enforces it (a member UPDATE matches 0 rows via the
+--   admin-only USING clause; a member INSERT is 403).
+--   • Hierarchy: Sport → League → team tiles, plus an open name search across all teams. Each tile shows
+--     the logo thumbnail when logo_url is set, else the SAME monogram the graphics overlay uses
+--     (teamMonogram mirrors overlay.html monogram) so the page and the on-air board match.
+--   • Edit / add / remove a team; add a new league/set (sport + league); free-text sport & league inputs
+--     support custom non-sports sets (anime, characters). Duplicate names are caught before insert with a
+--     suggest-and-confirm (offer to open the existing team) — never a hard 409 against unique lower(name).
+--   • Logo population: per team, upload an image (reuses pickImage → e10Upload → resize → Storage `cards`
+--     bucket → public URL) OR paste a URL; both write e10_teams.logo_url. Bulk-friendly: every tile in a
+--     league view has an inline paste field + ⬆ upload so a whole league can be knocked out in one sitting.
+--     No web auto-fetch (licensing / external dependency — out of scope). The graphics overlay team board
+--     already renders logo_url, so a set logo shows on-air immediately (verified).

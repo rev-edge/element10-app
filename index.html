@@ -244,7 +244,7 @@ const L=k=>S.lists[k];
 const NAV=[
  {k:'home',label:'Home',subs:[{k:'home',label:'Home',sec:'home'}]},
  {k:'schedule',label:'Schedule',subs:[{k:'schedule',label:'Schedule',sec:'schedule'},{k:'gen',label:'Generator',sec:'gen'}]},
- {k:'inventory',label:'Inventory',subs:[{k:'inventory',label:'Inventory',dt:'inventory'},{k:'checklists',label:'Checklists',dt:'checklists'},{k:'players',label:'Players',dt:'players'},{k:'modeler',label:'Break / Format',dt:'modeler'}]},
+ {k:'inventory',label:'Inventory',subs:[{k:'inventory',label:'Inventory',dt:'inventory'},{k:'checklists',label:'Checklists',dt:'checklists'},{k:'players',label:'Players',dt:'players'},{k:'modeler',label:'Break / Format',dt:'modeler'},{k:'teams',label:'Teams',dt:'teams'}]},
  {k:'toolkit',label:'Live Toolkit',subs:[{k:'live',label:'Live Break',sec:'live'},{k:'repack',label:'Repack',sec:'repack'},{k:'fulfill',label:'Ship',sec:'fulfill'},{k:'copy',label:'Copy Studio',sec:'copy'}]},
  {k:'reporting',label:'Reporting & Analytics',subs:[{k:'overview',label:'Overview',dt:'overview'},{k:'reports',label:'Reports',dt:'reports'},{k:'export',label:'Whatnot Export',dt:'export'}]},
 ];
@@ -263,7 +263,7 @@ async function loadCaps(){DENY=new Set();ROLE_PERMS=[];
    (data||[]).forEach(r=>DENY.add(r.capability));}catch(e){}}
 function hasCap(c){return ROLE==='admin'||!DENY.has(c);}
 const SEC2GROUP={home:'home',schedule:'schedule',gen:'schedule',live:'toolkit',repack:'toolkit',fulfill:'toolkit',copy:'toolkit'};
-const DT_INVENTORY=['inventory','checklists','players','modeler'],DT_REPORTING=['overview','reports','export'];
+const DT_INVENTORY=['inventory','checklists','players','modeler','teams'],DT_REPORTING=['overview','reports','export'];
 function groupForDataTab(dt){return DT_INVENTORY.includes(dt)?'inventory':(DT_REPORTING.includes(dt)?'reporting':'settings');}
 function subsFor(g){return g==='settings'?SETTINGS_SUBS:((NAV.find(x=>x.k===g)||{subs:[]}).subs);}
 let GROUP='home',SUB={};
@@ -1227,6 +1227,105 @@ async function plFetch(){const box=$('plListBox');if(box&&PLR.rows==null)box.inn
  PLR.rows=rows;PLR.count=count;PLR.ms=Date.now()-t0;const bx=$('plListBox');if(!bx)return;
  bx.innerHTML=`<div class="egrid wide"><table><tr><th>Player</th><th>Team</th><th>Nationality</th><th>Sport</th><th></th></tr>${rows.map(p=>`<tr><td><a style="cursor:pointer;color:#2563eb;text-decoration:underline;font-weight:600" onclick="openPlayer('${p.id}')">${esc(p.name)}</a></td><td>${esc(p.team||'—')}</td><td>${esc(p.nationality||'—')}</td><td>${esc(p.sport||'—')}</td><td><button class="btn sm" onclick="openPlayer('${p.id}')">All cards ↗</button></td></tr>`).join('')||`<tr><td colspan="5" style="color:var(--mut)">No players match.</td></tr>`}</table></div>`;
  const pg=$('plPager');if(pg){const pages=Math.max(1,Math.ceil(count/50));pg.innerHTML=`${count.toLocaleString()} players${PLR.ms!=null?' · '+PLR.ms+'ms':''} · <button class="btn x sm" ${PLR.page<=0?'disabled':''} onclick="plPage(-1)">‹</button> ${PLR.page+1}/${pages} <button class="btn x sm" ${PLR.page>=pages-1?'disabled':''} onclick="plPage(1)">›</button>`;}}
+/* ---------- Teams management (sport → league → team hierarchy + logo population) ---------- */
+let TM={sport:null,league:null,search:'',dir:null,all:null,pending:null},_tmT=null;
+/* same monogram the graphics overlay uses, so page + overlay fallbacks match exactly */
+function teamMonogram(label){const t=(label||'').replace(/[^A-Za-z0-9 ]/g,'').trim();const w=t.split(/\s+/).filter(Boolean);if(w.length>=2)return (w[0][0]+w[1][0]).toUpperCase();return (t||'?').slice(0,3).toUpperCase();}
+function jsq(s){return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;');}
+async function tmLoadDir(){TM.all=[];TM.dir={};
+ try{const{data,error}=await sb.from('e10_teams').select('id,name,sport,league,logo_url').order('sport').order('league').order('name');if(error)throw error;
+   TM.all=(data||[]).map(t=>({id:t.id,name:t.name,sport:t.sport,league:t.league,logo_url:t.logo_url}));
+   TM.all.forEach(t=>{const sp=t.sport||'Other',lg=t.league||'(no league)';(TM.dir[sp]=TM.dir[sp]||{});(TM.dir[sp][lg]=TM.dir[sp][lg]||[]).push(t);});
+ }catch(e){toast('Load teams: '+e.message);}
+ if(TM.pending){const sp=TM.pending.sport||'Other',lg=TM.pending.league||'(no league)';(TM.dir[sp]=TM.dir[sp]||{});if(!TM.dir[sp][lg])TM.dir[sp][lg]=[];}}
+function tmDatalists(){const dir=TM.dir||{};const sports=Object.keys(dir).filter(s=>s&&s!=='Other');const leagues=[...new Set(Object.values(dir).flatMap(o=>Object.keys(o)))].filter(l=>l&&l!=='(no league)');
+ return `<datalist id="dl_tmsport">${sports.map(s=>`<option value="${esc(s)}"></option>`).join('')}</datalist><datalist id="dl_tmleague">${leagues.map(l=>`<option value="${esc(l)}"></option>`).join('')}</datalist>`;}
+async function dTeams(){$('dtc').innerHTML=`<div class="card">
+   <div class="row" style="justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px"><div><h3 style="font-size:15px">Teams</h3><div class="lab">Browse the league rosters — Sport → League → teams. ${ROLE==='admin'?'Edit names, add/remove teams &amp; leagues, and attach logos (rendered on the graphics overlay board).':'Read-only for your role — an admin manages teams &amp; logos.'}</div></div>
+     ${ROLE==='admin'?`<div class="row" style="gap:6px"><button class="btn sm" onclick="tmAddLeague()">+ League / set</button><button class="btn v sm" onclick="tmAdd()">+ Add team</button></div>`:''}</div>
+   <div class="etool" style="margin-top:12px"><div style="flex:2;min-width:180px"><label>Search all teams</label><input id="tmSearch" value="${esc(TM.search||'')}" placeholder="e.g. Lakers, Argentina" oninput="tmSearchIn(this.value)"></div><div id="tmCount" class="lab" style="margin-left:auto;align-self:flex-end;text-transform:none;letter-spacing:0"></div></div>
+   <div id="tmSports" style="margin-top:10px"></div>
+   <div id="tmLeagues"></div>
+   <div id="tmBody" style="margin-top:12px"><div class="lab" style="padding:12px">Loading…</div></div>
+   ${tmDatalists()}</div>`;
+ await tmLoadDir();tmRender();}
+function tmRender(){const admin=ROLE==='admin';const dir=TM.dir||{};const sports=Object.keys(dir).sort();
+ const body=$('tmBody');if(!body)return;const sportsBox=$('tmSports'),leaguesBox=$('tmLeagues'),cnt=$('tmCount');
+ const q=(TM.search||'').trim().toLowerCase();let teams;
+ if(q){teams=(TM.all||[]).filter(t=>(t.name||'').toLowerCase().includes(q));if(sportsBox)sportsBox.innerHTML='';if(leaguesBox)leaguesBox.innerHTML=`<div class="lab" style="text-transform:none;letter-spacing:0">Showing search matches across all teams — clear the search to browse by league.</div>`;}
+ else{if((!TM.sport||!dir[TM.sport])&&sports.length)TM.sport=sports[0];
+   const leagues=(TM.sport&&dir[TM.sport])?Object.keys(dir[TM.sport]).sort():[];
+   if(TM.sport&&(!TM.league||!dir[TM.sport][TM.league]))TM.league=leagues[0]||null;
+   teams=(TM.sport&&TM.league&&dir[TM.sport][TM.league])?dir[TM.sport][TM.league]:[];
+   if(sportsBox)sportsBox.innerHTML=`<div class="lab" style="text-transform:none;letter-spacing:0;margin-bottom:4px">Sport</div><div class="row" style="gap:6px;flex-wrap:wrap">${sports.map(sp=>`<button class="btn sm ${sp===TM.sport?'v':''}" onclick="tmPickSport('${jsq(sp)}')">${esc(sp)} <span class="lab" style="text-transform:none">${Object.values(dir[sp]).reduce((a,l)=>a+l.length,0)}</span></button>`).join('')||'<span class="lab">No teams yet.</span>'}</div>`;
+   if(leaguesBox)leaguesBox.innerHTML=TM.sport?`<div class="lab" style="text-transform:none;letter-spacing:0;margin:8px 0 4px">League</div><div class="row" style="gap:6px;flex-wrap:wrap">${leagues.map(lg=>`<button class="btn sm ${lg===TM.league?'v':''}" onclick="tmPickLeague('${jsq(lg)}')">${esc(lg)} <span class="lab" style="text-transform:none">${dir[TM.sport][lg].length}</span></button>`).join('')}</div>`:'';}
+ if(cnt)cnt.textContent=teams.length+' team'+(teams.length===1?'':'s')+(q?' matching':((TM.sport&&TM.league)?(' · '+TM.sport+' / '+TM.league):''));
+ body.innerHTML=teams.length?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(214px,1fr));gap:10px">${teams.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(t=>tmTileHTML(t,admin)).join('')}</div>`:`<div class="lab" style="padding:12px;text-transform:none;letter-spacing:0">${admin?'No teams here yet — <b>+ Add team</b> to build this league / set.':'No teams here yet.'}</div>`;}
+function tmTileHTML(t,admin){const logo=t.logo_url;
+ const badge=logo?`<img src="${esc(logo)}" style="width:46px;height:46px;object-fit:contain;border-radius:8px;border:1px solid var(--line);background:#fff;flex:0 0 auto" onerror="this.outerHTML='<div style=\\'width:46px;height:46px;border-radius:8px;background:#0A0B0D;color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center;font-size:15px;flex:0 0 auto\\'>${esc(teamMonogram(t.name))}</div>'">`:`<div style="width:46px;height:46px;border-radius:8px;background:#0A0B0D;color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center;font-size:15px;flex:0 0 auto">${esc(teamMonogram(t.name))}</div>`;
+ return `<div style="display:flex;flex-direction:column;gap:8px;border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--surface)">
+   <div style="display:flex;align-items:center;gap:8px;min-width:0">${badge}<div style="min-width:0"><div style="font-weight:700;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(t.name)}">${esc(t.name)}</div><div class="lab" style="text-transform:none;letter-spacing:0;font-size:11px">${esc(t.sport||'—')}${t.league?' · '+esc(t.league):''}${logo?' · <span style="color:#0a8a4a;font-weight:700">logo ✓</span>':''}</div></div></div>
+   ${admin?`<div class="row" style="gap:4px"><input placeholder="paste logo URL…" style="flex:1;min-width:0;font-size:11px" onchange="tmPasteLogo('${t.id}',this.value)" onkeydown="if(event.key==='Enter')this.blur()"><button class="btn sm" title="Upload a logo image" onclick="tmUploadLogo('${t.id}')">⬆</button></div>
+   <div class="row" style="gap:4px"><button class="btn sm" onclick="tmEdit('${t.id}')">Edit</button>${logo?`<button class="btn sm" onclick="tmClearLogo('${t.id}')">Clear logo</button>`:''}<button class="btn x sm" style="margin-left:auto" onclick="tmRemove('${t.id}')">Remove</button></div>`:''}
+ </div>`;}
+function tmPickSport(sp){TM.sport=sp;const dir=TM.dir||{};const lgs=dir[sp]?Object.keys(dir[sp]).sort():[];TM.league=lgs[0]||null;TM.search='';const si=$('tmSearch');if(si)si.value='';tmRender();}
+function tmPickLeague(lg){TM.league=lg;tmRender();}
+function tmSearchIn(v){TM.search=v;clearTimeout(_tmT);_tmT=setTimeout(tmRender,150);}
+/* ---- logo population (reuses the shared Storage upload → resize → public URL; or paste a URL) ---- */
+async function tmSetLogo(id,url){if(ROLE!=='admin'){toast('Admin only');return;}
+ try{const{error}=await sb.from('e10_teams').update({logo_url:url||null}).eq('id',id);if(error)throw error;}catch(e){toast('Save failed: '+e.message);return;}
+ const t=(TM.all||[]).find(x=>x.id===id);if(t)t.logo_url=url||null;tmRender();toast(url?'Logo set — live on the overlay board':'Logo cleared');}
+function tmUploadLogo(id){if(ROLE!=='admin'){toast('Admin only');return;}pickImage(url=>tmSetLogo(id,url));}
+function tmPasteLogo(id,url){url=(url||'').trim();if(!url)return;tmSetLogo(id,url);}
+function tmClearLogo(id){tmSetLogo(id,'');}
+/* ---- duplicate-name guard (unique lower(name)) — suggest-and-confirm, never a hard 409 ---- */
+async function tmCheckDup(name,excludeId){name=(name||'').trim();if(!name)return null;try{const{data}=await sb.from('e10_teams').select('id,name,sport,league').ilike('name',name).limit(5);return (data||[]).find(t=>(t.name||'').toLowerCase()===name.toLowerCase()&&t.id!==excludeId)||null;}catch(e){return null;}}
+/* ---- edit / add / remove ---- */
+function tmEdit(id){if(ROLE!=='admin'){toast('Admin only');return;}const t=(TM.all||[]).find(x=>x.id===id);if(!t)return;
+ $('modal').innerHTML=`<h3 style="font-size:17px">Edit team</h3>
+   <label>Name</label><input id="tmeName" value="${esc(t.name)}" style="width:100%">
+   <div class="row" style="gap:8px;margin-top:8px"><div style="flex:1"><label>Sport</label><input id="tmeSport" list="dl_tmsport" value="${esc(t.sport||'')}" style="width:100%"></div><div style="flex:1"><label>League / set</label><input id="tmeLeague" list="dl_tmleague" value="${esc(t.league||'')}" style="width:100%"></div></div>
+   <label style="margin-top:8px">Logo</label><div class="row" style="gap:6px"><input id="tmeLogo" value="${esc(t.logo_url||'')}" placeholder="paste URL or upload" style="flex:1" onchange="tmePv()"><button class="btn sm" onclick="tmEditUpload()">⬆ Upload</button></div>
+   <div style="margin-top:8px"><img id="tmeLogoPv" src="${esc(t.logo_url||'')}" style="height:52px;border-radius:6px;border:1px solid var(--line);background:#fff;${t.logo_url?'':'display:none'}"></div>
+   <div class="row" style="margin-top:14px;gap:8px"><button class="btn v" onclick="tmEditSave('${id}')">Save</button><button class="btn sm" onclick="closeM()">Cancel</button></div>${tmDatalists()}`;
+ $('ov').style.display='flex';}
+function tmePv(){const el=$('tmeLogo'),pv=$('tmeLogoPv');if(pv&&el){pv.src=el.value.trim();pv.style.display=el.value.trim()?'inline-block':'none';}}
+function tmEditUpload(){pickImage(url=>{const el=$('tmeLogo');if(el)el.value=url;tmePv();});}
+async function tmEditSave(id){const name=($('tmeName').value||'').trim();if(!name){toast('Name required');return;}
+ const dup=await tmCheckDup(name,id);if(dup){toast('A team named “'+name+'” already exists'+(dup.league?(' in '+dup.league):'')+' — names must be unique. Pick a different name.');return;}
+ const sport=($('tmeSport').value||'').trim()||null,league=($('tmeLeague').value||'').trim()||null,logo=($('tmeLogo').value||'').trim()||null;
+ try{const{error}=await sb.from('e10_teams').update({name,sport,league,logo_url:logo}).eq('id',id);if(error)throw error;}catch(e){toast('Save failed: '+e.message);return;}
+ closeM();await tmLoadDir();TM.sport=sport||'Other';TM.league=league||'(no league)';TM.search='';tmRender();toast('Team updated');}
+function tmAdd(sport,league){if(ROLE!=='admin'){toast('Admin only');return;}
+ const sp=(typeof sport==='string'?sport:(TM.search?'':TM.sport))||'',lg=(typeof league==='string'?league:(TM.search?'':TM.league))||'';
+ $('modal').innerHTML=`<h3 style="font-size:17px">Add team</h3>
+   <label>Name</label><input id="tmaName" placeholder="e.g. New York Yankees, or a character" style="width:100%" onkeydown="if(event.key==='Enter')tmAddSave()">
+   <div class="row" style="gap:8px;margin-top:8px"><div style="flex:1"><label>Sport / set type</label><input id="tmaSport" list="dl_tmsport" value="${esc(sp==='Other'?'':sp)}" placeholder="Baseball, or Anime…" style="width:100%"></div><div style="flex:1"><label>League / set</label><input id="tmaLeague" list="dl_tmleague" value="${esc(lg==='(no league)'?'':lg)}" placeholder="MLB, or One Piece…" style="width:100%"></div></div>
+   <label style="margin-top:8px">Logo (optional)</label><div class="row" style="gap:6px"><input id="tmaLogo" placeholder="paste URL or upload" style="flex:1" onchange="tmaPv()"><button class="btn sm" onclick="tmAddUpload()">⬆ Upload</button></div>
+   <div style="margin-top:8px"><img id="tmaLogoPv" style="height:52px;border-radius:6px;border:1px solid var(--line);background:#fff;display:none"></div>
+   <div class="lab" style="text-transform:none;letter-spacing:0;margin-top:8px">Leave sport/league blank for a one-off. Custom set types (anime, characters) are welcome — type any sport &amp; set.</div>
+   <div class="row" style="margin-top:14px;gap:8px"><button class="btn v" onclick="tmAddSave()">Add team</button><button class="btn sm" onclick="closeM()">Cancel</button></div>${tmDatalists()}`;
+ $('ov').style.display='flex';setTimeout(()=>{const el=$('tmaName');if(el)el.focus();},60);}
+function tmaPv(){const el=$('tmaLogo'),pv=$('tmaLogoPv');if(pv&&el){pv.src=el.value.trim();pv.style.display=el.value.trim()?'inline-block':'none';}}
+function tmAddUpload(){pickImage(url=>{const el=$('tmaLogo');if(el)el.value=url;tmaPv();});}
+async function tmAddSave(){const name=($('tmaName').value||'').trim();if(!name){toast('Name required');return;}
+ const dup=await tmCheckDup(name,null);
+ if(dup){closeM();if(confirm('A team named “'+name+'” already exists in '+(dup.sport||'—')+' / '+(dup.league||'—')+'.\nNames must be unique. Open that team to edit it instead?'))tmEdit(dup.id);return;}
+ const sport=($('tmaSport').value||'').trim()||null,league=($('tmaLeague').value||'').trim()||null,logo=($('tmaLogo').value||'').trim()||null;
+ try{const{error}=await sb.from('e10_teams').insert({name,sport,league,logo_url:logo});if(error)throw error;}catch(e){toast('Add failed: '+e.message);return;}
+ TM.pending=null;closeM();TM.search='';TM.sport=sport||'Other';TM.league=league||'(no league)';await tmLoadDir();tmRender();toast('Team added to '+(league||sport||'teams'));}
+async function tmRemove(id){if(ROLE!=='admin'){toast('Admin only');return;}const t=(TM.all||[]).find(x=>x.id===id);if(!t)return;
+ if(!confirm('Remove team “'+t.name+'”? This deletes it from e10_teams.'))return;
+ try{const{error}=await sb.from('e10_teams').delete().eq('id',id);if(error)throw error;}catch(e){toast('Remove failed: '+e.message+(/foreign key|violates/i.test(e.message||'')?' (it is referenced by cards or break slots)':''));return;}
+ await tmLoadDir();tmRender();toast('Team removed');}
+function tmAddLeague(){if(ROLE!=='admin'){toast('Admin only');return;}
+ $('modal').innerHTML=`<h3 style="font-size:17px">Add a league / set</h3>
+   <div class="row" style="gap:8px;margin-top:4px"><div style="flex:1"><label>Sport / set type</label><input id="tmlSport" list="dl_tmsport" placeholder="Soccer, or a custom type" style="width:100%"></div><div style="flex:1"><label>League / set name</label><input id="tmlLeague" list="dl_tmleague" placeholder="La Liga, or a character set" style="width:100%"></div></div>
+   <div class="lab" style="text-transform:none;letter-spacing:0;margin-top:8px">Selects the new league so you can add teams / characters into it.</div>
+   <div class="row" style="margin-top:14px;gap:8px"><button class="btn v" onclick="tmAddLeagueGo()">Continue → add teams</button><button class="btn sm" onclick="closeM()">Cancel</button></div>${tmDatalists()}`;
+ $('ov').style.display='flex';}
+function tmAddLeagueGo(){const sport=($('tmlSport').value||'').trim(),league=($('tmlLeague').value||'').trim();if(!sport&&!league){toast('Enter a sport and/or league');return;}
+ TM.pending={sport,league};TM.search='';TM.sport=sport||'Other';TM.league=league||'(no league)';closeM();tmLoadDir().then(()=>{tmRender();tmAdd(sport,league);});}
 /* ---------- Import commit → tables (chunked) + player resolution ---------- */
 async function dbEnsureSet(name,sport){name=(name||'').trim();if(!name)return null;try{
  const{data:ex}=await sb.from('e10_sets').select('id').ilike('name',name).limit(1);if(ex&&ex.length)return ex[0].id;
@@ -1369,7 +1468,7 @@ function dataHub(){
  /* Tab bar now lives in the top-level sub-nav; this just renders the active module into #dtc. */
  if(dataTab==='team'&&ROLE!=='admin')dataTab='overview';
  $('sec-data').innerHTML=`<div id="dtc"></div>`;
- ({overview:dOverview,inventory:dInventory,checklists:dChecklists,players:dPlayers,modeler:dModeler,reports:dReports,export:dExport,lists:dLists,team:dTeam,perms:dPerms}[dataTab]||dOverview)();
+ ({overview:dOverview,inventory:dInventory,checklists:dChecklists,players:dPlayers,modeler:dModeler,teams:dTeams,reports:dReports,export:dExport,lists:dLists,team:dTeam,perms:dPerms}[dataTab]||dOverview)();
 }
 function invTotals(){let cost=0,val=0,byCat={},qty=0;const view=invView();view.forEach(i=>{const q=+i.qty||1,c=(+i.cost||0)*q,v=(+i.value||0)*q;cost+=c;val+=v;qty+=q;byCat[i.cat]=(byCat[i.cat]||0)+v;});return{cost,val,byCat,qty,cnt:view.length,gain:val-cost};}
 function svgBars(entries){if(!entries.length)return '<div style="color:var(--mut);font-size:13px">No inventory yet.</div>';
