@@ -185,6 +185,37 @@ async function dbTeamSearch(q){q=(q||'').trim();if(!q)return[];try{const{data}=a
 function invItemSearch(q){q=(q||'').toLowerCase();return (S.inventory||[]).filter(x=>(x.name||'').toLowerCase().includes(q)).slice(0,24).map(x=>({id:x.id,label:x.name,sub:[x.cat,x.set,'cost '+money(+x.cost||0)].filter(Boolean).join(' · ')}));}
 /* pickInput: type-to-filter combobox from a Lists & Settings pick-list (or a fixed array) */
 function pickOpts(list){const arr=Array.isArray(list)?list:L(list);return (arr||[]).map(v=>`<option value="${esc(v)}"></option>`).join('');}
+/* ===== Team roster directory (e10_teams by sport→league) — powers "load a roster" ===== */
+let TEAMDIR=null;
+async function loadTeamDir(force){if(TEAMDIR&&!force)return TEAMDIR;
+ try{const{data}=await sb.from('e10_teams').select('id,name,sport,league').not('league','is',null).order('sport').order('league').order('name');
+   const dir={};(data||[]).forEach(t=>{const sp=t.sport||'Other',lg=t.league||'—';(dir[sp]=dir[sp]||{});(dir[sp][lg]=dir[sp][lg]||[]).push({id:t.id,name:t.name});});TEAMDIR=dir;}
+ catch(e){TEAMDIR={};}
+ return TEAMDIR;}
+async function dbLeagueTeams(sport,league){try{const{data}=await sb.from('e10_teams').select('id,name').eq('sport',sport).eq('league',league).order('name');return data||[];}catch(e){return[];}}
+async function dbChecklistSearch(q){q=(q||'').trim();try{let query=sb.from('e10_checklists').select('id,name,card_count').order('updated_at',{ascending:false}).limit(20);if(q)query=query.ilike('name','%'+q+'%');const{data}=await query;return (data||[]).map(c=>({id:c.id,label:c.name,sub:(c.card_count||0)+' cards'}));}catch(e){return[];}}
+/* One "Load the spot list" panel, reused on the live-board worklist (ctx='live') and the pre-flight review (ctx='review').
+   Live wires straight to e10_break_slots; review wires to the BK slot builder. Both surface the phase-1/2 formatter. */
+function slotLoaderHTML(ctx){const dir=TEAMDIR||{};const sports=Object.keys(dir).sort();const live=(ctx==='live');
+ const fmts=(S.breaks||[]).filter(b=>b.ruleSlots&&b.ruleSlots.length);
+ const sp0=sports[0]||'';const lgs=sp0?Object.keys(dir[sp0]).sort():[];
+ return `<div class="out" style="margin-top:10px;padding:12px">
+   <div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px"><b style="font-size:13px">＋ Load the spot list</b><span class="lab" style="text-transform:none;letter-spacing:0;font-size:11px">Build the board fast — a saved format, a team roster, a checklist's players, or on the fly.</span></div>
+   <div class="row" style="gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap"><span class="lab" style="min-width:70px">By team</span>
+     <select id="sl_sport_${ctx}" style="font-size:12px" onchange="slotLoaderSport('${ctx}')">${sports.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('')||'<option value="">— seed rosters —</option>'}</select>
+     <select id="sl_league_${ctx}" style="font-size:12px">${lgs.map(l=>`<option value="${esc(l)}">${esc(l)} (${dir[sp0][l].length})</option>`).join('')}</select>
+     <button class="btn v sm" onclick="${live?'liveLoadRosterPicked':'bkLoadRosterPicked'}('${ctx}')">Load roster</button></div>
+   ${fmts.length?`<div class="row" style="gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap"><span class="lab" style="min-width:70px">Saved format</span>
+     <select id="sl_fmt_${ctx}" style="font-size:12px;max-width:240px">${fmts.map(b=>`<option value="${esc(b.id)}">${esc(b.name)} · ${b.ruleSlots.length} spots</option>`).join('')}</select>
+     <button class="btn d sm" onclick="${live?'liveLoadFormatPicked':'bkAttachFormatPicked'}('${ctx}')">Attach</button></div>`:''}
+   <div class="row" style="gap:6px;margin-top:8px;align-items:flex-start;flex-wrap:wrap"><span class="lab" style="min-width:70px;margin-top:9px">By player</span>
+     <div style="flex:1;min-width:180px;max-width:270px">${entityPicker('sl_cl_'+ctx,{icon:'📋',server:true,minChars:1,freeText:false,placeholder:'search a checklist…',search:dbChecklistSearch,onpick:(id)=>{window['_slCl_'+ctx]=id;},onclear:()=>{window['_slCl_'+ctx]=null;}})}</div>
+     <button class="btn d sm" onclick="${live?'liveLoadPlayerPicked':'bkLoadPlayerPicked'}('${ctx}')">Generate</button></div>
+   <div class="row" style="gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap"><span class="lab" style="min-width:70px">On the fly</span>
+     <input id="sl_qty_${ctx}" type="number" min="1" value="10" style="width:64px;font-size:12px"><button class="btn sm" onclick="${live?'liveQuickAddPicked':'bkQuickAddPicked'}('${ctx}')">Add N blank spots</button></div>
+ </div>`;}
+function slotLoaderSport(ctx){const dir=TEAMDIR||{};const sp=($('sl_sport_'+ctx)||{}).value;const lg=$('sl_league_'+ctx);if(!lg||!dir[sp])return;const ls=Object.keys(dir[sp]).sort();lg.innerHTML=ls.map(l=>`<option value="${esc(l)}">${esc(l)} (${dir[sp][l].length})</option>`).join('');}
+function avgSlotTarget(cost,n){return (n>0&&cost>0)?(cost/n):0;}
 function pickInput(cfg){const dl='dl_'+cfg.id;return `<input id="${cfg.id}" list="${dl}" value="${esc(cfg.value==null?'':cfg.value)}" placeholder="${esc(cfg.placeholder||'type or pick…')}" autocomplete="off"${cfg.disabled?' disabled':''}${cfg.style?` style="${cfg.style}"`:''}${cfg.oninput?` oninput="${cfg.oninput}"`:''}${cfg.onchange?` onchange="${cfg.onchange}"`:''}><datalist id="${dl}">${pickOpts(cfg.list)}</datalist>`;}
 
 /* ---------- state ---------- */
@@ -600,6 +631,21 @@ let _bkEvalT=null;
 function bkSlotById(sid){return (BK.slots||[]).find(s=>s.id===sid);}
 function bkAddSlot(){BK.slots=BK.slots||[];BK.slots.push({id:'sl'+Math.random().toString(36).slice(2),name:'Slot '+(BK.slots.length+1),include:[{field:'team',value:'',valueId:null}],exclude:[]});renderSlotBuilder();bkEvalSlots();}
 function bkAddFieldSlot(){BK.slots=BK.slots||[];if(BK.slots.some(s=>s.remainder)){toast('Field slot already added');return;}BK.slots.push({id:'sl'+Math.random().toString(36).slice(2),name:'Field / remainder',remainder:true,include:[],exclude:[]});renderSlotBuilder();bkEvalSlots();}
+/* ===== Slot-list loaders for the pre-flight REVIEW (populate BK.slots; the slot builder + projection re-render) ===== */
+function bkAfterLoad(){if(REVIEW)renderLive();else{renderSlotBuilder();bkEvalSlots();}}
+function bkLoadRosterPicked(ctx){const sp=($('sl_sport_'+ctx)||{}).value,lg=($('sl_league_'+ctx)||{}).value;if(!sp||!lg){toast('Pick a sport + league (seed rosters first if empty)');return;}bkLoadRoster(sp,lg);}
+async function bkLoadRoster(sport,league){const teams=await dbLeagueTeams(sport,league);if(!teams.length){toast('No teams in '+league);return;}
+ BK.slots=BK.slots||[];BK.breakType='team';
+ teams.forEach(t=>{BK.slots.push({id:'sl'+Math.random().toString(36).slice(2),name:t.name,include:[{field:'team',value:t.name,valueId:t.id}],exclude:[],method:'$1auction',tierId:null,_modelVal:0});});
+ bkAfterLoad();toast('Loaded '+teams.length+' '+league+' team spots');}
+function bkAttachFormatPicked(ctx){const id=($('sl_fmt_'+ctx)||{}).value;if(!id){toast('Pick a saved format');return;}bkAttachFormat(id);}
+function bkAttachFormat(modelId){const model=(S.breaks||[]).find(b=>b.id===modelId);if(!model){toast('Format not found');return;}
+ const rs=model.ruleSlots||[];if(!rs.length){toast('That format has no formatted spots');return;}
+ BK.slots=JSON.parse(JSON.stringify(rs));BK.tierBands=JSON.parse(JSON.stringify(model.tierBands||[]));BK.checklistId=model.checklistId||null;BK.breakType=model.breakType||'team';
+ BK.cost=+((model.inputs&&model.inputs.cost)||model.cost||BK.cost||0);BK.targetMargin=(model.inputs&&model.inputs.targetMargin!=null)?model.inputs.targetMargin:(BK.targetMargin!=null?BK.targetMargin:30);BK._slotEval=null;BK._modelId=model.id;
+ if(REVIEW)REVIEW.modelId=model.id;bkAfterLoad();toast('Attached '+model.name+' — '+rs.length+' spots + tiers + projection');}
+async function bkLoadPlayerPicked(ctx){const id=window['_slCl_'+ctx];if(!id){toast('Pick a checklist');return;}BK.checklistId=id;BK.breakType='player';await bkGenerateSlots();if(REVIEW)renderLive();}
+function bkQuickAddPicked(ctx){const n=Math.max(1,Math.min(60,+(($('sl_qty_'+ctx)||{}).value)||1));BK.slots=BK.slots||[];for(let i=0;i<n;i++)BK.slots.push({id:'sl'+Math.random().toString(36).slice(2),name:'Slot '+(BK.slots.length+1),include:[{field:'team',value:'',valueId:null}],exclude:[]});bkAfterLoad();toast('Added '+n+' blank spots');}
 function bkDelSlot(sid){BK.slots=(BK.slots||[]).filter(s=>s.id!==sid);renderSlotBuilder();bkEvalSlots();}
 function bkSlotName(sid,v){const s=bkSlotById(sid);if(s){s.name=v;clearTimeout(_bkEvalT);_bkEvalT=setTimeout(bkEvalSlots,400);}}
 function bkAddCond(sid,kind){const s=bkSlotById(sid);if(!s)return;(s[kind]=s[kind]||[]).push({field:kind==='include'?'player':'player',value:'',valueId:null});renderSlotBuilder();}
@@ -622,12 +668,14 @@ function bkRuleHTML(s,kind,label){const conds=s[kind]||[];const FF=[['team','Tea
    h+=`<button class="btn x sm" onclick="bkDelCond('${s.id}','${kind}',${idx})">✕</button></div>`;});
  return h+`</div>`;}
 function renderSlotBuilder(){const box=$('bkSlots');if(!box)return;
- if(!BK.checklistId){box.innerHTML=`<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Slots</h3><div class="lab" style="text-transform:none;letter-spacing:0;margin-top:6px">Load a product + checklist first — slots slice that checklist into breakable groups (team / player / set rules with carve-outs).</div></div>`;return;}
+ /* Only block on "no checklist" when there are also no slots. A loaded team roster / on-the-fly list
+    has slots with no checklist — render the rows (names, methods, tiers) and just skip per-card counts. */
+ if(!BK.checklistId&&!(BK.slots&&BK.slots.length)){box.innerHTML=`<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Slots</h3><div class="lab" style="text-transform:none;letter-spacing:0;margin-top:6px">Load a roster, a saved format, or a checklist's players above — or a product + checklist to slice card-by-card.</div></div>`;return;}
  const slots=BK.slots||[],bt=BK.breakType||'team';
  let h=`<div class="card" style="margin-top:16px"><div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="font-size:15px">Slots — slice the checklist into groups</h3><div class="row" style="gap:6px;align-items:center;flex-wrap:wrap"><span class="lab" style="text-transform:none;letter-spacing:0">Break type</span><select style="font-size:12px" onchange="bkSetType(this.value)">${[['team','Team'],['player','Player'],['hybrid','Hybrid']].map(o=>`<option value="${o[0]}" ${bt===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select><button class="btn d sm" onclick="bkGenerateSlots()">⚡ Generate spots</button><button class="btn v sm" onclick="bkAddSlot()">+ Add slot</button><button class="btn sm" onclick="bkAddFieldSlot()">+ Field</button></div></div>
    <div id="slBanner" style="margin-top:10px"></div>`;
  if(!slots.length)h+=`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:8px">No slots yet. <b>Generate spots</b> creates one slot per ${bt==='player'?'player':'team'}${bt==='hybrid'?' (then carve players out)':''} + a Field catch-all, or add a slot manually and define an include rule (e.g. Team = Liverpool), optionally an exclude (e.g. Player = Rio → “Liverpool no Rio”). Include conditions are AND’d; exclude carves them out.</div>`;
- slots.forEach(s=>{h+=`<div class="out" style="margin-top:10px"><div class="row" style="justify-content:space-between;align-items:center;gap:8px"><input value="${esc(s.name||'')}" placeholder="Slot name" style="max-width:230px;font-weight:600" oninput="bkSlotName('${s.id}',this.value)"><div class="row" style="gap:8px;align-items:center"><span class="lab" id="slcount_${s.id}" style="text-transform:none;letter-spacing:0">…</span><button class="btn x sm" onclick="bkDelSlot('${s.id}')">✕</button></div></div>`;
+ slots.forEach(s=>{h+=`<div class="out" style="margin-top:10px"><div class="row" style="justify-content:space-between;align-items:center;gap:8px"><input value="${esc(s.name||'')}" placeholder="Slot name" style="max-width:230px;font-weight:600" oninput="bkSlotName('${s.id}',this.value)"><div class="row" style="gap:8px;align-items:center"><span class="lab" id="slcount_${s.id}" style="text-transform:none;letter-spacing:0">${BK.checklistId?'…':''}</span><button class="btn x sm" onclick="bkDelSlot('${s.id}')">✕</button></div></div>`;
    if(s.remainder)h+=`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:6px">🧺 Catch-all — claims every card not taken by another slot.</div>`;
    else h+=bkRuleHTML(s,'include','Include — match ALL of:')+bkRuleHTML(s,'exclude','Exclude — carve out:');
    h+=bkSlotSaleHTML(s);
@@ -1399,10 +1447,11 @@ function dInventory(){const admin=ROLE==='admin';const canEdit=hasCap('act.inven
    <div><label>Name</label><input id="ivN" placeholder="e.g. Ascended Heroes Box"></div>
    <div><label>Category</label>${pickInput({id:'ivC',list:'invcats',value:'',placeholder:'category'})}</div>
    <div style="min-width:150px"><label>Set / product</label>${entityPicker('ivSet',{icon:'🗂',placeholder:'search sets…',minChars:2,server:true,freeText:true,value:ivSetLink,search:dbSetSearch,onpick:(sid,label)=>{ivSetLink={id:sid,label};},onclear:()=>{ivSetLink=null;}})}</div>
-   <div><label>Qty (boxes on hand)</label><input id="ivQ" type="number" value="1"></div>
-   <div><label>Unit cost $</label><input id="ivCo" type="number" placeholder="0"></div>
-   <div><label>Boxes / case</label><input id="ivBPC" type="number" min="1" value="1" title="For sealed product bought by the case — boxes per case. Leave 1 for singles/slabs."></div>
-   <div><label>Per-box cost $</label><input id="ivPBC" type="number" placeholder="= unit cost" title="Cost of one box (defaults to unit cost)."></div>
+   <div><label>Qty (boxes on hand)</label><input id="ivQ" type="number" value="1" title="How many BOXES you hold. One full case = boxes/case. Two cases of 12 = 24."></div>
+   <div><label>Cost $</label><input id="ivCo" type="number" placeholder="0" oninput="ivBoxHint()"></div>
+   <div><label>Cost basis</label><select id="ivBasis" onchange="ivBoxHint()"><option value="perbox">per box / unit</option><option value="percase">per case</option></select></div>
+   <div><label>Boxes / case</label><input id="ivBPC" type="number" min="1" value="1" oninput="ivBoxHint()" title="For sealed product bought by the case — boxes per case (e.g. Prizm WC = 12). Leave 1 for singles / slabs."></div>
+   <div style="align-self:end"><label>&nbsp;</label><div id="ivPBHint" class="lab" style="text-transform:none;letter-spacing:0;font-size:12px;padding-bottom:9px">= $0/box</div></div>
    <div><label>Market $</label><input id="ivV" type="number" placeholder="0"></div>
    <div><label>Grading co.</label>${pickInput({id:'ivGC',list:'grading',value:'',placeholder:'raw/sealed'})}</div>
    <div><label>Grade</label><input id="ivGrade" placeholder="10 / 9.5"></div>
@@ -1457,10 +1506,14 @@ function buyListHTML(){
 function addInv(){const n=$('ivN').value.trim();if(!n)return;const owner=($('ivOwner')&&$('ivOwner').value!=='')?$('ivOwner').value:(ROLE==='admin'&&$('ivOwner')?null:ME);
  const gv=id=>{const el=$(id);return el?el.value.trim():'';};
  const L2=ivLinked||{};const SL=ivSetLink||{};
- const unitCost=+$('ivCo').value||0,bpc=Math.max(1,+($('ivBPC')&&$('ivBPC').value)||1),pbc=($('ivPBC')&&$('ivPBC').value!=='')?(+$('ivPBC').value||0):unitCost;
- S.inventory.push({id:'i'+Date.now(),name:n,cat:gv('ivC'),set:(SL.label||''),setId:(SL.id||null),qty:+$('ivQ').value||1,cost:unitCost,value:+$('ivV').value||0,boxesPerCase:bpc,perBoxCost:pbc,gradingCompany:gv('ivGC'),grade:gv('ivGrade'),cardNumber:gv('ivNum'),year:gv('ivYear'),cond:gv('ivG'),img:$('ivImg').value,owner,
+ /* box/case cost model: the stored `cost` is always PER BOX (so capital = boxes×cost is right).
+    If the user enters a case price, divide by boxes/case to get the per-box cost. */
+ const rawCost=+$('ivCo').value||0,bpc=Math.max(1,+($('ivBPC')&&$('ivBPC').value)||1),basis=(($('ivBasis')&&$('ivBasis').value)||'perbox'),pbc=(basis==='percase'&&bpc>1)?(rawCost/bpc):rawCost;
+ S.inventory.push({id:'i'+Date.now(),name:n,cat:gv('ivC'),set:(SL.label||''),setId:(SL.id||null),qty:+$('ivQ').value||1,cost:pbc,value:+$('ivV').value||0,boxesPerCase:bpc,perBoxCost:pbc,gradingCompany:gv('ivGC'),grade:gv('ivGrade'),cardNumber:gv('ivNum'),year:gv('ivYear'),cond:gv('ivG'),img:$('ivImg').value,owner,
    cardId:L2.cardId||null,playerId:L2.playerId||null,parallel:L2.parallel||'',rarity:L2.rarity||''});
  ivLinked=null;ivSetLink=null;save();dInventory();toast('Added'+(L2.cardId?' · linked to card':''));}
+function ivBoxHint(){const el=$('ivPBHint');if(!el)return;const raw=+($('ivCo')&&$('ivCo').value)||0,bpc=Math.max(1,+($('ivBPC')&&$('ivBPC').value)||1),basis=(($('ivBasis')&&$('ivBasis').value)||'perbox');const pbc=(basis==='percase'&&bpc>1)?(raw/bpc):raw;
+ el.textContent='= '+money(pbc)+'/box'+((basis==='percase'&&bpc>1)?(' · case '+money(raw)):'');el.style.color=pbc>0?'var(--red)':'';}
 function delInv(id){S.inventory=S.inventory.filter(x=>x.id!==id);save();dInventory();}
 /* ===== Quick-add inventory from the card library (search e10_cards → autofill + link) ===== */
 let ivLinked=null,ivSetLink=null,_ivResults=[],_ivT=null;
@@ -2009,6 +2062,7 @@ async function boot(){if(!window.supabase){authScreen('Auth library failed to lo
 let LIVE={session:null,slots:[],chan:null,chases:[]};
 async function renderLive(){
  if(!sb){$('sec-live').innerHTML='<div class="card">Connecting…</div>';return;}
+ await loadTeamDir();
  if(REVIEW&&!LIVE.session){$('sec-live').innerHTML=liveReviewHTML();renderSlotBuilder();bkEvalSlots();return;}
  if(!LIVE.session)await liveLoadActive();
  $('sec-live').innerHTML=LIVE.session?liveActiveHTML():liveStartHTML();
@@ -2048,6 +2102,47 @@ async function liveAddSlot(){if(!LIVE.session)return;const label=($('slotLabel')
  const{data,error}=await sb.from('e10_break_slots').insert({session_id:LIVE.session.id,label:label||('Spot '+(pos+1)),position:pos}).select().maybeSingle();
  if(error){toast(error.message);return;}LIVE.slots.push(data);await liveEvent('assigned',data.id,{label:data.label});renderLive();
 }
+/* ===== Slot-list loaders for the LIVE BOARD worklist (insert straight into e10_break_slots) ===== */
+async function liveInsertSlots(rows,evt){if(!rows.length)return;
+ /* plan is NOT NULL — give every row in the batch the same column so a mixed batch (some rows with plan,
+    some without) can't null-out the plan column for the rows that omitted it. */
+ rows.forEach(r=>{if(r.plan==null)r.plan={};});
+ try{const{data,error}=await sb.from('e10_break_slots').insert(rows).select();if(error)throw error;(data||[]).forEach(s=>LIVE.slots.push(s));}catch(e){toast(e.message);return false;}
+ await liveEvent('slots_loaded',null,evt||{});renderLive();return true;}
+async function livePatchSession(patch){if(!Object.keys(patch).length)return;try{await sb.from('e10_break_sessions').update(patch).eq('id',LIVE.session.id);Object.assign(LIVE.session,patch);}catch(e){}}
+function liveLoadRosterPicked(ctx){const sp=($('sl_sport_'+ctx)||{}).value,lg=($('sl_league_'+ctx)||{}).value;if(!sp||!lg){toast('Pick a sport + league');return;}liveLoadRoster(sp,lg);}
+async function liveLoadRoster(sport,league){if(!LIVE.session)return;const teams=await dbLeagueTeams(sport,league);if(!teams.length){toast('No teams in '+league);return;}
+ const base=LIVE.slots.length;const rows=teams.map((t,i)=>({session_id:LIVE.session.id,label:t.name,position:base+i,team_id:t.id,method:'$1auction'}));
+ if(!LIVE.session.break_type)await livePatchSession({break_type:'team'});
+ if(await liveInsertSlots(rows,{source:'roster',league,count:teams.length}))toast('Loaded '+teams.length+' '+league+' team spots');}
+function liveLoadFormatPicked(ctx){const id=($('sl_fmt_'+ctx)||{}).value;if(!id){toast('Pick a saved format');return;}liveLoadFormat(id);}
+async function liveLoadFormat(modelId){if(!LIVE.session)return;const model=(S.breaks||[]).find(b=>b.id===modelId);if(!model){toast('Format not found');return;}
+ const rs=model.ruleSlots||[];if(!rs.length){toast('That format has no spots');return;}
+ const tb=model.tierBands||[],base=LIVE.slots.length;let cardMap={};
+ if(model.checklistId){try{const payload=rs.map(s=>({name:s.name||'',include:s.include||[],exclude:s.exclude||[],remainder:!!s.remainder}));const{data}=await sb.rpc('e10_slot_cards',{p_checklist:model.checklistId,p_slots:payload,p_limit:60});(data||[]).forEach(x=>{cardMap[x.i]={count:x.count,cards:x.cards||[]};});}catch(e){}}
+ const rows=rs.map((s,i)=>{const take=modelTake(s,tb),tierName=(tb.find(t=>t.id===s.tierId)||{}).name||'';const teamC=(s.include||[]).find(c=>c.field==='team'&&c.valueId),playerC=(s.include||[]).find(c=>c.field==='player'&&c.valueId),cm=cardMap[i]||{count:null,cards:[]};
+   return{session_id:LIVE.session.id,label:s.name||('Spot '+(base+i+1)),position:base+i,method:s.method||'$1auction',tier:tierName,band_low:take.low,band_expected:take.expected,band_high:take.high,team_id:teamC?teamC.valueId:null,player_id:playerC?playerC.valueId:null,price:((s.method==='fixed')?(+s.price||0):null),plan:{formatSlotId:s.id,breakType:model.breakType||'team',tierName,remainder:!!s.remainder,cardCount:cm.count,cards:cm.cards}};});
+ const proj=modelProjection(model),patch={};
+ if(!LIVE.session.checklist_id&&model.checklistId)patch.checklist_id=model.checklistId;
+ if(!LIVE.session.format_id)patch.format_id=model.id;
+ if(!LIVE.session.break_type)patch.break_type=model.breakType||'team';
+ if(!(+LIVE.session.proj_expected>0||+LIVE.session.proj_low>0||+LIVE.session.proj_high>0)){patch.proj_low=proj.low;patch.proj_expected=proj.exp;patch.proj_high=proj.high;}
+ await livePatchSession(patch);
+ if(patch.checklist_id)await liveLoadChases();
+ if(await liveInsertSlots(rows,{source:'format',format_id:model.id,count:rs.length}))toast('Attached '+model.name+' — '+rs.length+' spots + projection');}
+function liveLoadPlayerPicked(ctx){const id=window['_slCl_'+ctx];if(!id){toast('Pick a checklist');return;}liveLoadByPlayer(id);}
+async function liveLoadByPlayer(checklistId){if(!LIVE.session)return;let facets=[];
+ try{const{data,error}=await sb.rpc('e10_checklist_facet',{p_checklist:checklistId,p_dim:'player'});if(error)throw error;facets=data||[];}catch(e){toast('Generate failed: '+e.message);return;}
+ if(!facets.length){toast('No player values on that checklist');return;}
+ const CAP=40,top=facets.slice(0,CAP),base=LIVE.slots.length;
+ const rows=top.map((f,i)=>({session_id:LIVE.session.id,label:f.label||'(player)',position:base+i,player_id:f.id||null,method:'$1auction'}));
+ rows.push({session_id:LIVE.session.id,label:'Field / remainder',position:base+top.length,method:'$1auction',plan:{remainder:true}});
+ const patch={};if(!LIVE.session.checklist_id)patch.checklist_id=checklistId;if(!LIVE.session.break_type)patch.break_type='player';
+ await livePatchSession(patch);if(patch.checklist_id)await liveLoadChases();
+ if(await liveInsertSlots(rows,{source:'player',count:top.length}))toast('Loaded '+top.length+' player spots + Field'+(facets.length>CAP?(' · '+(facets.length-CAP)+' more fall into Field'):''));}
+function liveQuickAddPicked(ctx){const n=Math.max(1,Math.min(60,+(($('sl_qty_'+ctx)||{}).value)||1));liveQuickAddSpots(n);}
+async function liveQuickAddSpots(n){if(!LIVE.session)return;const base=LIVE.slots.length,rows=[];for(let i=0;i<n;i++)rows.push({session_id:LIVE.session.id,label:'Spot '+(base+i+1),position:base+i});
+ if(await liveInsertSlots(rows,{source:'quickadd',count:n}))toast('Added '+n+' spots');}
 async function liveAssign(id){const sl=LIVE.slots.find(x=>x.id===id);if(!sl)return;
  const label=$('al_'+id)?$('al_'+id).value.trim():sl.label;const handle=$('ah_'+id)?$('ah_'+id).value.trim():sl.buyer_handle;
  const pe=$('pr_'+id),price=pe?(pe.value===''?null:+pe.value||0):(sl.price!=null?sl.price:null);
@@ -2146,8 +2241,9 @@ function liveActiveHTML(){const s=LIVE.session;const dir=liveDirUrl();const over
    ${open.length?`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:4px">Tap <b>Mark sold</b> as each spot closes → pick the winner → enter the hammer.</div>`:''}
    ${open.map((sl)=>liveSpotCard(sl,LIVE.slots.indexOf(sl))).join('')}
    ${sold.length?`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:14px;border-top:1px solid var(--line);padding-top:10px">Sold (${sold.length}) — tap to edit or reopen</div>`+sold.map((sl)=>liveSpotCard(sl,LIVE.slots.indexOf(sl))).join(''):''}
-   ${!LIVE.slots.length?`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:8px">No spots yet — add one below.</div>`:''}
-   <div class="row" style="margin-top:12px;gap:6px"><input id="slotLabel" list="dl_slotchars" placeholder="Add a spot (team / character)" style="flex:2" onkeydown="if(event.key==='Enter')liveAddSlot()"><button class="btn sm" onclick="liveAddSlot()">+ Add spot</button></div><datalist id="dl_slotchars">${pickOpts('characters')}</datalist></div>
+   ${!LIVE.slots.length?`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:8px">No spots yet — load a roster, a format, or a checklist's players below (or add a one-off).</div>`:''}
+   ${slotLoaderHTML('live')}
+   <div class="row" style="margin-top:12px;gap:6px"><input id="slotLabel" list="dl_slotchars" placeholder="Add a one-off spot (team / character)" style="flex:2" onkeydown="if(event.key==='Enter')liveAddSlot()"><button class="btn sm" onclick="liveAddSlot()">+ Add spot</button></div><datalist id="dl_slotchars">${pickOpts('characters')}</datalist></div>
  <details class="card" style="margin-top:12px"><summary style="cursor:pointer;font-weight:600;font-size:14px">OBS overlays + broadcast links (vertical 1080×1920)</summary>
    ${(function(){const cfg=s.overlay_cfg||{};const onCam=overlayUrl+'&layout=oncam',graphics=overlayUrl+'&layout=graphics';return `
    <div class="lab" style="text-transform:none;letter-spacing:0;margin:8px 0 4px">Add each as an OBS <b>Browser</b> source at <b>1080×1920</b> (transparent). Put one layout per scene.</div>
@@ -2182,6 +2278,8 @@ function liveProgressHTML(){const s=LIVE.session;const sold=LIVE.slots.filter(x=
  let h=`<div class="card" style="margin-bottom:12px"><div class="row" style="gap:10px;flex-wrap:wrap">
    <div class="metric" style="flex:1;min-width:120px"><div class="n" style="font-size:22px">${money(actual)}</div><div class="l">Actual hammer · ${nSold}/${N} sold</div></div>`;
  if(hasProj)h+=`<div class="metric" style="flex:1;min-width:150px"><div class="n" style="font-size:15px">${money(low)} / <b>${money(exp)}</b> / ${money(high)}</div><div class="l">Projection L / E / H</div></div>`;
+ const avgT=avgSlotTarget(cost,N);
+ if(avgT>0)h+=`<div class="metric" style="flex:1;min-width:130px"><div class="n" style="font-size:18px;color:var(--red)">${money(avgT)}</div><div class="l">Avg slot target · break-even (${money(cost)} ÷ ${N})</div></div>`;
  if(cost>0)h+=`<div class="metric" style="flex:1;min-width:130px"><div class="n" style="font-size:18px;color:${pc(actual-cost)}">${actual>=cost?'+':''}${money(actual-cost)}</div><div class="l">vs cost ${money(cost)}${actual>0?(' · '+margin.toFixed(0)+'%'):''}</div></div>`;
  h+=`</div>`;
  if(hasProj||cost>0){const clr=hasProj?(actual>=exp?['#0a8a4a','✓ At/above EXPECTED']:(actual>=low?['#b8860b','On track — between LOW and EXPECTED']:['#e8332b','Below LOW so far'])):null;
@@ -2305,12 +2403,14 @@ function liveStartFromFormat(modelId){const model=(S.breaks||[]).find(b=>b.id===
 }
 function liveCancelReview(){REVIEW=null;renderLive();}
 function liveReviewHTML(){const model=(S.breaks||[]).find(b=>b.id===REVIEW.modelId)||{};const proj=computeProjection();
- return `<div class="hero"><div><h1>Review break — pre-flight</h1><div class="sub">Set title, hosts, products &amp; cost. Tweak slots. Then confirm to go live.</div></div><button class="btn x" onclick="liveCancelReview()">Cancel</button></div>
-  <div class="card" style="margin-bottom:12px"><div class="lab" style="text-transform:none;letter-spacing:0;font-size:13px">Format: <b>${esc(model.name||'—')}</b> · ${esc(BK.breakType||'team')} break · <b>${(BK.slots||[]).length}</b> spots · ${(BK.tierBands||[]).length} tiers · projection ${money(proj.low)} / <b>${money(proj.exp)}</b> / ${money(proj.high)}</div></div>
+ const nSlots=(BK.slots||[]).length,brkCost=breakCost(REVIEW.products),avgT=avgSlotTarget(brkCost,nSlots);
+ return `<div class="hero"><div><h1>Review break — pre-flight</h1><div class="sub">Set title, hosts, products &amp; cost. Load or tweak slots. Then confirm to go live.</div></div><button class="btn x" onclick="liveCancelReview()">Cancel</button></div>
+  <div class="card" style="margin-bottom:12px"><div class="lab" style="text-transform:none;letter-spacing:0;font-size:13px">Format: <b>${esc(model.name||'—')}</b> · ${esc(BK.breakType||'team')} break · <b>${nSlots}</b> spots · ${(BK.tierBands||[]).length} tiers · projection ${money(proj.low)} / <b>${money(proj.exp)}</b> / ${money(proj.high)}</div>
+   ${avgT>0?`<div class="lab" style="text-transform:none;letter-spacing:0;font-size:13px;margin-top:4px">Break cost <b>${money(brkCost)}</b> ÷ ${nSlots} spots = <b style="color:var(--red)">${money(avgT)}</b> avg slot target to break even</div>`:''}</div>
   <div class="card" style="margin-bottom:12px"><label>Stream title</label><input id="rvTitle" value="${esc(REVIEW.title)}" oninput="REVIEW.title=this.value" style="font-size:16px;width:100%;max-width:520px"></div>
   <div class="card" style="margin-bottom:12px"><h3 style="font-size:15px">Participants / hosts</h3><div id="partBox">${participantsHTML()}</div></div>
   <div class="card" style="margin-bottom:12px"><div id="prodBox">${productEditorHTML()}</div></div>
-  <div class="card" style="margin-bottom:12px"><h3 style="font-size:15px">Slots — last-minute edits</h3><div id="bkSlots"></div></div>
+  <div class="card" style="margin-bottom:12px"><h3 style="font-size:15px">Slots — load or edit the spot list</h3>${slotLoaderHTML('review')}<div id="bkSlots" style="margin-top:10px"></div></div>
   <div class="row" style="gap:8px;margin-bottom:20px"><button class="btn v" onclick="liveConfirmReview()">✓ Confirm &amp; go live</button><button class="btn" onclick="liveCancelReview()">Cancel</button></div>`;}
 async function liveConfirmReview(){if(!REVIEW)return;if(!canEditScoped())return roGuard();
  const model=(S.breaks||[]).find(b=>b.id===REVIEW.modelId)||{};

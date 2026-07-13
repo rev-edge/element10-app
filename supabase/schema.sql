@@ -331,3 +331,27 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --   bar (overlay_cfg.socials), and brand chevrons framing the cam zone. The bottom ~15% is kept clear for
 --   Whatnot's native bid bar — the ON THE BLOCK spot/price bar and sold flash are suppressed on graphics
 --   (Whatnot shows spot/price/winner; the tiles show sold via dimming). The on-cam layout is untouched.
+
+-- ─────────────────────────────────────────────────────────────
+-- APPLIED (migration e10_teams_league_and_starter_rosters):
+-- Complete the break setup — load the spot list (format / team roster / player / on-the-fly).
+--   e10_teams.league text (nullable) — tags each team's league so "sport → league → load roster" works.
+--     RLS UNCHANGED (already InitPlan-wrapped: read=(select e10_is_org()), insert/update/delete=(select
+--     e10_is_admin())); a nullable column inherits those policies — nothing weakened.
+--   Idempotent starter-roster seed into e10_teams (insert ... where not exists on lower(name), so re-running
+--     is a no-op and never duplicates): 176 teams tagged sport + league — NBA(30), MLB(30), NFL(32),
+--     NHL(32), Premier League(20), Soccer Nations(32). Full city+nickname names keep the unique lower(name)
+--     index collision-free across leagues (e.g. Los Angeles Lakers vs Los Angeles Kings). Logos deferred
+--     (the overlay's monogram fallback renders now). This is permanent product data, not throwaway.
+-- Everything else is client-only (index.html): a shared "Load the spot list" panel on BOTH the pre-flight
+--   REVIEW and the live-board WORKLIST — attach a saved format (seeds slots+tiers+projection), generate by
+--   TEAM (sport→league→e10_teams roster, one slot per team, team_id-linked so the graphics overlay renders
+--   logos/monograms), generate by PLAYER (e10_checklist_facet), or build on the fly (N blank spots; the
+--   free-text one-off add stays). Live-board loaders insert straight into e10_break_slots (default plan={}
+--   on every batch row so a mixed batch can't null-out the NOT-NULL plan column); review loaders populate
+--   the BK slot builder (now renders roster/on-the-fly slots even with no checklist — per-card counts just
+--   stay blank). Once slots exist, the AVERAGE SLOT TARGET (break cost ÷ slot count, break-even) shows on
+--   both surfaces and attaching a format populates proj_low/expected/high. Box-slicing fix (Phase A):
+--   the inventory form captures a Cost basis (per box / per case) + Boxes/case and stores `cost` PER BOX
+--   (case price ÷ boxes/case), so a case-priced product models correctly and the product editor slices to
+--   full case / half / N boxes against the right per-box cost.
