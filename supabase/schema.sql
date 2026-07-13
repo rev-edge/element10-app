@@ -285,3 +285,33 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 -- RLS UNCHANGED / not weakened: both columns inherit the existing e10_break_sessions owner/admin write
 --   + can_read_session read; no new policy, nothing new to InitPlan-wrap. Inventory writes go through the
 --   existing member-writable shared workspace row via cloudCommitShared (read-modify-write).
+
+-- ─────────────────────────────────────────────────────────────
+-- APPLIED (migration e10_roles_permissions_engine):
+-- Roles & permissions engine. ENFORCEMENT IS ADDITIVE — capabilities only RESTRICT; they never loosen
+-- an existing policy, and admin is a hard-wired superuser that cannot be locked out.
+--   e10_role_permissions(role, capability, allowed, updated_at, updated_by) PK(role,capability).
+--     RLS: select = (select e10_is_member()); insert/update/delete = (select e10_is_admin()). InitPlan.
+--   Capabilities (enumerated): MODULES mod.home/mod.schedule/mod.inventory/mod.toolkit/mod.reporting/
+--     mod.settings; ACTIONS act.inventory_edit/act.live_run/act.team_manage/act.lists_edit/
+--     act.reporting_export/act.permissions_config.
+--   e10_has_cap(cap text) — SECURITY DEFINER, search_path=public. Returns (select e10_is_admin()) OR
+--     NOT EXISTS(an explicit allowed=false row for the caller's role+cap). Default-ALLOW: existing
+--     members (no rows) are unaffected; admin ALWAYS true (a deny row for 'admin' is ignored). Row-
+--     independent → wrapped as (select e10_has_cap(...)) in policies = InitPlan (once per statement).
+--   e10_is_member() is UNCHANGED (role in ('member','admin')) so every existing WRITE policy that uses
+--     it (e10_workspace + e10_cards/players/sets/checklists ins/upd/del) keeps its exact original
+--     behavior — capability gates only add AND has_cap, never loosen. e10_is_org() (NEW, = exists any
+--     e10_members row) is used ONLY on READ (SELECT) policies so custom roles (manager/streamer/viewer)
+--     can VIEW; they still cannot WRITE (strict e10_is_member) unless assigned member/admin. [This split
+--     is the applied fix for the security review's finding #1 — see migration e10_permissions_secfix.]
+--   e10_assign_role(p_user,p_role) — admin-only RPC to assign any role string; protects the last admin
+--     with a row-lock on the admin rows before the count (closes a TOCTOU race — review finding #3).
+--   ADDITIVE gates (each = ORIGINAL predicate AND (select e10_has_cap(...)); base branch preserved):
+--     e10_workspace ws_ins/ws_upd — the 'shared' (inventory) branch AND act.inventory_edit.
+--     e10_break_sessions bs_ins/bs_upd — owner/admin AND act.live_run.
+--     e10_break_slots sl_ins/sl_upd/sl_del — e10_owns_session AND act.live_run.
+--   Two-layer enforcement: client hides nav/controls by capability; RLS is the real gate. Verified a
+--   restricted 'viewer' is blocked SERVER-SIDE — inventory write and break-session insert both fail with
+--   "new row violates row-level security policy" — while admin retains full access and members are
+--   unaffected. Team writes stay admin-only RPCs; exports are client-side (act.reporting_export).

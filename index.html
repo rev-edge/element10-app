@@ -217,18 +217,31 @@ const NAV=[
  {k:'toolkit',label:'Live Toolkit',subs:[{k:'live',label:'Live Break',sec:'live'},{k:'repack',label:'Repack',sec:'repack'},{k:'fulfill',label:'Ship',sec:'fulfill'},{k:'copy',label:'Copy Studio',sec:'copy'}]},
  {k:'reporting',label:'Reporting & Analytics',subs:[{k:'overview',label:'Overview',dt:'overview'},{k:'reports',label:'Reports',dt:'reports'},{k:'export',label:'Whatnot Export',dt:'export'}]},
 ];
-const SETTINGS_SUBS=[{k:'team',label:'Team',dt:'team'},{k:'lists',label:'Lists & Settings',dt:'lists'},{k:'perm',label:'Permissions',dt:'team'}];
+const SETTINGS_SUBS=[{k:'team',label:'Team',dt:'team'},{k:'lists',label:'Lists & Settings',dt:'lists'},{k:'perm',label:'Permissions',dt:'perms'}];
+/* ===== Capability engine (client mirror of e10_has_cap; the SERVER is the real gate) =====
+   Module caps drive the top nav; action caps hide in-module controls. Default-ALLOW: a role is
+   unrestricted unless the admin sets allowed=false (stored in e10_role_permissions). Admin = all. */
+const CAPS_MODULE=[['mod.home','Home'],['mod.schedule','Schedule'],['mod.inventory','Inventory'],['mod.toolkit','Live Toolkit'],['mod.reporting','Reporting'],['mod.settings','Settings']];
+const CAPS_ACTION=[['act.inventory_edit','Edit inventory'],['act.live_run','Run / assign live breaks'],['act.team_manage','Manage team'],['act.lists_edit','Edit lists & settings'],['act.reporting_export','Export / reporting'],['act.permissions_config','Configure permissions']];
+const ALL_CAPS=CAPS_MODULE.concat(CAPS_ACTION);
+let ROLE='member';   /* hoisted: the init renderNav() (below) reads it via hasCap before loadAll sets it */
+let DENY=new Set(),ROLE_PERMS=[];
+async function loadCaps(){DENY=new Set();ROLE_PERMS=[];
+ try{if(ROLE==='admin'){ROLE_PERMS=(await sb.from('e10_role_permissions').select('role,capability,allowed')).data||[];return;}
+   const{data}=await sb.from('e10_role_permissions').select('capability,allowed').eq('role',ROLE).eq('allowed',false);
+   (data||[]).forEach(r=>DENY.add(r.capability));}catch(e){}}
+function hasCap(c){return ROLE==='admin'||!DENY.has(c);}
 const SEC2GROUP={home:'home',schedule:'schedule',gen:'schedule',live:'toolkit',repack:'toolkit',fulfill:'toolkit',copy:'toolkit'};
 const DT_INVENTORY=['inventory','checklists','players','modeler'],DT_REPORTING=['overview','reports','export'];
 function groupForDataTab(dt){return DT_INVENTORY.includes(dt)?'inventory':(DT_REPORTING.includes(dt)?'reporting':'settings');}
 function subsFor(g){return g==='settings'?SETTINGS_SUBS:((NAV.find(x=>x.k===g)||{subs:[]}).subs);}
 let GROUP='home',SUB={};
-function renderNav(){const el=$('nav');if(el)el.innerHTML=NAV.map(g=>`<button class="tab ${GROUP===g.k?'on':''}" onclick="goGroup('${g.k}')">${esc(g.label)}</button>`).join('');}
+function renderNav(){const el=$('nav');if(el)el.innerHTML=NAV.filter(g=>hasCap('mod.'+g.k)).map(g=>`<button class="tab ${GROUP===g.k?'on':''}" onclick="goGroup('${g.k}')">${esc(g.label)}</button>`).join('');}
 function renderSubnav(){const box=$('subnav');if(!box)return;const subs=subsFor(GROUP);
  if(!subs||subs.length<2){box.innerHTML='';box.style.display='none';return;}
  box.style.display='flex';const cur=SUB[GROUP]||subs[0].k;
  box.innerHTML=subs.map(s=>`<button class="tab ${cur===s.k?'on':''}" onclick="goSub('${GROUP}','${s.k}')">${esc(s.label)}</button>`).join('');}
-function goGroup(g){const subs=subsFor(g);const cur=SUB[g]||(subs[0]&&subs[0].k);if(cur)goSub(g,cur);}
+function goGroup(g){if(g!=='settings'&&!hasCap('mod.'+g)){toast('Not available for your role');return;}const subs=subsFor(g);const cur=SUB[g]||(subs[0]&&subs[0].k);if(cur)goSub(g,cur);}
 function goSub(g,subKey){const subs=subsFor(g);const sub=subs.find(x=>x.k===subKey)||subs[0];if(!sub)return;GROUP=g;SUB[g]=sub.k;if(sub.dt){dataTab=sub.dt;go('data');}else go(sub.sec);}
 function go(s){document.querySelectorAll('.sec').forEach(x=>x.classList.remove('on'));const el=$('sec-'+s);if(el)el.classList.add('on');window.scrollTo(0,0);
  ({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData,repack:renderRepack,live:renderLive,fulfill:renderFulfill}[s]||renderHome)();
@@ -1308,7 +1321,7 @@ function dataHub(){
  /* Tab bar now lives in the top-level sub-nav; this just renders the active module into #dtc. */
  if(dataTab==='team'&&ROLE!=='admin')dataTab='overview';
  $('sec-data').innerHTML=`<div id="dtc"></div>`;
- ({overview:dOverview,inventory:dInventory,checklists:dChecklists,players:dPlayers,modeler:dModeler,reports:dReports,export:dExport,lists:dLists,team:dTeam}[dataTab]||dOverview)();
+ ({overview:dOverview,inventory:dInventory,checklists:dChecklists,players:dPlayers,modeler:dModeler,reports:dReports,export:dExport,lists:dLists,team:dTeam,perms:dPerms}[dataTab]||dOverview)();
 }
 function invTotals(){let cost=0,val=0,byCat={},qty=0;const view=invView();view.forEach(i=>{const q=+i.qty||1,c=(+i.cost||0)*q,v=(+i.value||0)*q;cost+=c;val+=v;qty+=q;byCat[i.cat]=(byCat[i.cat]||0)+v;});return{cost,val,byCat,qty,cnt:view.length,gain:val-cost};}
 function svgBars(entries){if(!entries.length)return '<div style="color:var(--mut);font-size:13px">No inventory yet.</div>';
@@ -1374,8 +1387,8 @@ const invGridCfg={sk:'e10_inv',cols:INV_COLS,defaultCols:INV_DEFAULT_COLS,defaul
    const s=gLoad('e10_invSort',null);if(s&&s.col)G.state.sort=s;}}
 };
 const INVG=makeGrid('inv',invGridCfg);
-function dInventory(){const admin=ROLE==='admin';const rl=invRollup();const sets=[...new Set(S.inventory.map(i=>i.set).filter(Boolean))].sort();const years=[...new Set(S.inventory.map(i=>i.year).filter(Boolean))].sort();
- let h=`<div class="card"><h3 style="font-size:15px">Add inventory</h3>
+function dInventory(){const admin=ROLE==='admin';const canEdit=hasCap('act.inventory_edit');const rl=invRollup();const sets=[...new Set(S.inventory.map(i=>i.set).filter(Boolean))].sort();const years=[...new Set(S.inventory.map(i=>i.year).filter(Boolean))].sort();
+ let h=canEdit?`<div class="card"><h3 style="font-size:15px">Add inventory</h3>
    <div style="margin-top:10px;position:relative">
      <label>🔎 Find a card in your library <span class="lab" style="text-transform:none;letter-spacing:0">— autofills &amp; links this item to the card</span></label>
      <input id="ivCardSearch" placeholder="type a player, card, or set… e.g. Messi, Prizm Silver, Charizard" autocomplete="off" oninput="invCardSearch(this.value)" onfocus="invCardSearch(this.value)">
@@ -1398,7 +1411,7 @@ function dInventory(){const admin=ROLE==='admin';const rl=invRollup();const sets
    <div><label>Condition</label>${pickInput({id:'ivG',list:'conditions',value:'',placeholder:'NM / LP / Sealed'})}</div>
    <div><label>Image</label><div class="row" style="gap:6px"><input id="ivImg" placeholder="URL or upload" style="min-width:0"><button class="btn sm" onclick="invUploadImg()">⬆</button></div><img id="ivImgPv" style="display:none;height:40px;border-radius:5px;margin-top:4px;border:1px solid var(--line)"></div>
    <div><label>Owner</label><select id="ivOwner">${ownerOpts(ME)}</select></div></div>
-   <div class="row" style="margin-top:12px"><button class="btn v" onclick="addInv()">+ Add item</button><button class="btn sm" onclick="downloadInvTemplate()">↓ CSV template</button><button class="btn sm" onclick="$('ivCSV').click()">Import CSV</button><input id="ivCSV" type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="importInv(this)"></div></div>`;
+   <div class="row" style="margin-top:12px"><button class="btn v" onclick="addInv()">+ Add item</button><button class="btn sm" onclick="downloadInvTemplate()">↓ CSV template</button><button class="btn sm" onclick="$('ivCSV').click()">Import CSV</button><input id="ivCSV" type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="importInv(this)"></div></div>`:`<div class="card"><div class="lab" style="text-transform:none;letter-spacing:0">➕ Adding &amp; importing inventory is restricted for your role.</div></div>`;
  h+=`<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:16px">
    <div class="metric"><div class="n">${money(rl.cost)}</div><div class="l">Capital deployed</div></div>
    <div class="metric"><div class="n">${money(rl.market)}</div><div class="l">Market value · <span style="color:${rl.gain>=0?'#0a8a4a':'var(--red)'}">${rl.gain>=0?'+':''}${money(rl.gain)}</span></div></div>
@@ -1658,7 +1671,8 @@ function dReports(){const t=invTotals();const cat=Object.entries(t.byCat).sort((
  $('dtc').innerHTML=h;}
 function csvDL(name,rows){const csv=rows.map(r=>r.map(c=>`"${(''+(c==null?'':c)).replace(/"/g,'""')}"`).join(',')).join('\n');const b=new Blob([csv],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name;a.click();}
 function exportReport(){const rows=[['Name','Category','Set','Qty','Unit cost','Unit value','Line value','Line gain','Condition']];invView().forEach(i=>{const q=+i.qty||1;rows.push([i.name,i.cat,i.set,q,i.cost,i.value,(+i.value||0)*q,((+i.value||0)-(+i.cost||0))*q,i.cond]);});csvDL('element10_inventory_report.csv',rows);toast('Report downloaded');}
-function dExport(){let h=`<div class="card"><h3 style="font-size:15px">Export to Whatnot</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">Maps your inventory to Whatnot's bulk-import columns. Paste into their official region template for the real upload.</div>
+function dExport(){if(!hasCap('act.reporting_export')){$('dtc').innerHTML='<div class="card"><div class="lab" style="text-transform:none;letter-spacing:0">Export / reporting is restricted for your role.</div></div>';return;}
+ let h=`<div class="card"><h3 style="font-size:15px">Export to Whatnot</h3><div class="sub" style="color:var(--mut);font-size:12.5px;margin:4px 0 10px">Maps your inventory to Whatnot's bulk-import columns. Paste into their official region template for the real upload.</div>
   <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
    <div><label>Include categories</label><select id="exCat" onchange="updateExCount()"><option value="all">All</option><option value="Raw card">Raw cards</option><option value="Slab">Slabs</option><option value="ETB / Sealed">Sealed</option><option value="Box">Boxes</option></select></div>
    <div><label>Listing type</label><select id="exType"><option>Auction</option><option>Buy It Now</option><option>Giveaway</option></select></div>
@@ -1720,6 +1734,35 @@ async function setTeamRole(uid,role){if(!confirm('Set this member’s role to '+
   await refreshMembers();dTeam();renderScopebar();toast('Role updated');
  }catch(e){toast(e.message||'Failed');}
 }
+/* ===== Settings → Permissions: capability matrix (roles × caps) + role assignment ===== */
+let _uiRoles=new Set();
+function permRoles(){const s=new Set(['admin','member']);MEMBERS.forEach(m=>{if(m.role)s.add(m.role);});(ROLE_PERMS||[]).forEach(r=>s.add(r.role));_uiRoles.forEach(r=>s.add(r));return [...s];}
+function permDenied(role,cap){return (ROLE_PERMS||[]).some(r=>r.role===role&&r.capability===cap&&r.allowed===false);}
+function dPerms(){
+ if(ROLE!=='admin'){$('dtc').innerHTML='<div class="card" style="color:var(--mut)">Admin only — permissions are configured by admins.</div>';return;}
+ const roles=permRoles();
+ const capRow=(cap,label)=>`<tr><td style="text-align:left"><b>${esc(label)}</b> <span class="lab" style="text-transform:none;letter-spacing:0">${esc(cap)}</span></td>${roles.map(role=>{const lock=(role==='admin');const on=lock||!permDenied(role,cap);return `<td style="text-align:center"><input type="checkbox" ${on?'checked':''} ${lock?'disabled':''} onchange="permToggle('${role}','${esc(cap)}',this.checked)"></td>`;}).join('')}</tr>`;
+ let h=`<div class="card"><div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="font-size:15px">Roles &amp; permissions</h3><div class="row" style="gap:6px"><input id="permNewRole" placeholder="new role (e.g. viewer)" style="max-width:180px" onkeydown="if(event.key==='Enter')permAddRole()"><button class="btn sm" onclick="permAddRole()">+ Role</button></div></div>
+   <div class="lab" style="text-transform:none;letter-spacing:0;margin-top:4px">Uncheck to <b>restrict</b> a role — default is full access; admin is always full and can't be reduced. Enforced server-side (RLS), not just in the UI.</div>
+   <div class="egrid" style="margin-top:10px;overflow:auto"><table><tr><th style="text-align:left">Capability</th>${roles.map(r=>`<th>${esc(r)}${r==='admin'?' 🔒':''}</th>`).join('')}</tr>
+   <tr><td colspan="${roles.length+1}" class="lab" style="text-transform:none;letter-spacing:0;padding-top:10px"><b>Module access</b></td></tr>
+   ${CAPS_MODULE.map(c=>capRow(c[0],c[1])).join('')}
+   <tr><td colspan="${roles.length+1}" class="lab" style="text-transform:none;letter-spacing:0;padding-top:10px"><b>Actions</b></td></tr>
+   ${CAPS_ACTION.map(c=>capRow(c[0],c[1])).join('')}
+   </table></div></div>`;
+ h+=`<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Assign roles to users</h3>
+   <div class="egrid" style="margin-top:10px"><table><tr><th>Member</th><th>Role</th><th></th></tr>
+   ${MEMBERS.slice().sort((a,b)=>(a.role===b.role?0:(a.role==='admin'?-1:1))).map(m=>`<tr><td>${esc(m.display_name||m.email||m.user_id)}${m.user_id===MEID?' <span class="lab">(you)</span>':''}</td><td><select id="pr_${m.user_id}" ${m.user_id===MEID?'disabled':''}>${roles.map(r=>`<option ${m.role===r?'selected':''}>${esc(r)}</option>`).join('')}</select></td><td style="text-align:right">${m.user_id===MEID?'<span class="lab">you</span>':`<button class="btn sm" onclick="permAssign('${m.user_id}')">Apply</button>`}</td></tr>`).join('')}
+   </table></div><div class="lab" style="margin-top:8px;text-transform:none;letter-spacing:0">Assigning a role updates the member (admin-only, last-admin protected); the role's capabilities come from the matrix above.</div></div>`;
+ $('dtc').innerHTML=h;
+}
+function permAddRole(){const el=$('permNewRole');const v=el?el.value.trim():'';if(!v)return;if(v==='admin'){toast('Admin is built-in (superuser)');return;}_uiRoles.add(v);if(el)el.value='';dPerms();}
+async function permToggle(role,cap,allowed){if(role==='admin')return;
+ try{const{error}=await sb.from('e10_role_permissions').upsert({role,capability:cap,allowed,updated_at:new Date().toISOString()},{onConflict:'role,capability'});if(error){toast(error.message);return;}}catch(e){toast(e.message);return;}
+ await loadCaps();dPerms();toast((allowed?'Granted ':'Restricted ')+cap+' · '+role);}
+async function permAssign(uid){const sel=$('pr_'+uid);const role=sel?sel.value:'';if(!role)return;
+ try{const{error}=await sb.rpc('e10_assign_role',{p_user:uid,p_role:role});if(error){toast(error.message);return;}}catch(e){toast(e.message);return;}
+ await refreshMembers();await loadCaps();dPerms();renderScopebar();toast('Role assigned: '+role);}
 
 /* ---------- REPACK STUDIO ---------- */
 let REPEDIT=null;
@@ -1789,7 +1832,7 @@ function invUploadImg(){pickImage(url=>{const el=$('ivImg');if(el)el.value=url;c
 /* ===== Element 10 cloud: multi-tenant (shared + universal + personal) + auth + realtime ===== */
 const SB_URL='https://ddhkkumiyidorzmajwde.supabase.co';
 const SB_KEY='sb_publishable_wRoaFNiqpZJaEJkQvLpnUw_7bpcXllv';
-let sb=null,ME=null,MEID=null,ROLE='member',_st=null,_applyingRemote=false;
+let sb=null,ME=null,MEID=null,_st=null,_applyingRemote=false;
 let SHARED={},SCOPED={},SCOPED_ID='',REVS={},MEMBERS=[];
 let SCOPE=localStorage.getItem('e10_scope')||'mine';         // 'mine' | 'universal' | '<uid>'
 let invFilter=localStorage.getItem('e10_invfilter')||'mine'; // 'mine' | 'all'
@@ -1913,6 +1956,7 @@ async function loadAll(){
  try{await sb.from('e10_members').upsert({user_id:MEID,email:ME},{onConflict:'user_id',ignoreDuplicates:true});}catch(e){}
  try{const me=await sb.from('e10_members').select('role').eq('user_id',MEID).maybeSingle();ROLE=(me.data&&me.data.role)||'member';}catch(e){ROLE='member';}
  try{const mem=await sb.from('e10_members').select('user_id,email,display_name,role');MEMBERS=mem.data||[];}catch(e){MEMBERS=[];}
+ await loadCaps();renderNav();renderSubnav();
  const sh=await fetchRow('shared');REVS['shared']=sh?(sh.rev||0):0;SHARED=sh&&sh.data&&Object.keys(sh.data).length?splitLegacy(sh.data).sh:blankShared();normShared(SHARED);
  if(!sh||!sh.data||!Object.keys(sh.data).length)await writeRow('shared',null,SHARED);
  if(SCOPE!=='mine'&&SCOPE!=='universal'&&ROLE!=='admin')SCOPE='mine';
