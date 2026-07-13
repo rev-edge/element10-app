@@ -1085,7 +1085,8 @@ function clStageDirect(headers,rows,name){
  clStage(applied.cards,{name:name,set:applied.setName||clDeriveSet(applied.cards),summary:applied.summary,flags:applied.flags,unmapped:applied.unmapped,confidence:'high',notes:'Direct import — matched template headers.',mode:'direct'});}
 function clStage(cards,meta){
  cards.forEach(c=>{c.value=(c.value===''||c.value==null)?'':(+c.value||0);c.chase=!!c.chase;c.cardType=c.cardType||'base';c.parallel=c.parallel||'';});
- PENDING_CL={id:'__pending__',name:meta.name||'Imported checklist',set:meta.set||clDeriveSet(cards),cards,columns:[],_pending:true,_meta:meta,_resolve:!/pok[eé]mon|magic|mtg|lorcana|yu-?gi/i.test((meta.name||'')+' '+(meta.set||''))};
+ const _nm=(meta.name||'')+' '+(meta.set||'');
+ PENDING_CL={id:'__pending__',name:meta.name||'Imported checklist',set:meta.set||clDeriveSet(cards),cards,columns:[],_pending:true,_meta:meta,sport:inferSport(_nm)||'',league:'',_resolve:!/pok[eé]mon|magic|mtg|lorcana|yu-?gi/i.test(_nm)};
  clReviewMode=true;clOpenId=null;if(GRIDS['cl:__review__'])delete GRIDS['cl:__review__'];makeGrid('cl:__review__',clReviewGridCfg());renderChecklistReview();}
 function clReviewGridCfg(){return {sk:'e10_clrev',cols:CL_COLS,defaultCols:['num','name','parallel','cardType','rarity','value','chase','actions'],defaultSort:{col:'name',dir:1},colFilters:true,
  defaultFilters:{search:''},listBoxId:'clRevListBox',colsMenuId:'clRevColsMenu',viewPrompt:'Name this view',
@@ -1105,7 +1106,7 @@ function renderChecklistReview(){const cl=PENDING_CL;if(!cl){clReviewMode=false;
    <div class="lab" style="text-transform:none;letter-spacing:0;margin-top:8px;font-size:12.5px"><b>${cds.length}</b> cards · ${nBase} base · ${nPar} parallel · ${nIns} insert.${m.summary?` <b>Mapped:</b> ${esc(m.summary)}.`:''}${m.notes?` <span style="color:var(--mut)">${esc(m.notes)}</span>`:''}</div>
    ${(m.unmapped&&m.unmapped.length)?`<div class="lab" style="text-transform:none;letter-spacing:0;margin-top:4px;color:var(--mut)">Unmapped columns kept in “extra”: ${m.unmapped.map(esc).join(', ')}.</div>`:''}
    ${(m.flags&&m.flags.length)?`<div class="out" style="margin-top:8px">⚠ ${m.flags.length} row(s) to check: ${m.flags.slice(0,6).map(f=>'row '+f.row+' — '+esc(f.msg)).join('; ')}${m.flags.length>6?' …':''}</div>`:''}
-   <div class="row" style="margin-top:12px;gap:8px;align-items:center;flex-wrap:wrap"><span class="lab">Name</span><input value="${esc(cl.name||'')}" style="max-width:240px" oninput="PENDING_CL.name=this.value"><span class="lab">Set</span><div style="min-width:180px;max-width:230px">${entityPicker('clSet',{icon:'🗂',server:true,minChars:2,freeText:true,placeholder:'search sets…',value:cl.set?{id:(cl.setId||null),label:cl.set}:null,search:dbSetSearch,onpick:(sid,label)=>{PENDING_CL.set=label;PENDING_CL.setId=sid;},onclear:()=>{PENDING_CL.set='';PENDING_CL.setId=null;}})}</div><label style="display:flex;align-items:center;gap:5px;margin:0"><input type="checkbox" style="width:auto" ${cl._resolve!==false?'checked':''} onchange="PENDING_CL._resolve=this.checked"> <span class="lab">Resolve player entities (sports)</span></label></div>
+   <div class="row" style="margin-top:12px;gap:8px;align-items:center;flex-wrap:wrap"><span class="lab">Name</span><input value="${esc(cl.name||'')}" style="max-width:240px" oninput="PENDING_CL.name=this.value"><span class="lab">Set</span><div style="min-width:180px;max-width:230px">${entityPicker('clSet',{icon:'🗂',server:true,minChars:2,freeText:true,placeholder:'search sets…',value:cl.set?{id:(cl.setId||null),label:cl.set}:null,search:dbSetSearch,onpick:(sid,label)=>{PENDING_CL.set=label;PENDING_CL.setId=sid;},onclear:()=>{PENDING_CL.set='';PENDING_CL.setId=null;}})}</div><span class="lab">Sport</span><input list="dl_impsport" value="${esc(cl.sport||'')}" placeholder="unknown" style="max-width:150px" oninput="PENDING_CL.sport=this.value"><span class="lab">League</span><input value="${esc(cl.league||'')}" style="max-width:130px" oninput="PENDING_CL.league=this.value"><datalist id="dl_impsport"><option value="Baseball"></option><option value="Basketball"></option><option value="Soccer"></option><option value="Football"></option><option value="Hockey"></option><option value="Pokémon"></option></datalist><label style="display:flex;align-items:center;gap:5px;margin:0"><input type="checkbox" style="width:auto" ${cl._resolve!==false?'checked':''} onchange="PENDING_CL._resolve=this.checked"> <span class="lab">Resolve players</span></label></div>
    ${(S.chaseLists&&S.chaseLists.length)?`<div class="out" style="margin-top:10px;padding:8px 10px"><div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><span class="lab" style="text-transform:none;letter-spacing:0">Apply a chase list to this import?</span><select id="clRevChase" style="font-size:12px;max-width:240px">${S.chaseLists.map(l=>`<option value="${l.id}" ${chaseListSuggested(l,cl)?'selected':''}>${esc(l.name)}${[l.sport,l.league].filter(Boolean).length?(' · '+[l.sport,l.league].filter(Boolean).join('/')):''} (${(l.players||[]).length})</option>`).join('')}</select><button class="btn sm" onclick="clApplyChaseListToImport()">Apply to import</button></div></div>`:''}
    <div class="etool" style="margin-top:12px">
      <div style="flex:2;min-width:160px"><label>Search</label><input value="${esc(F.search||'')}" placeholder="name / # / parallel" oninput="clRevSet('search',this.value)"></div>
@@ -1358,6 +1359,17 @@ function tmAddLeague(){if(ROLE!=='admin'){toast('Admin only');return;}
 function tmAddLeagueGo(){const sport=($('tmlSport').value||'').trim(),league=($('tmlLeague').value||'').trim();if(!sport&&!league){toast('Enter a sport and/or league');return;}
  TM.pending={sport,league};TM.search='';TM.sport=sport||'Other';TM.league=league||'(no league)';closeM();tmLoadDir().then(()=>{tmRender();tmAdd(sport,league);});}
 /* ---------- Import commit → tables (chunked) + player resolution ---------- */
+/* Pre-fill the import Sport selector from the product / set name, only on an unambiguous
+   signal; anything else returns null so the reviewer picks and unknown stays NULL. Replaces
+   the old bug where any sports-product name hardcoded every new player to 'Soccer'. */
+function inferSport(text){const t=(text||'').toLowerCase();
+ if(/pok[eé]mon|\bpokemon\b|\b151\b|scarlet|violet|paldea/.test(t))return 'Pokémon';
+ if(/world cup|\bfifa\b|\bsoccer\b|\bla ?liga\b|premier league|\buefa\b|champions league|\bepl\b/.test(t))return 'Soccer';
+ if(/\bbaseball\b|\bmlb\b/.test(t))return 'Baseball';
+ if(/\bbasketball\b|\bnba\b|\bwnba\b/.test(t))return 'Basketball';
+ if(/\bhockey\b|\bnhl\b/.test(t))return 'Hockey';
+ if(/\bfootball\b|\bnfl\b/.test(t))return 'Football';
+ return null;}
 async function dbEnsureSet(name,sport){name=(name||'').trim();if(!name)return null;try{
  const{data:ex}=await sb.from('e10_sets').select('id').ilike('name',name).limit(1);if(ex&&ex.length)return ex[0].id;
  const yr=(name.match(/\d{4}/)||[null])[0];const{data,error}=await sb.from('e10_sets').insert({name,year:yr?+yr:null,sport:sport||null}).select('id').single();if(error)throw error;return data.id;
@@ -1388,10 +1400,14 @@ async function commitImport(cl,setId,linkMap){toast('Committing '+cl.cards.lengt
  if(cl._resolve!==false){
    // create new players for names not linked, in bulk
    const nn=s=>(s||'').trim().toLowerCase();const linked=Object.assign({},linkMap);const need=[...new Set(cl.cards.map(c=>(c.name||'').trim()).filter(n=>n&&!(nn(n) in linked)))];
-   const sport=(/soccer|nfl|nba|mlb|sport|prizm|topps|panini|football|basketball|baseball|world cup/i.test((cl.name||'')+' '+(cl.set||'')))?'Soccer':null;
+   /* Sport: the reviewer's per-import choice wins; else infer from the name; else NULL (unknown).
+      Never a blind 'Soccer' default. Only NEW players are stamped (ignoreDuplicates), so existing
+      players keep their sport. League, when given, rides along in attrs on the new rows only. */
+   const sport=((cl.sport||'').trim())||inferSport((cl.name||'')+' '+(cl.set||''))||null;
+   const league=(cl.league||'').trim();
    /* ON CONFLICT (name_norm) DO NOTHING → a case/whitespace-variant of an existing player skips that row
       only, never rolling back the batch (was: one collision dropped up to 200 players silently). */
-   for(let i=0;i<need.length;i+=200){const batch=need.slice(i,i+200).map(nm=>({name:nm,sport:sport}));try{const{error}=await sb.from('e10_players').upsert(batch,{onConflict:'name_norm',ignoreDuplicates:true});if(error)throw error;}catch(e){}}
+   for(let i=0;i<need.length;i+=200){const batch=need.slice(i,i+200).map(nm=>league?({name:nm,sport:sport,attrs:{league:league}}):({name:nm,sport:sport}));try{const{error}=await sb.from('e10_players').upsert(batch,{onConflict:'name_norm',ignoreDuplicates:true});if(error)throw error;}catch(e){}}
    for(let i=0;i<need.length;i+=150){const b=need.slice(i,i+150).map(nn);try{const{data}=await sb.from('e10_players').select('id,name_norm').in('name_norm',b);(data||[]).forEach(p=>linked[p.name_norm]=p.id);}catch(e){}}
    cl.cards.forEach(c=>{c.player_id=linked[nn(c.name)]||null;});
  } else cl.cards.forEach(c=>{c.player_id=null;});
