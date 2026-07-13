@@ -385,3 +385,18 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --     league view has an inline paste field + ⬆ upload so a whole league can be knocked out in one sitting.
 --     No web auto-fetch (licensing / external dependency — out of scope). The graphics overlay team board
 --     already renders logo_url, so a set logo shows on-air immediately (verified).
+
+-- ─────────────────────────────────────────────────────────────
+-- CLIENT-ONLY (no schema change): inventory in-place edit + bounded UX polish sweep.
+--   Inventory edit: invEdit/invEditSave — an Edit action on every item opens the same cost-basis-aware
+--     fields as the add form (name, category, set, cost basis per box/per case + boxes/case + per-box hint,
+--     qty, market, grading-co/grade/card#/year/parallel/condition, owner, image upload/URL). Saves in place
+--     (no delete-and-re-add), recomputes rollups, and lets legacy items (e.g. a $12,000/box case) be
+--     corrected to the right per-box cost — which then flows into live-break slices. Inline validation
+--     (name required; cost/qty/market ≥ 0; boxes/case ≥ 1) with a visible error line; delete now confirms.
+--   Polish sweep (small/additive/reversible): destructive confirms added to delInv, liveDelSlot (warns if
+--     the spot is SOLD), delShow/delShowById, delBreak/delBreakById, delCopy, prodRemove; success/error
+--     toasts on those + addInv + addTodo; liveDelSlot now surfaces DB errors instead of an empty catch.
+--     Enter-to-submit on the inventory add name, reserve-units, show-reserve qty, and the break planner
+--     product/chase/auction add-rows. Empty-state "None yet." fallbacks on the break planner
+--     product/chase/auction/inventory panels. Currency stays money()-formatted app-wide (audited).

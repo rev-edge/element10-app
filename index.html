@@ -330,7 +330,7 @@ function showBreakBoxHTML(s,id,ro){const eco=s.breakModel&&s.breakModel.economic
  return s.breakModel?`<div class="out"><div class="row" style="justify-content:space-between"><span class="lab">${esc(s.breakModel.name)} · ${s.breakModel.slots} slots · ${s.breakModel.tiers} tiers</span>${ro?'':`<button class="btn x" onclick="showDetach('${id}','breakModel')">detach</button>`}</div>${eco?`<div style="font-size:12.5px;margin-top:6px">Exp. gross ${money(eco.grossAvg)} · proj. profit ${money(eco.profit)} · cost ${money(eco.cost)} · card value ${money(eco.totVal)}</div>`:''}${(s.inventoryAlloc&&s.inventoryAlloc.length)?`<div style="margin-top:6px"><span class="lab">Inventory allocation</span>${s.inventoryAlloc.map(a=>`<div style="font-size:12.5px;padding:1px 0">📦 ${esc(a.name)} · cost ${money(a.cost)} · val ${money(a.value)}</div>`).join('')}</div>`:''}${ro?'':`<div class="row" style="margin-top:8px"><button class="btn v sm" onclick="showStartLive('${id}')">▶ Start Live Break for this show</button></div>`}</div>`
    :`<div class="lab">No break model attached.</div>${ro?'':`<div class="row" style="margin-top:6px"><select onchange="showPickBreak('${id}',this.value)" style="flex:2"><option value="">— attach a saved break model —</option>${(S.breaks||[]).map(b=>`<option value="${b.id}">${esc(b.name)} · ${b.slots} slots</option>`).join('')}</select><button class="btn sm" onclick="closeM();openModeler()">Build ↗</button></div><div class="row" style="margin-top:6px"><button class="btn sm" onclick="showStartLive('${id}')">▶ Start Live Break (no model)</button></div>`}`;}
 function showResBoxHTML(s,id,ro){const reslist=[];S.inventory.forEach(it=>{(it.reservations||[]).forEach(x=>{if(x.showId===s.id)reslist.push({itemId:it.id,name:it.name,qty:x.qty,streamerUid:x.streamerUid});});});
- return `${reslist.length?reslist.map(o=>`<div style="font-size:12.5px;padding:2px 0">📦 ${esc(o.name)} ×${o.qty}${ro?'':((ROLE==='admin'||o.streamerUid===MEID)?` <a onclick="releaseReservation('${o.itemId}','${s.id}','${o.streamerUid}').then(()=>showRerender('${id}'))" style="color:var(--red)">release</a>`:'')}</div>`).join(''):'<div class="lab">No inventory reserved to this show.</div>'}${ro?'':`<div class="row" style="margin-top:6px;align-items:flex-start"><div style="flex:2;min-width:0">${entityPicker('srInv',{icon:'📦',placeholder:'search an available item…',search:q=>{const ql=(q||'').toLowerCase();return (S.inventory||[]).filter(i=>invAvailable(i)>0&&(i.name||'').toLowerCase().includes(ql)).slice(0,24).map(i=>({id:i.id,label:i.name,sub:[invAvailable(i)+' free',i.cat].filter(Boolean).join(' · ')}));},onpick:(iid,label)=>{window._srPick={id:iid,label};}})}</div><input id="srQty" type="number" value="1" min="1" style="width:64px"><button class="btn sm" onclick="showAddReserve('${id}')">Reserve</button></div>`}`;}
+ return `${reslist.length?reslist.map(o=>`<div style="font-size:12.5px;padding:2px 0">📦 ${esc(o.name)} ×${o.qty}${ro?'':((ROLE==='admin'||o.streamerUid===MEID)?` <a onclick="releaseReservation('${o.itemId}','${s.id}','${o.streamerUid}').then(()=>showRerender('${id}'))" style="color:var(--red)">release</a>`:'')}</div>`).join(''):'<div class="lab">No inventory reserved to this show.</div>'}${ro?'':`<div class="row" style="margin-top:6px;align-items:flex-start"><div style="flex:2;min-width:0">${entityPicker('srInv',{icon:'📦',placeholder:'search an available item…',search:q=>{const ql=(q||'').toLowerCase();return (S.inventory||[]).filter(i=>invAvailable(i)>0&&(i.name||'').toLowerCase().includes(ql)).slice(0,24).map(i=>({id:i.id,label:i.name,sub:[invAvailable(i)+' free',i.cat].filter(Boolean).join(' · ')}));},onpick:(iid,label)=>{window._srPick={id:iid,label};}})}</div><input id="srQty" type="number" value="1" min="1" style="width:64px" onkeydown="if(event.key==='Enter')showAddReserve('${id}')"><button class="btn sm" onclick="showAddReserve('${id}')">Reserve</button></div>`}`;}
 function showCopyBoxHTML(s,id,ro){return s.titleSet?`<div class="out"><div class="row" style="justify-content:space-between"><span class="lab">${esc(s.titleSet.name)} · ${esc(s.titleSet.type)}</span>${ro?'':`<button class="btn x" onclick="showDetach('${id}','titleSet')">detach</button>`}</div><div style="margin-top:6px">${(s.titleSet.items||[]).map(it=>`<div style="font-size:12.5px;padding:2px 0"><span class="lab">${esc(it[0])}</span> ${esc(it[1])}</div>`).join('')}</div></div>`
    :`<div class="lab">No copy attached.</div>${ro?'':`<div class="row" style="margin-top:6px"><select onchange="showPickCopy('${id}',this.value)" style="flex:2"><option value="">— attach a saved copy set —</option>${(S.copySets||[]).map(c=>`<option value="${c.id}">${esc(c.name)} · ${esc(c.type)}</option>`).join('')}</select><button class="btn sm" onclick="go('copy')">Generate ↗</button></div>`}`;}
 function showRepackBoxHTML(s,id,ro){return s.repackRef?`<div class="out"><div class="row" style="justify-content:space-between"><span>🎁 ${esc(s.repackRef.name)}</span>${ro?'':`<button class="btn x" onclick="showDetach('${id}','repackRef')">detach</button>`}</div></div>`
@@ -353,7 +353,7 @@ function saveShowDetail(id){if(!canEditScoped())return roGuard();const r=showByI
  const nk=$('mday').value+'|'+$('mdp').value;
  if(nk!==r.k){S.shows[r.k].splice(r.i,1);if(!S.shows[r.k].length)delete S.shows[r.k];(S.shows[nk]=S.shows[nk]||[]).push(s);}
  save();closeM();rerenderSchedule();toast('Show saved');}
-function delShowById(id){if(!canEditScoped())return roGuard();const r=showById(id);if(!r)return;S.shows[r.k].splice(r.i,1);if(!S.shows[r.k].length)delete S.shows[r.k];save();closeM();rerenderSchedule();}
+function delShowById(id){if(!canEditScoped())return roGuard();const r=showById(id);if(!r)return;if(!confirm('Delete show “'+((r.s&&r.s.name)||'Untitled')+'”? This cannot be undone.'))return;S.shows[r.k].splice(r.i,1);if(!S.shows[r.k].length)delete S.shows[r.k];save();closeM();rerenderSchedule();toast('Show deleted');}
 function showPickCopy(id,setId){if(!setId)return;if(!canEditScoped())return roGuard();const cs=(S.copySets||[]).find(x=>x.id===setId);const r=showById(id);if(!cs||!r)return;r.s.titleSet=JSON.parse(JSON.stringify(cs));r.s.titleSetId=cs.id;save();showRerender(id);toast('Copy attached');}
 async function showPickBreak(id,bid){if(!bid)return;if(!canEditScoped())return roGuard();const b=(S.breaks||[]).find(x=>x.id===bid);const r=showById(id);if(!b||!r)return;r.s.breakModel=JSON.parse(JSON.stringify(b));r.s.breakModelId=b.id;r.s.inventoryAlloc=(b.invItems||[]).map(x=>({itemId:x.itemId,name:x.name,qty:x.qty,cost:x.cost,value:x.value,set:x.set}));save();const res=await reserveModelToShow(r.s,b);showRerender(id);toast((res&&res.msg)||'Break model attached');}
 /* Attaching a model to a show converts its inventory pulls into hard reservations (and detach releases them). */
@@ -385,7 +385,7 @@ async function showAddReserve(id){const r=showById(id);if(!r)return;const p=wind
 function showAddNeed(id){if(!canEditScoped())return roGuard();const r=showById(id);if(!r)return;const set=$('ndSet')?$('ndSet').value:'';if(!set){toast('Pick a set');return;}const qty=Math.max(1,$('ndQty')?+$('ndQty').value:1);const cost=$('ndCost')?+$('ndCost').value:0;(r.s.needs=r.s.needs||[]).push({id:'nd'+Date.now(),set,qty,approxCost:cost||0});save();showRerender(id);toast('Need added');}
 function showDelNeed(id,ni){if(!canEditScoped())return roGuard();const r=showById(id);if(!r||!r.s.needs)return;r.s.needs.splice(ni,1);save();showRerender(id);}
 function showStartLive(id){const r=showById(id);if(!r)return;BUILDER=null;LIVE_SEED={show:r.s.name,model:r.s.breakModel||null};closeM();go('live');}
-function delShow(k,i){if(!canEditScoped())return roGuard();S.shows[k].splice(i,1);if(!S.shows[k].length)delete S.shows[k];save();closeM();rerenderSchedule();}
+function delShow(k,i){if(!canEditScoped())return roGuard();const sh=(S.shows[k]||[])[i];if(!confirm('Delete show “'+((sh&&sh.name)||'Untitled')+'”? This cannot be undone.'))return;S.shows[k].splice(i,1);if(!S.shows[k].length)delete S.shows[k];save();closeM();rerenderSchedule();toast('Show deleted');}
 function closeM(){$('ov').style.display='none';}
 
 /* ---------- HOME ---------- */
@@ -415,7 +415,7 @@ function renderHome(){
 }
 function acc(title,body,open){return `<div class="acc ${open?'open':''}"><div class="h" onclick="this.parentElement.classList.toggle('open')">${title}<span class="chev">▸</span></div><div class="b">${body}</div></div>`;}
 function todoHTML(){return S.todos.map((t,i)=>`<div class="todo ${t.done?'done':''}" draggable="true" ondragstart="tdDrag(${i})" ondragover="event.preventDefault()" ondragenter="this.classList.add('dover')" ondragleave="this.classList.remove('dover')" ondrop="this.classList.remove('dover');tdDrop(${i})"><span class="grip">↕</span><input type="checkbox" ${t.done?'checked':''} onchange="tdTog('${t.id}')"><span class="t" onclick="openTodo('${t.id}')">${esc(t.text)}</span>${t.comments.length?`<span class="badge">💬 ${t.comments.length}</span>`:''}${t.desc?`<span class="badge">📝</span>`:''}<button class="btn x" onclick="tdDel('${t.id}')">✕</button></div>`).join('')||'<div style="color:var(--mut)">Nothing yet.</div>';}
-function addTodo(){const v=$('todoin').value.trim();if(!v)return;S.todos.push({id:'t'+Date.now(),text:v,done:false,desc:'',comments:[]});save();$('todos').innerHTML=todoHTML();$('todoin').value='';}
+function addTodo(){const v=$('todoin').value.trim();if(!v)return;S.todos.push({id:'t'+Date.now(),text:v,done:false,desc:'',comments:[]});save();$('todos').innerHTML=todoHTML();$('todoin').value='';toast('Task added');}
 function tdTog(id){const t=S.todos.find(x=>x.id===id);if(!t)return;t.done=!t.done;save();renderHome();}
 function tdDel(id){S.todos=S.todos.filter(x=>x.id!==id);save();$('todos').innerHTML=todoHTML();}
 let TD=null;function tdDrag(i){TD=i;}function tdDrop(i){if(TD==null||TD===i)return;const m=S.todos.splice(TD,1)[0];S.todos.splice(i,0,m);TD=null;save();$('todos').innerHTML=todoHTML();}
@@ -434,7 +434,7 @@ function planHTML(){return `<p style="color:var(--mut);font-size:13px">Each show
  <div style="margin-top:8px">${S.streamers.map(s=>`<span class="pill">${esc(s)}</span>`).join('')}</div>`;}
 function breaksListHTML(){if(!S.breaks.length)return '<div style="color:var(--mut)">No saved models. Build one under <a onclick="openModeler()">Data &amp; Lists → Break / Format</a>.</div>';
  return S.breaks.map((b,i)=>`<div class="row" style="justify-content:space-between;border-bottom:1px solid var(--line);padding:8px 0"><div><b>${esc(b.name)}</b> · ${b.slots} slots · exp ${money(b.gross)} <span class="pill">${b.tiers} tiers</span></div><button class="btn x" onclick="delBreak(${i})">✕</button></div>`).join('');}
-function delBreak(i){S.breaks.splice(i,1);save();renderHome();}
+function delBreak(i){const b=S.breaks[i];if(!confirm('Delete saved model “'+((b&&b.name)||'')+'”? This cannot be undone.'))return;S.breaks.splice(i,1);save();renderHome();toast('Model deleted');}
 
 /* ---------- SCHEDULE ---------- */
 function scheduleRollupHTML(){
@@ -557,7 +557,7 @@ function renderCopyHist(){const el=$('csHist');if(!el)return;
 function reopenCopy(id){const cs=(S.copySets||[]).find(x=>x.id===id);if(!cs)return;CS_LAST={type:cs.type,items:cs.items};const o=$('cout');if(o)o.innerHTML=copyOutHTML(cs.items);const nm=$('csName');if(nm)nm.value=cs.name;toast('Reopened '+cs.name);}
 function dupCopy(id){if(!canEditScoped())return roGuard();const cs=(S.copySets||[]).find(x=>x.id===id);if(!cs)return;S.copySets.unshift({id:'cs'+Date.now(),name:cs.name+' (copy)',ts:Date.now(),type:cs.type,items:cs.items.slice()});save();renderCopyHist();}
 function renameCopy(id){if(!canEditScoped())return roGuard();const cs=(S.copySets||[]).find(x=>x.id===id);if(!cs)return;const v=prompt('Rename copy set',cs.name);if(v==null)return;cs.name=v.trim()||cs.name;save();renderCopyHist();}
-function delCopy(id){if(!canEditScoped())return roGuard();S.copySets=(S.copySets||[]).filter(x=>x.id!==id);save();renderCopyHist();}
+function delCopy(id){if(!canEditScoped())return roGuard();if(!confirm('Delete this copy set? This cannot be undone.'))return;S.copySets=(S.copySets||[]).filter(x=>x.id!==id);save();renderCopyHist();toast('Copy set deleted');}
 function attachCopyToShow(id,ref){if(!ref)return;if(!canEditScoped())return roGuard();const cs=(S.copySets||[]).find(x=>x.id===id);const r=showByRef(ref);if(!cs||!r)return;r.s.titleSet=JSON.parse(JSON.stringify(cs));r.s.titleSetId=cs.id;save();toast('Attached “'+cs.name+'” to '+(r.s.name||'show'));}
 
 /* ---------- SCHEDULE GEN ---------- */
@@ -606,12 +606,12 @@ function renderBreak(target){target=target||'dtc';const el=$(target);if(!el)retu
  <details class="gcfg" style="margin-top:8px"><summary class="btn sm">Advanced / add more inputs ▾</summary>
    <div style="margin-top:8px;padding:12px;border:1px solid var(--line);border-radius:10px">
      <div class="lab">Chase pool (checklist cards)</div><div id="chaseList"></div>
-     <div class="row" style="margin-top:6px"><input id="cbName" placeholder="Chase card" style="flex:2"><input id="cbVal" type="number" placeholder="$" style="flex:1"><button class="btn sm" onclick="addChase()">+</button></div>
+     <div class="row" style="margin-top:6px"><input id="cbName" placeholder="Chase card" style="flex:2" onkeydown="if(event.key==='Enter')addChase()"><input id="cbVal" type="number" placeholder="$" style="flex:1" onkeydown="if(event.key==='Enter')addChase()"><button class="btn sm" onclick="addChase()">+</button></div>
      <div class="row" style="margin-top:8px"><button class="btn sm" onclick="loadChecklistPicker()">＋ Load chases from a checklist…</button></div>
      <div class="lab" style="margin-top:12px">Extra products (split into spots)</div><div id="prodList"></div>
-     <div class="row" style="margin-top:6px"><input id="pName" placeholder="Product" style="flex:2"><input id="pSpots" type="number" placeholder="spots" style="flex:1"><input id="pVal" type="number" placeholder="pool $" style="flex:1"><button class="btn sm" onclick="addProd()">+</button></div>
+     <div class="row" style="margin-top:6px"><input id="pName" placeholder="Product" style="flex:2" onkeydown="if(event.key==='Enter')addProd()"><input id="pSpots" type="number" placeholder="spots" style="flex:1" onkeydown="if(event.key==='Enter')addProd()"><input id="pVal" type="number" placeholder="pool $" style="flex:1" onkeydown="if(event.key==='Enter')addProd()"><button class="btn sm" onclick="addProd()">+</button></div>
      <div class="lab" style="margin-top:12px">Solo auctions</div><div id="aucList"></div>
-     <div class="row" style="margin-top:6px"><input id="aName" placeholder="Auction item" style="flex:2"><input id="aVal" type="number" placeholder="$" style="flex:1"><button class="btn sm" onclick="addAuc()">+</button></div>
+     <div class="row" style="margin-top:6px"><input id="aName" placeholder="Auction item" style="flex:2" onkeydown="if(event.key==='Enter')addAuc()"><input id="aVal" type="number" placeholder="$" style="flex:1" onkeydown="if(event.key==='Enter')addAuc()"><button class="btn sm" onclick="addAuc()">+</button></div>
      <div class="lab" style="margin-top:12px">Pull from inventory</div><div id="invList"></div>
      ${S.inventory.length?`<div class="row" style="margin-top:6px"><select id="bkInv" style="flex:2"><option value="">— choose an inventory item —</option>${S.inventory.map((x,ix)=>`<option value="${ix}">${esc(x.name)} · ${esc(x.cat||'')} · ${money(+x.value||0)}</option>`).join('')}</select><button class="btn sm" onclick="bkAddFromInv()">+ Pull</button></div>`:''}
    </div></details>
@@ -839,11 +839,11 @@ async function buildBreakFromProduct(itemId){const it=S.inventory.find(x=>x.id==
  if(cls[0]){const cards=await dbPreloadCards(cls[0].id);preloadBreak(it,{name:cls[0].name,set:it.set,cards,_clId:cls[0].id});}else preloadBreak(it,null);
 }
 async function buildBreakFromChecklist(clId){const name=(window._clCache&&window._clCache[clId])||'Checklist';const cards=await dbPreloadCards(clId);preloadBreak(null,{name,set:'',cards,_clId:clId});}
-function renderBKlists(){
- $('prodList').innerHTML=BK.products.map((p,i)=>`<div class="row" style="justify-content:space-between;font-size:13px;padding:3px 0"><span>${esc(p.name)} · ${p.spots} spots · ${money(p.val)}</span><button class="btn x" onclick="BK.products.splice(${i},1);renderBKlists();calcBreak()">✕</button></div>`).join('');
- $('chaseList').innerHTML=BK.chases.map((c,i)=>`<div class="row" style="justify-content:space-between;font-size:13px;padding:3px 0"><span>${esc(c.name)} · ${money(c.val)}</span><button class="btn x" onclick="BK.chases.splice(${i},1);renderBKlists();calcBreak()">✕</button></div>`).join('');
- $('aucList').innerHTML=BK.auctions.map((c,i)=>`<div class="row" style="justify-content:space-between;font-size:13px;padding:3px 0"><span>${esc(c.name)} · ${money(c.val)}</span><button class="btn x" onclick="BK.auctions.splice(${i},1);renderBKlists();calcBreak()">✕</button></div>`).join('');
- const il=$('invList');if(il)il.innerHTML=BK.invItems.map((it,i)=>`<div class="row" style="justify-content:space-between;font-size:13px;padding:3px 0"><span>📦 ${esc(it.name)} · cost ${money(it.cost)} · val ${money(it.value)}</span><button class="btn x" onclick="bkDelInv(${i})">✕</button></div>`).join('');
+function renderBKlists(){const none='<div class="lab" style="text-transform:none;letter-spacing:0;padding:3px 0">None yet.</div>';
+ $('prodList').innerHTML=BK.products.map((p,i)=>`<div class="row" style="justify-content:space-between;font-size:13px;padding:3px 0"><span>${esc(p.name)} · ${p.spots} spots · ${money(p.val)}</span><button class="btn x" onclick="BK.products.splice(${i},1);renderBKlists();calcBreak()">✕</button></div>`).join('')||none;
+ $('chaseList').innerHTML=BK.chases.map((c,i)=>`<div class="row" style="justify-content:space-between;font-size:13px;padding:3px 0"><span>${esc(c.name)} · ${money(c.val)}</span><button class="btn x" onclick="BK.chases.splice(${i},1);renderBKlists();calcBreak()">✕</button></div>`).join('')||none;
+ $('aucList').innerHTML=BK.auctions.map((c,i)=>`<div class="row" style="justify-content:space-between;font-size:13px;padding:3px 0"><span>${esc(c.name)} · ${money(c.val)}</span><button class="btn x" onclick="BK.auctions.splice(${i},1);renderBKlists();calcBreak()">✕</button></div>`).join('')||none;
+ const il=$('invList');if(il)il.innerHTML=BK.invItems.map((it,i)=>`<div class="row" style="justify-content:space-between;font-size:13px;padding:3px 0"><span>📦 ${esc(it.name)} · cost ${money(it.cost)} · val ${money(it.value)}</span><button class="btn x" onclick="bkDelInv(${i})">✕</button></div>`).join('')||none;
 }
 function bkAddFromInv(){const el=$('bkInv');if(!el||el.value==='')return;const it=S.inventory[+el.value];if(!it)return;
  const already=BK.invItems.filter(x=>x.itemId===it.id).reduce((s,x)=>s+(+x.qty||0),0);
@@ -968,7 +968,7 @@ function reopenBreak(id){const b=(S.breaks||[]).find(x=>x.id===id);if(!b)return;
  BK.invItems=(b.invItems||[]).slice();BK.slots=JSON.parse(JSON.stringify(b.ruleSlots||[]));BK.checklistId=b.checklistId||null;BK.tierBands=JSON.parse(JSON.stringify(b.tierBands||[]));BK.breakType=b.breakType||'team';BK._slotEval=null;BK._modelId=id;BK._preloadNote='Reopened “'+b.name+'”';dModeler();toast('Reopened '+b.name);}
 function dupBreak(id){if(!canEditScoped())return roGuard();const b=(S.breaks||[]).find(x=>x.id===id);if(!b)return;const c=JSON.parse(JSON.stringify(b));c.id='bk'+Date.now();c.name=b.name+' (copy)';c.ts=Date.now();S.breaks.unshift(c);save();renderBreakHist();}
 function renameBreak(id){if(!canEditScoped())return roGuard();const b=(S.breaks||[]).find(x=>x.id===id);if(!b)return;const v=prompt('Rename break model',b.name);if(v==null)return;b.name=v.trim()||b.name;save();renderBreakHist();}
-function delBreakById(id){if(!canEditScoped())return roGuard();S.breaks=(S.breaks||[]).filter(x=>x.id!==id);save();renderBreakHist();}
+function delBreakById(id){if(!canEditScoped())return roGuard();const b=(S.breaks||[]).find(x=>x.id===id);if(!confirm('Delete saved model “'+((b&&b.name)||'')+'”? This cannot be undone.'))return;S.breaks=(S.breaks||[]).filter(x=>x.id!==id);save();renderBreakHist();toast('Model deleted');}
 async function attachBreakToShow(id,ref){if(!ref)return;if(!canEditScoped())return roGuard();const b=(S.breaks||[]).find(x=>x.id===id);const r=showByRef(ref);if(!b||!r)return;
  r.s.breakModel=JSON.parse(JSON.stringify(b));r.s.breakModelId=b.id;
  r.s.inventoryAlloc=(b.invItems||[]).map(x=>({itemId:x.itemId,name:x.name,qty:x.qty,cost:x.cost,value:x.value,set:x.set}));
@@ -1516,7 +1516,7 @@ const INV_COLS=[
  {key:'age',label:'Age',type:'num',sortable:true,sortVal:i=>invAge(i),cell:i=>{const age=invAge(i);return `<td class="mono" style="${age>30?'color:var(--red)':''}">${age}d${age>30?' ⚠':''}</td>`;}},
  {key:'owner',label:'Owner',type:'text',sortable:true,sortVal:i=>ownerName(i.owner).toLowerCase(),cell:i=>`<td>${esc(ownerName(i.owner))}</td>`},
  {key:'status',label:'Status',type:'text',sortable:true,sortVal:i=>{const av=invAvailable(i);return av>0?'0free':(invReserved(i)>0?'1reserved':((+i.soldQty||0)>0?'2sold':'3none'));},cell:i=>{const av=invAvailable(i),rsv=invReserved(i),sold=(+i.soldQty||0)>0;return `<td><span class="lab">${av>0?'Free':(rsv>0?'Reserved':(sold?'Sold':'—'))}</span></td>`;}},
- {key:'actions',label:'',core:true,sortable:false,cell:(i,admin)=>`<td style="white-space:nowrap">${/box|case|etb|pack|sealed/i.test(i.cat||'')?`<button class="btn sm" title="Model a break from this product + its checklist" onclick="buildBreakFromProduct('${i.id}')">⚡ Break</button> `:''}<button class="btn sm" onclick="reserveModal('${i.id}')">Reserve</button> <button class="btn sm" onclick="sellModal('${i.id}')">Sold</button>${admin?` <select style="max-width:110px;font-size:11px" onchange="reassignInv('${i.id}',this.value)">${ownerOpts(i.owner)}</select>`:''} <button class="btn x" onclick="delInv('${i.id}')">✕</button></td>`},
+ {key:'actions',label:'',core:true,sortable:false,cell:(i,admin)=>`<td style="white-space:nowrap">${/box|case|etb|pack|sealed/i.test(i.cat||'')?`<button class="btn sm" title="Model a break from this product + its checklist" onclick="buildBreakFromProduct('${i.id}')">⚡ Break</button> `:''}${hasCap('act.inventory_edit')?`<button class="btn sm" title="Edit this item" onclick="invEdit('${i.id}')">Edit</button> `:''}<button class="btn sm" onclick="reserveModal('${i.id}')">Reserve</button> <button class="btn sm" onclick="sellModal('${i.id}')">Sold</button>${admin?` <select style="max-width:110px;font-size:11px" onchange="reassignInv('${i.id}',this.value)">${ownerOpts(i.owner)}</select>`:''} <button class="btn x" onclick="delInv('${i.id}')">✕</button></td>`},
 ];
 const INV_DEFAULT_COLS=['name','cat','set','gradingCompany','grade','onhand','cost','market','gain','alloc','age','actions'];
 const invGridCfg={sk:'e10_inv',cols:INV_COLS,defaultCols:INV_DEFAULT_COLS,defaultSort:{col:'name',dir:1},
@@ -1543,7 +1543,7 @@ function dInventory(){const admin=ROLE==='admin';const canEdit=hasCap('act.inven
    </div>
    <div id="ivLinkChip" style="margin-top:8px"></div>
    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(128px,1fr));margin-top:10px">
-   <div><label>Name</label><input id="ivN" placeholder="e.g. Ascended Heroes Box"></div>
+   <div><label>Name</label><input id="ivN" placeholder="e.g. Ascended Heroes Box" onkeydown="if(event.key==='Enter')addInv()"></div>
    <div><label>Category</label>${pickInput({id:'ivC',list:'invcats',value:'',placeholder:'category'})}</div>
    <div style="min-width:150px"><label>Set / product</label>${entityPicker('ivSet',{icon:'🗂',placeholder:'search sets…',minChars:2,server:true,freeText:true,value:ivSetLink,search:dbSetSearch,onpick:(sid,label)=>{ivSetLink={id:sid,label};},onclear:()=>{ivSetLink=null;}})}</div>
    <div><label>Qty (boxes on hand)</label><input id="ivQ" type="number" value="1" title="How many BOXES you hold. One full case = boxes/case. Two cases of 12 = 24."></div>
@@ -1602,18 +1602,65 @@ function buyListHTML(){
  return `<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Buy list from the schedule</h3>
    <div class="egrid"><table><tr><th>Set / product</th><th>Needed by</th><th>Demand</th><th>Free</th><th>Gap</th><th>~Order</th></tr>${rows}</table></div>
    <div class="row" style="justify-content:flex-end;margin-top:8px"><b>Projected order: ~${money(projected)}</b></div></div>`;}
-function addInv(){const n=$('ivN').value.trim();if(!n)return;const owner=($('ivOwner')&&$('ivOwner').value!=='')?$('ivOwner').value:(ROLE==='admin'&&$('ivOwner')?null:ME);
+function addInv(){const n=$('ivN').value.trim();if(!n){toast('Name is required');const e=$('ivN');if(e)e.focus();return;}const owner=($('ivOwner')&&$('ivOwner').value!=='')?$('ivOwner').value:(ROLE==='admin'&&$('ivOwner')?null:ME);
  const gv=id=>{const el=$(id);return el?el.value.trim():'';};
  const L2=ivLinked||{};const SL=ivSetLink||{};
  /* box/case cost model: the stored `cost` is always PER BOX (so capital = boxes×cost is right).
     If the user enters a case price, divide by boxes/case to get the per-box cost. */
- const rawCost=+$('ivCo').value||0,bpc=Math.max(1,+($('ivBPC')&&$('ivBPC').value)||1),basis=(($('ivBasis')&&$('ivBasis').value)||'perbox'),pbc=(basis==='percase'&&bpc>1)?(rawCost/bpc):rawCost;
- S.inventory.push({id:'i'+Date.now(),name:n,cat:gv('ivC'),set:(SL.label||''),setId:(SL.id||null),qty:+$('ivQ').value||1,cost:pbc,value:+$('ivV').value||0,boxesPerCase:bpc,perBoxCost:pbc,gradingCompany:gv('ivGC'),grade:gv('ivGrade'),cardNumber:gv('ivNum'),year:gv('ivYear'),cond:gv('ivG'),img:$('ivImg').value,owner,
+ const qraw=$('ivQ').value,craw=$('ivCo').value,vraw=$('ivV').value;
+ if(craw!==''&&(isNaN(+craw)||+craw<0)){toast('Cost must be a number ≥ 0');return;}
+ if(qraw!==''&&(isNaN(+qraw)||+qraw<0)){toast('Qty must be a number ≥ 0');return;}
+ if(vraw!==''&&(isNaN(+vraw)||+vraw<0)){toast('Market must be a number ≥ 0');return;}
+ const rawCost=+craw||0,bpc=Math.max(1,+($('ivBPC')&&$('ivBPC').value)||1),basis=(($('ivBasis')&&$('ivBasis').value)||'perbox'),pbc=(basis==='percase'&&bpc>1)?(rawCost/bpc):rawCost;
+ S.inventory.push({id:'i'+Date.now(),name:n,cat:gv('ivC'),set:(SL.label||''),setId:(SL.id||null),qty:(qraw===''?1:Math.max(0,+qraw||0)),cost:pbc,value:Math.max(0,+vraw||0),boxesPerCase:bpc,perBoxCost:pbc,gradingCompany:gv('ivGC'),grade:gv('ivGrade'),cardNumber:gv('ivNum'),year:gv('ivYear'),cond:gv('ivG'),img:$('ivImg').value,owner,
    cardId:L2.cardId||null,playerId:L2.playerId||null,parallel:L2.parallel||'',rarity:L2.rarity||''});
  ivLinked=null;ivSetLink=null;save();dInventory();toast('Added'+(L2.cardId?' · linked to card':''));}
 function ivBoxHint(){const el=$('ivPBHint');if(!el)return;const raw=+($('ivCo')&&$('ivCo').value)||0,bpc=Math.max(1,+($('ivBPC')&&$('ivBPC').value)||1),basis=(($('ivBasis')&&$('ivBasis').value)||'perbox');const pbc=(basis==='percase'&&bpc>1)?(raw/bpc):raw;
  el.textContent='= '+money(pbc)+'/box'+((basis==='percase'&&bpc>1)?(' · case '+money(raw)):'');el.style.color=pbc>0?'var(--red)':'';}
-function delInv(id){S.inventory=S.inventory.filter(x=>x.id!==id);save();dInventory();}
+/* ---- In-place inventory edit (same cost-basis-aware fields as the add form; corrects legacy items) ---- */
+function invEdit(id){if(!hasCap('act.inventory_edit')){toast('Editing inventory is restricted for your role');return;}
+ const it=(S.inventory||[]).find(x=>x.id===id);if(!it)return;
+ const pbc=(it.perBoxCost!=null&&it.perBoxCost!=='')?+it.perBoxCost:(+it.cost||0);
+ $('modal').innerHTML=`<h3 style="font-size:17px">Edit item</h3>
+   <div id="iveErr" class="lab" style="display:none;color:var(--red);text-transform:none;letter-spacing:0;margin:4px 0"></div>
+   <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-top:6px">
+   <div><label>Name</label><input id="iveN" value="${esc(it.name||'')}" onkeydown="if(event.key==='Enter')invEditSave('${id}')"></div>
+   <div><label>Category</label>${pickInput({id:'iveC',list:'invcats',value:it.cat||'',placeholder:'category'})}</div>
+   <div><label>Set / product</label><input id="iveSet" value="${esc(it.set||'')}" placeholder="set name"></div>
+   <div><label>Qty (boxes on hand)</label><input id="iveQ" type="number" min="0" value="${esc(''+(it.qty!=null?it.qty:1))}"></div>
+   <div><label>Cost $</label><input id="iveCo" type="number" min="0" value="${esc(''+pbc)}" oninput="iveBoxHint()"></div>
+   <div><label>Cost basis</label><select id="iveBasis" onchange="iveBoxHint()"><option value="perbox">per box / unit</option><option value="percase">per case</option></select></div>
+   <div><label>Boxes / case</label><input id="iveBPC" type="number" min="1" value="${esc(''+Math.max(1,+it.boxesPerCase||1))}" oninput="iveBoxHint()"></div>
+   <div style="align-self:end"><label>&nbsp;</label><div id="ivePBHint" class="lab" style="text-transform:none;letter-spacing:0;font-size:12px;padding-bottom:9px"></div></div>
+   <div><label>Market $</label><input id="iveV" type="number" min="0" value="${esc(''+(it.value!=null?it.value:0))}"></div>
+   <div><label>Grading co.</label>${pickInput({id:'iveGC',list:'grading',value:it.gradingCompany||'',placeholder:'raw/sealed'})}</div>
+   <div><label>Grade</label><input id="iveGrade" value="${esc(it.grade||'')}" placeholder="10 / 9.5"></div>
+   <div><label>Card #</label><input id="iveNum" value="${esc(it.cardNumber||'')}"></div>
+   <div><label>Year</label><input id="iveYear" type="number" value="${esc(it.year!=null?(''+it.year):'')}"></div>
+   <div><label>Parallel</label><input id="ivePar" value="${esc(it.parallel||'')}"></div>
+   <div><label>Condition</label>${pickInput({id:'iveG',list:'conditions',value:it.cond||'',placeholder:'NM / Sealed'})}</div>
+   <div><label>Owner</label><select id="iveOwner">${ownerOpts(it.owner)}</select></div>
+   <div><label>Image</label><div class="row" style="gap:6px"><input id="iveImg" value="${esc(it.img||'')}" placeholder="URL or upload" style="min-width:0" onchange="ivePv()"><button class="btn sm" onclick="iveUpload()">⬆</button></div></div>
+   </div>
+   <div style="margin-top:6px"><img id="iveImgPv" src="${esc(it.img||'')}" style="height:44px;border-radius:5px;border:1px solid var(--line);${it.img?'':'display:none'}"></div>
+   <div class="row" style="margin-top:14px;gap:8px"><button class="btn v" onclick="invEditSave('${id}')">Save changes</button><button class="btn sm" onclick="closeM()">Cancel</button></div>`;
+ $('ov').style.display='flex';iveBoxHint();setTimeout(()=>{const el=$('iveN');if(el){el.focus();el.select();}},50);}
+function iveBoxHint(){const el=$('ivePBHint');if(!el)return;const raw=+($('iveCo')&&$('iveCo').value)||0,bpc=Math.max(1,+($('iveBPC')&&$('iveBPC').value)||1),basis=(($('iveBasis')&&$('iveBasis').value)||'perbox');const pbc=(basis==='percase'&&bpc>1)?(raw/bpc):raw;el.textContent='= '+money(pbc)+'/box'+((basis==='percase'&&bpc>1)?(' · case '+money(raw)):'');el.style.color=pbc>0?'var(--red)':'';}
+function ivePv(){const el=$('iveImg'),pv=$('iveImgPv');if(pv&&el){pv.src=(el.value||'').trim();pv.style.display=(el.value||'').trim()?'inline-block':'none';}}
+function iveUpload(){pickImage(url=>{const el=$('iveImg');if(el)el.value=url;ivePv();});}
+function invEditSave(id){if(!hasCap('act.inventory_edit')){toast('Editing is restricted for your role');return;}
+ const it=(S.inventory||[]).find(x=>x.id===id);if(!it)return;
+ const err=m=>{const e=$('iveErr');if(e){e.textContent=m;e.style.display='block';}};
+ const name=($('iveN').value||'').trim();if(!name)return err('Name is required.');
+ const qv=$('iveQ').value,cv=$('iveCo').value,mv=$('iveV').value;
+ if(qv!==''&&(isNaN(+qv)||+qv<0))return err('Qty (boxes) must be a number ≥ 0.');
+ if(cv!==''&&(isNaN(+cv)||+cv<0))return err('Cost must be a number ≥ 0.');
+ if(mv!==''&&(isNaN(+mv)||+mv<0))return err('Market must be a number ≥ 0.');
+ const bpc=Math.max(1,+($('iveBPC')&&$('iveBPC').value)||1),basis=(($('iveBasis')&&$('iveBasis').value)||'perbox'),rawCost=+cv||0,pbc=(basis==='percase'&&bpc>1)?(rawCost/bpc):rawCost;
+ const gv=i2=>{const el=$(i2);return el?el.value.trim():'';};const newSet=gv('iveSet');const ow=$('iveOwner');
+ Object.assign(it,{name,cat:gv('iveC'),set:newSet,setId:(newSet===(it.set||'')?it.setId:null),qty:(qv===''?0:Math.max(0,+qv||0)),cost:pbc,perBoxCost:pbc,boxesPerCase:bpc,value:Math.max(0,+mv||0),gradingCompany:gv('iveGC'),grade:gv('iveGrade'),cardNumber:gv('iveNum'),year:gv('iveYear'),parallel:gv('ivePar'),cond:gv('iveG'),img:($('iveImg').value||'').trim(),owner:(ow?(ow.value||null):it.owner)});
+ save();closeM();dInventory();toast('Updated “'+name+'” · '+money(pbc)+'/box');}
+function delInv(id){const it=(S.inventory||[]).find(x=>x.id===id);const nm=it?it.name:'this item';if(!confirm('Delete “'+nm+'” from inventory? This cannot be undone.'))return;S.inventory=S.inventory.filter(x=>x.id!==id);save();dInventory();toast('Deleted '+nm);}
 /* ===== Quick-add inventory from the card library (search e10_cards → autofill + link) ===== */
 let ivLinked=null,ivSetLink=null,_ivResults=[],_ivT=null;
 function ivYearFromSet(s){const m=(s||'').match(/\b(19|20)\d{2}\b/);return m?m[0]:'';}
@@ -1683,7 +1730,7 @@ function reserveModal(itemId){const it=S.inventory.find(x=>x.id===itemId);if(!it
  $('modal').innerHTML=`<h3 style="font-size:18px">Reserve — ${esc(it.name)}</h3>
   <div class="lab" style="margin-top:4px">${invAvailable(it)} of ${(+it.qty||0)} free</div>
   <div style="margin-top:12px"><label>Reserve to show</label><select id="rvShow">${showPickerOptions('')}</select></div>
-  <div style="margin-top:10px"><label>Units</label><input id="rvQty" type="number" value="1" min="1"></div>
+  <div style="margin-top:10px"><label>Units</label><input id="rvQty" type="number" value="1" min="1" onkeydown="if(event.key==='Enter')doReserve('${itemId}')"></div>
   <div class="row" style="margin-top:16px"><button class="btn v" onclick="doReserve('${itemId}')">Reserve</button><button class="btn sm" onclick="closeM()">Cancel</button></div>
   ${ROLE==='admin'?'<div class="lab" style="margin-top:8px">Admin: you may reserve beyond what is free.</div>':''}`;
  $('ov').style.display='flex';setTimeout(()=>{const e=$('rvShow');if(e)e.focus();},50);}
@@ -2256,7 +2303,8 @@ async function liveSlotCaseHit(id){const sl=LIVE.slots.find(x=>x.id===id);if(!sl
  try{await sb.from('e10_break_slots').update({case_hit:v}).eq('id',id);}catch(e){toast(e.message);return;}
  sl.case_hit=v;await liveEvent('case_hit',id,{case_hit:v,label:sl.label,scope:'slot'});renderLive();
 }
-async function liveDelSlot(id){try{await sb.from('e10_break_slots').delete().eq('id',id);}catch(e){}LIVE.slots=LIVE.slots.filter(x=>x.id!==id);renderLive();}
+async function liveDelSlot(id){const sl=LIVE.slots.find(x=>x.id===id);const warn=(sl&&sl.state==='sold')?('This spot is SOLD to '+(sl.buyer_handle||'a buyer')+' for '+money(+sl.price||0)+'. Remove it anyway? The buyer/price will be lost.'):('Remove spot “'+((sl&&sl.label)||'')+'”?');if(!confirm(warn))return;
+ try{const{error}=await sb.from('e10_break_slots').delete().eq('id',id);if(error)throw error;}catch(e){toast(e.message);return;}LIVE.slots=LIVE.slots.filter(x=>x.id!==id);renderLive();toast('Spot removed');}
 async function liveToggleStash(){if(!LIVE.session)return;const v=!LIVE.session.stash_or_pass;
  try{await sb.from('e10_break_sessions').update({stash_or_pass:v}).eq('id',LIVE.session.id);}catch(e){toast(e.message);return;}
  LIVE.session.stash_or_pass=v;await liveEvent('stash_toggled',null,{stash_or_pass:v});renderLive();
@@ -2466,10 +2514,11 @@ async function prodAdd(itemId){const it=(S.inventory||[]).find(x=>x.id===itemId)
  if(LIVE.session){await breakConsume(p);await prodPersist();}
  afterProdChange();}
 async function prodRemove(idx){const arr=prodArr();const p=arr[idx];if(!p)return;
+ if(!confirm('Remove “'+(p.name||'this product')+'” from the break?'+(LIVE.session?' Its boxes return to stock.':'')))return;
  if(LIVE.session){p.boxes=0;await breakConsume(p);/* returns its boxes to stock */}
  arr.splice(idx,1);
  if(LIVE.session)await prodPersist();
- afterProdChange();}
+ afterProdChange();toast('Product removed');}
 async function prodSlice(idx,slice,n){const arr=prodArr();const p=arr[idx];if(!p)return;
  p.slice=slice;if(n!=null)p.n=Math.max(1,+n||1);p.boxes=sliceToBoxes(p.slice,p.n,p.boxesPerCase);
  if(LIVE.session){await breakConsume(p);await prodPersist();}
