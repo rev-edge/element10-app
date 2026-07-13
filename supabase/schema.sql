@@ -481,3 +481,26 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --   (bottom 1728) + now-bar (1740) intrude into the bottom-15% keep-clear zone; liveStart-from-show seeds
 --   only projection rows, dropping ruleSlots' team_id/bands (route show-start through liveLoadFormat);
 --   bkTierField/bkSlotOverride stale per-slot band spans (targeted span update to avoid focus loss).
+
+-- ─────────────────────────────────────────────────────────────
+-- APPLIED (migration e10_name_norm_dedup) — the ONE migration for the flagged follow-up fixes.
+--   e10_players.name_norm + e10_teams.name_norm: text GENERATED ALWAYS AS (lower(btrim(name))) STORED,
+--     each with a UNIQUE index (e10_players_name_norm_uidx / e10_teams_name_norm_uidx). Generated → existing
+--     rows untouched, stays in sync automatically; verified 0 pre-existing collisions so the unique index
+--     built cleanly. RLS UNCHANGED (columns inherit each table's InitPlan-wrapped policies; nothing loosened).
+--   Used by the client for: (a) IMPORT DEDUP — resolveTeams / planResolution / commitImport now look up
+--     existing rows by name_norm and insert new ones via upsert(onConflict:'name_norm',ignoreDuplicates)
+--     so a single case/whitespace-variant collision skips just that row instead of rolling back the whole
+--     batch (the old atomic insert + case-sensitive .in() dropped up to 200 rows silently); and (b)
+--     chaseApply name-match — the import preview (clApplyChaseListToImport) now normalizes the same way
+--     (trim+lower) as the server apply, so preview and apply flag the same cards.
+-- Client-only companions (no schema): A1 show→live seeding now carries the format's ruleSlots (team_id +
+--   tiers + bands + projection), not just projection rows (liveStart rich-seed branch); A2 invClampRes()
+--   trims reservations to on-hand qty on every qty drop (invEditSave / markSold / breakConsume) so
+--   available never lies; A3 reserveModelToShow aggregates invItems by itemId (SUM, not SET-overwrite) so a
+--   duplicate-item model reserves the total while re-attach stays idempotent; C5 on-cam #chaseboard height
+--   556 (bottom = 1632, off the keep-clear line); C6 bkBandSpanHTML/bkRefreshBands update per-slot band
+--   spans in place on a tier/override edit (no full re-render, focus retained).
+-- Verified live (UI drive + SQL/DOM read): B teams 'argentina'/'ARGENTINA' → same existing id + new team
+--   created, no rollback; A3 reserved=2; A2 qty 1 → reserved clamped to 1, available 0; A1 3 rich slots
+--   (Argentina:A:120 …) + proj 140/300/660; C5 chaseboard bottom 1632; C6 span $80→$999 in place, focus kept.

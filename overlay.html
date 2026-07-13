@@ -58,7 +58,7 @@ html,body{width:1080px;height:1920px;background:transparent;font-family:var(--fo
 .placard.pop{animation:placpop .5s cubic-bezier(.2,1.55,.4,1) both}
 @keyframes placpop{0%{transform:scale(.55) rotate(var(--rot,0deg));opacity:0}70%{transform:scale(1.06) rotate(var(--rot,0deg))}100%{transform:scale(1) rotate(var(--rot,0deg));opacity:1}}
 /* ---- chase board (A) — live cross-off ---- */
-#chaseboard{position:absolute;right:32px;top:1076px;width:476px;height:652px;background:var(--panel);border:6px solid var(--volt);border-radius:20px;overflow:hidden}
+#chaseboard{position:absolute;right:32px;top:1076px;width:476px;height:556px;background:var(--panel);border:6px solid var(--volt);border-radius:20px;overflow:hidden}/* bottom = 1076+556 = 1632: ends at the bottom-15% keep-clear line (Whatnot bid bar). cb-scroll (bottom:8px) reflows. */
 #chaseboard .cb-hd{padding:16px 20px 12px;border-bottom:5px solid var(--volt)}
 #chaseboard .cb-title{font-weight:900;text-transform:uppercase;font-size:30px;color:var(--volt);line-height:1}
 #chaseboard .cb-count{font-weight:900;font-size:46px;color:#fff;margin-top:4px;line-height:1}
