@@ -69,9 +69,20 @@ const T = (n, ok, d) => ok ? (pass++, console.log('  PASS ' + n)) : (fail++, con
   const after = await sumRes(IDx);
   T('b4 mid-batch: zero mutation on the passing item', before === after, { before, after });
 
+  // ---- Item 1 (M3.2.1): CONCURRENT same-key ADD → advisory lock serializes; one item, one movement ----
+  const AID = 'zzconc' + Date.now().toString(36), AKEY = 'zznode:concadd:' + AID;
+  const adItem = { p_item: { id: AID, name: 'ZZ conc', qty: 1, cost: 1, cat: 'Box' }, p_idempotency_key: AKEY };
+  const [a1, a2] = await Promise.all([rpc(A, 'e10_inv_add_item', adItem), rpc(A, 'e10_inv_add_item', adItem)]);
+  T('i1 concurrent add: both callers succeed', a1.ok === true && a2.ok === true, { a1, a2 });
+  const cItems = (await A.from('e10_inventory_items').select('id').eq('id', AID)).data;
+  T('i1 concurrent add: exactly one item committed', cItems.length === 1, cItems.length);
+  const cMv = (await A.from('e10_inventory_movements').select('id').eq('idempotency_key', AKEY)).data;
+  T('i1 concurrent add: exactly one movement (loser replayed)', cMv.length === 1, cMv.length);
+
   // ---- teardown (rows + blob via RPC; ledger/receipts cleared by the SQL sweep afterward) ----
   await rpc(A, 'e10_inv_delete_item', { p_id: ID, p_idempotency_key: 'zznode:del:' + ID });
   await rpc(A, 'e10_inv_delete_item', { p_id: IDx, p_idempotency_key: 'zznode:delx:' + ID });
+  await rpc(A, 'e10_inv_delete_item', { p_id: AID, p_idempotency_key: 'zznode:concdel:' + AID });
 
   console.log('\n  ' + pass + ' pass · ' + fail + ' fail\n');
   process.exit(fail ? 1 : 0);

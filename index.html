@@ -294,7 +294,8 @@ function renderSubnav(){const box=$('subnav');if(!box)return;const subs=subsFor(
  box.innerHTML=subs.map(s=>`<button class="tab ${cur===s.k?'on':''}" onclick="goSub('${GROUP}','${s.k}')">${esc(s.label)}</button>`).join('');}
 function goGroup(g){if(g!=='settings'&&!hasCap('mod.'+g)){toast('Not available for your role');return;}const subs=subsFor(g);const cur=SUB[g]||(subs[0]&&subs[0].k);if(cur)goSub(g,cur);}
 function goSub(g,subKey){const subs=subsFor(g);const sub=subs.find(x=>x.k===subKey)||subs[0];if(!sub)return;GROUP=g;SUB[g]=sub.k;if(sub.dt){dataTab=sub.dt;go('data');}else go(sub.sec);}
-function go(s){document.querySelectorAll('.sec').forEach(x=>x.classList.remove('on'));const el=$('sec-'+s);if(el)el.classList.add('on');window.scrollTo(0,0);
+function go(s){if(s!=='live'){LIVE_SEED=null;if(REVIEW)REVIEW.showRef=null;}  /* M3.2.1 item 3: leaving the live section abandons any pending show seed */
+ document.querySelectorAll('.sec').forEach(x=>x.classList.remove('on'));const el=$('sec-'+s);if(el)el.classList.add('on');window.scrollTo(0,0);
  ({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData,repack:renderRepack,live:renderLive,fulfill:renderFulfill}[s]||renderHome)();
  if(s==='data'){GROUP=groupForDataTab(dataTab);SUB[GROUP]=dataTab;}else if(SEC2GROUP[s]){GROUP=SEC2GROUP[s];SUB[GROUP]=s;}
  renderNav();renderSubnav();}
@@ -2632,7 +2633,7 @@ async function loadAll(){
  if(SCOPE!=='mine'&&SCOPE!=='universal'&&ROLE!=='admin')SCOPE='mine';
  await loadScopedFor(SCOPE);await loadOpShows();rebuildS();subscribeRealtime();}
 renderWho=function(){if(!$('who'))return;$('who').innerHTML=`<div style="position:relative"><button class="btn sm" onclick="toggleProfileMenu(event)">\u{1F464} ${esc(ME||'')}${ROLE==='admin'?' · admin':''} ▾</button><div id="profMenu" class="profmenu" style="display:none"></div></div>`;};
-function signOut(){sb.auth.signOut().then(()=>location.reload());}
+function signOut(){LIVE_SEED=null;if(REVIEW)REVIEW.showRef=null;sb.auth.signOut().then(()=>location.reload());}  /* M3.2.1 item 3: sign-out clears any pending show seed */
 function closeProfileMenu(){const m=$('profMenu');if(m)m.style.display='none';}
 function _pmOutside(e){const m=$('profMenu');if(m&&m.style.display==='block'&&!m.parentNode.contains(e.target)){closeProfileMenu();document.removeEventListener('click',_pmOutside);}}
 function toggleProfileMenu(ev){if(ev)ev.stopPropagation();const m=$('profMenu');if(!m)return;
@@ -3094,14 +3095,13 @@ function liveStartFromFormat(modelId){const model=(S.breaks||[]).find(b=>b.id===
  const rs=(model.ruleSlots||[]);if(!rs.length){toast('This model has no formatted spots — build slots in the planner first.');return;}
  /* load the format into BK so the slot builder is editable in the review */
  BK.slots=JSON.parse(JSON.stringify(rs));BK.tierBands=JSON.parse(JSON.stringify(model.tierBands||[]));BK.checklistId=model.checklistId||null;BK.breakType=model.breakType||'team';BK.cost=+((model.inputs&&model.inputs.cost)||model.cost||0);BK.targetMargin=(model.inputs&&model.inputs.targetMargin!=null)?model.inputs.targetMargin:30;BK._slotEval=null;BK._modelId=model.id;
- /* M3.2: carry the source show ref into the pre-flight → session. Prefer an explicit show seed (came
-    from the show pop-out); else if this format is attached to exactly ONE show, use that; else ad-hoc. */
- let _showRef=(LIVE_SEED&&LIVE_SEED.showRef)||null;
- if(!_showRef){const hits=[];Object.keys(S.shows||{}).forEach(k=>(S.shows[k]||[]).forEach(s=>{if(s&&s.breakModelId===modelId)hits.push(s.id);}));if(hits.length===1)_showRef=hits[0];}
+ /* M3.2.1 item 2: a session carries a show ref ONLY when the operator explicitly started from that show
+    (showStartLive → LIVE_SEED.showRef). Generic format launches are always ad hoc — NO show inference. */
+ const _showRef=(LIVE_SEED&&LIVE_SEED.showRef)||null;
  REVIEW={modelId:model.id,title:model.name+' — live',showRef:_showRef,participants:(S.streamers&&S.streamers.length)?[S.streamers[0]]:[],products:[]};
  go('live');renderLive();
 }
-function liveCancelReview(){REVIEW=null;renderLive();}
+function liveCancelReview(){REVIEW=null;LIVE_SEED=null;renderLive();}  /* M3.2.1 item 3: cancelling pre-flight abandons the show seed */
 function liveReviewHTML(){const model=(S.breaks||[]).find(b=>b.id===REVIEW.modelId)||{};const proj=computeProjection();
  const nSlots=(BK.slots||[]).length,brkCost=breakCost(REVIEW.products),avgT=avgSlotTarget(brkCost,nSlots);
  return `<div class="hero"><div><h1>Review break — pre-flight</h1></div><button class="btn x" onclick="liveCancelReview()">Cancel</button></div>
