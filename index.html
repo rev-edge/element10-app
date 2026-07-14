@@ -1678,31 +1678,7 @@ const invGridCfg={sk:'e10_inv',cols:INV_COLS,defaultCols:INV_DEFAULT_COLS,defaul
 };
 const INVG=makeGrid('inv',invGridCfg);
 function dInventory(){const admin=ROLE==='admin';const canEdit=hasCap('act.inventory_edit');const rl=invRollup();const sets=[...new Set(S.inventory.map(i=>i.set).filter(Boolean))].sort();const years=[...new Set(S.inventory.map(i=>i.year).filter(Boolean))].sort();
- let h=canEdit?`<div class="card"><h3 style="font-size:15px">Add inventory</h3>
-   <div style="margin-top:10px;position:relative">
-     <label>Find a card in your library</label>
-     <input id="ivCardSearch" placeholder="Search cards" autocomplete="off" oninput="invCardSearch(this.value)" onfocus="invCardSearch(this.value)">
-     <div id="ivCardResults" style="position:absolute;left:0;right:0;z-index:30"></div>
-   </div>
-   <div id="ivLinkChip" style="margin-top:8px"></div>
-   <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(128px,1fr));margin-top:10px">
-   <div><label>Name</label><input id="ivN" onkeydown="if(event.key==='Enter')addInv()"></div>
-   <div><label>Category</label>${pickInput({id:'ivC',list:'invcats',value:'',placeholder:''})}</div>
-   <div style="min-width:150px"><label>Set / product</label>${entityPicker('ivSet',{icon:'🗂',placeholder:'search sets…',minChars:2,server:true,freeText:true,value:ivSetLink,search:dbSetSearch,onpick:(sid,label)=>{ivSetLink={id:sid,label};},onclear:()=>{ivSetLink=null;}})}</div>
-   <div><label>Qty (boxes on hand)</label><input id="ivQ" type="number" value="1" title="How many BOXES you hold. One full case = boxes/case. Two cases of 12 = 24."></div>
-   <div><label>Cost $</label><input id="ivCo" type="number" placeholder="0" oninput="ivBoxHint()"></div>
-   <div><label>Cost basis</label><select id="ivBasis" onchange="ivBoxHint()"><option value="perbox">per box / unit</option><option value="percase">per case</option></select></div>
-   <div><label>Boxes / case</label><input id="ivBPC" type="number" min="1" value="1" oninput="ivBoxHint()" title="For sealed product bought by the case — boxes per case (e.g. Prizm WC = 12). Leave 1 for singles / slabs."></div>
-   <div style="align-self:end"><label>&nbsp;</label><div id="ivPBHint" class="lab" style="text-transform:none;letter-spacing:0;font-size:12px;padding-bottom:9px"></div></div>
-   <div><label>Market $</label><input id="ivV" type="number" placeholder="0"></div>
-   <div><label>Grading co.</label>${pickInput({id:'ivGC',list:'grading',value:'',placeholder:'raw/sealed'})}</div>
-   <div><label>Grade</label><input id="ivGrade" placeholder="10 / 9.5"></div>
-   <div><label>Card #</label><input id="ivNum" placeholder="199/191"></div>
-   <div><label>Year</label><input id="ivYear" type="number" placeholder="2023"></div>
-   <div><label>Condition</label>${pickInput({id:'ivG',list:'conditions',value:'',placeholder:'NM / LP / Sealed'})}</div>
-   <div><label>Image</label><div class="row" style="gap:6px"><input id="ivImg" placeholder="URL or upload" style="min-width:0"><button class="btn sm" onclick="invUploadImg()">⬆</button></div><img id="ivImgPv" style="display:none;height:40px;border-radius:5px;margin-top:4px;border:1px solid var(--line)"></div>
-   <div><label>Owner</label><select id="ivOwner">${ownerOpts(ME)}</select></div></div>
-   <div class="row" style="margin-top:12px"><button class="btn v" onclick="addInv()">+ Add item</button><button class="btn sm" onclick="downloadInvTemplate()">↓ CSV template</button><button class="btn sm" onclick="$('ivCSV').click()">Import CSV</button><input id="ivCSV" type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="importInv(this)"></div></div>`:`<div class="card"><div class="lab" style="text-transform:none;letter-spacing:0">➕ Adding &amp; importing inventory is restricted for your role.</div></div>`;
+ let h=canEdit?`<div class="card"><div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="font-size:15px">Inventory</h3><div class="row" style="gap:6px"><button class="btn v sm" onclick="invFormOpen('add')">+ Add inventory</button><button class="btn sm" onclick="downloadInvTemplate()">↓ CSV template</button><button class="btn sm" onclick="$('ivCSV').click()">Import CSV</button><input id="ivCSV" type="file" accept=".csv,.tsv,.txt" style="display:none" onchange="importInv(this)"></div></div></div>`:`<div class="card"><div class="lab" style="text-transform:none;letter-spacing:0">Adding &amp; importing inventory is restricted for your role.</div></div>`;
  h+=`<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:16px">
    <div class="metric"><div class="n">${money(rl.cost)}</div><div class="l">Capital deployed</div></div>
    <div class="metric"><div class="n">${money(rl.market)}</div><div class="l">Market value · <span style="color:${rl.gain>=0?'#0a8a4a':'var(--red)'}">${rl.gain>=0?'+':''}${money(rl.gain)}</span></div></div>
@@ -1720,7 +1696,12 @@ function dInventory(){const admin=ROLE==='admin';const canEdit=hasCap('act.inven
    <div id="invListBox"></div></div>`;
  h+=buyListHTML();
  $('dtc').innerHTML=h;gRenderCols(INVG);gRenderList(INVG);invEnsureDelegation();
- if(window._invPrefillCard){const c=window._invPrefillCard;window._invPrefillCard=null;invAutofillFromCard(c);}else if(ivLinked)invRenderChip();}
+ if(window._invPrefillCard){const c=window._invPrefillCard;window._invPrefillCard=null;invFormOpen('add');invFormPrefillCard(c);}}
+/* "Add to inventory" from the card library → open the type-aware form prefilled from the card. */
+function invFormPrefillCard(c){if(!c||!document.getElementById('ivf_type'))return;const t=$('ivf_type');if(t){t.value='raw_card';invFormTypeChange();}
+ const set=(k,v)=>{const el=$(k);if(el&&v!=null&&(''+v).trim()!=='')el.value=v;};
+ set('ivf_name',c.name);set('ivf_line',c.set_name||c.set);set('ivf_cardnum',c.num);set('ivf_parallel',c.parallel);if(c.year||(c.set&&c.set.year))set('ivf_year',c.year||c.set.year);
+ if(INVEDIT)INVEDIT.cardLink={cardId:c.id,playerId:c.player_id||null,setId:c.set_id||null};invFormMarkExplicit();invFormSync();}
 /* Buy list: aggregate demand BY SET across scheduled shows (break-model allocations + manual
    needs) vs free-to-break supply. Driven by real shows + real inventory, not a placeholder. */
 function buyListHTML(){
@@ -1756,33 +1737,8 @@ function addInv(){const n=$('ivN').value.trim();if(!n){toast('Name is required')
 function ivBoxHint(){const el=$('ivPBHint');if(!el)return;const raw=+($('ivCo')&&$('ivCo').value)||0,bpc=Math.max(1,+($('ivBPC')&&$('ivBPC').value)||1),basis=(($('ivBasis')&&$('ivBasis').value)||'perbox');const pbc=(basis==='percase'&&bpc>1)?(raw/bpc):raw;
  el.textContent=pbc>0?('= '+money(pbc)+'/box'+((basis==='percase'&&bpc>1)?(' · case '+money(raw)):'')):'';el.style.color=pbc>0?'var(--red)':'';}
 /* ---- In-place inventory edit (same cost-basis-aware fields as the add form; corrects legacy items) ---- */
-function invEdit(id){if(!hasCap('act.inventory_edit')){toast('Editing inventory is restricted for your role');return;}
- const it=(S.inventory||[]).find(x=>x.id===id);if(!it)return;
- const pbc=(it.perBoxCost!=null&&it.perBoxCost!=='')?+it.perBoxCost:(+it.cost||0);
- $('modal').innerHTML=`<div class="row" style="justify-content:space-between;align-items:center"><h3 style="font-size:17px">Edit item</h3><button class="btn x sm" title="Close" aria-label="Close" onclick="invEditCloseRequest()">✕</button></div>
-   <div id="iveErr" class="lab" style="display:none;color:var(--red);text-transform:none;letter-spacing:0;margin:4px 0"></div>
-   <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-top:6px">
-   <div><label>Name</label><input id="iveN" value="${esc(it.name||'')}" onkeydown="if(event.key==='Enter')invEditSave('${id}')"></div>
-   <div><label>Category</label>${pickInput({id:'iveC',list:'invcats',value:it.cat||'',placeholder:'category'})}</div>
-   <div><label>Set / product</label><input id="iveSet" value="${esc(it.set||'')}" placeholder="set name"></div>
-   <div><label>Qty (boxes on hand)</label><input id="iveQ" type="number" min="0" value="${esc(''+(it.qty!=null?it.qty:1))}"></div>
-   <div><label>Cost $</label><input id="iveCo" type="number" min="0" value="${esc(''+pbc)}" oninput="iveBoxHint()"></div>
-   <div><label>Cost basis</label><select id="iveBasis" onchange="iveBoxHint()"><option value="perbox">per box / unit</option><option value="percase">per case</option></select></div>
-   <div><label>Boxes / case</label><input id="iveBPC" type="number" min="1" value="${esc(''+Math.max(1,+it.boxesPerCase||1))}" oninput="iveBoxHint()"></div>
-   <div style="align-self:end"><label>&nbsp;</label><div id="ivePBHint" class="lab" style="text-transform:none;letter-spacing:0;font-size:12px;padding-bottom:9px"></div></div>
-   <div><label>Market $</label><input id="iveV" type="number" min="0" value="${esc(''+(it.value!=null?it.value:0))}"></div>
-   <div><label>Grading co.</label>${pickInput({id:'iveGC',list:'grading',value:it.gradingCompany||'',placeholder:'raw/sealed'})}</div>
-   <div><label>Grade</label><input id="iveGrade" value="${esc(it.grade||'')}" placeholder="10 / 9.5"></div>
-   <div><label>Card #</label><input id="iveNum" value="${esc(it.cardNumber||'')}"></div>
-   <div><label>Year</label><input id="iveYear" type="number" value="${esc(it.year!=null?(''+it.year):'')}"></div>
-   <div><label>Parallel</label><input id="ivePar" value="${esc(it.parallel||'')}"></div>
-   <div><label>Condition</label>${pickInput({id:'iveG',list:'conditions',value:it.cond||'',placeholder:'NM / Sealed'})}</div>
-   <div><label>Owner</label><select id="iveOwner">${ownerOpts(it.owner)}</select></div>
-   <div><label>Image</label><div class="row" style="gap:6px"><input id="iveImg" value="${esc(it.img||'')}" placeholder="URL or upload" style="min-width:0" onchange="ivePv()"><button class="btn sm" onclick="iveUpload()">⬆</button></div></div>
-   </div>
-   <div style="margin-top:6px"><img id="iveImgPv" src="${esc(it.img||'')}" style="height:44px;border-radius:5px;border:1px solid var(--line);${it.img?'':'display:none'}"></div>
-   <div class="row" style="margin-top:14px;gap:8px"><button class="btn v" onclick="invEditSave('${id}')">Save changes</button><button class="btn sm" onclick="invEditCloseRequest()">Cancel</button></div>`;
- $('ov').style.display='flex';iveBoxHint();invEditOpen(id);setTimeout(()=>{const el=$('iveN');if(el){el.focus();el.select();}},50);}
+/* Row-click / Edit button entry point — now opens the shared type-aware form (Pass 2.5). */
+function invEdit(id){invFormOpen('edit',id);}
 function iveBoxHint(){const el=$('ivePBHint');if(!el)return;const raw=+($('iveCo')&&$('iveCo').value)||0,bpc=Math.max(1,+($('iveBPC')&&$('iveBPC').value)||1),basis=(($('iveBasis')&&$('iveBasis').value)||'perbox');const pbc=(basis==='percase'&&bpc>1)?(raw/bpc):raw;el.textContent='= '+money(pbc)+'/box'+((basis==='percase'&&bpc>1)?(' · case '+money(raw)):'');el.style.color=pbc>0?'var(--red)':'';}
 function ivePv(){const el=$('iveImg'),pv=$('iveImgPv');if(pv&&el){pv.src=(el.value||'').trim();pv.style.display=(el.value||'').trim()?'inline-block':'none';}}
 function iveUpload(){pickImage(url=>{const el=$('iveImg');if(el)el.value=url;ivePv();});}
@@ -1791,6 +1747,138 @@ function iveUpload(){pickImage(url=>{const el=$('iveImg');if(el)el.value=url;ive
 function invClampRes(it){if(!it||!Array.isArray(it.reservations))return 0;const cap=Math.max(0,+it.qty||0);let sum=it.reservations.reduce((s,r)=>s+(+r.qty||0),0),trimmed=0;
  for(let i=it.reservations.length-1;i>=0&&sum>cap;i--){const r=it.reservations[i];const cut=Math.min(+r.qty||0,sum-cap);r.qty=(+r.qty||0)-cut;sum-=cut;trimmed+=cut;}
  it.reservations=it.reservations.filter(r=>(+r.qty||0)>0);return trimmed;}
+/* ===== Pass 2.5 — type-aware inventory Add/Edit form. ONE shared field + visibility model for both,
+   reusing the Pass 2.2 dismissal machine (#ov/#modal, backdrop/Escape, dirty/discard) + existing
+   owner/image/pickInput infra. ADDITIVE structured fields written only when explicitly entered; the
+   legacy compat fields (cat/set/year/boxesPerCase/perBoxCost/value/…) are always dual-written so Break
+   Planner, grid, cost, and reservation behavior are unchanged. No ledger emission, no schema change. */
+const INVF_TYPES=[['sealed_product','Sealed product'],['graded_card','Graded card'],['raw_card','Raw card'],['lot_bundle','Lot / bundle']];
+const INVF_DOMAINS=['TCG','Sports cards','Entertainment','Other'];
+const INVF_SPORTS=['Baseball','Basketball','Football','Soccer','Hockey','Golf','Racing','Wrestling','Other'];
+const INVF_GAMES=['Pokémon','One Piece','Magic: The Gathering','Yu-Gi-Oh!','Lorcana','Dragon Ball','Digimon','Other'];
+const INVF_PKGS=[['case','Case'],['box','Box'],['pack','Pack'],['bundle','Bundle'],['tin','Tin'],['blister','Blister'],['other','Other']];
+const INVF_CONFIGS=['Hobby','Retail','Mega','Blaster','Jumbo','H2','FOTL','Choice','Booster','Elite Trainer Box','Booster Bundle','Collection','Premium Collection','Ultra-Premium Collection'];
+const INVF_BRANDS=['Pokémon','Topps','Panini','Upper Deck','Leaf','Bandai'];
+let _invfCards=[];
+function invFormLegacyCat(type,pkg){if(type==='graded_card')return 'Slab';if(type==='raw_card')return 'Raw card';if(type==='lot_bundle')return 'Other';return ({case:'Case',box:'Box',pack:'Pack',bundle:'Pack',tin:'ETB / Sealed',blister:'ETB / Sealed',other:'ETB / Sealed'})[pkg]||'Box';}
+function invfV(k){const el=$(k);return el?(''+el.value).trim():'';}
+function invFormVisMap(type,domain,pkg){type=(type!=null?type:invfV('ivf_type'));domain=(domain!=null?domain:invfV('ivf_domain'));pkg=(pkg!=null?pkg:invfV('ivf_package'));
+ const s=type==='sealed_product',g=type==='graded_card',r=type==='raw_card',l=type==='lot_bundle',card=g||r;
+ return {name:true,qty:true,cost:true,value:true,owner:true,img:true,domain:true,
+  sport:domain==='Sports cards',game:domain==='TCG',franchise:domain==='Entertainment',catdetail:domain==='Other',
+  manufacturer:s,product_year:s||card,product_line:s||card||l,configuration:s,package:s,bpc:s&&pkg==='case',basis:s,
+  linkedcard:card,cardnum:card,parallel:card,gc:g,grade:g,cert:g,cond:s||r,itemcount:l,description:l};}
+function invFormSync(){const v=invFormVisMap();document.querySelectorAll('#modal [data-ivf]').forEach(el=>{el.style.display=v[el.getAttribute('data-ivf')]?'':'none';});
+ const ql=$('ivf_qtylabel');if(ql)ql.textContent=(invfV('ivf_package')==='case')?'Quantity of cases':'Quantity';invFormBoxHint();}
+function invFormBoxHint(){const el=$('ivf_boxhint');if(!el)return;const raw=+invfV('ivf_cost')||0,bpc=Math.max(1,+invfV('ivf_bpc')||1),basis=invfV('ivf_basis')||'perbox';const pbc=(basis==='percase'&&bpc>1)?(raw/bpc):raw;el.textContent=pbc>0?('= '+money(pbc)+'/box'+((basis==='percase'&&bpc>1)?(' · case '+money(raw)):'')):'';}
+function invFormMarkExplicit(){if(INVEDIT)INVEDIT.typeExplicit=true;invFormHideDerivedNote();}
+function invFormHideDerivedNote(){const n=$('ivf_derivednote');if(n&&INVEDIT&&INVEDIT.typeExplicit)n.style.display='none';}
+function invFormUseClassification(){if(!INVEDIT)return;INVEDIT.typeExplicit=true;INVEDIT.catDirty=false;invFormHideDerivedNote();toast('Classification set — save to store it');}
+function invFormTypeChange(){const sel=$('ivf_type');if(!sel||!INVEDIT)return;const nt=sel.value,prev=INVEDIT._prevType||'';
+ if(INVEDIT.mode==='add'&&prev&&prev!==nt){const lost=invFormHiddenWithData(prev,nt);if(lost.length&&!confirm('Switch type? Unsaved '+lost.join(', ')+' will be cleared.')){sel.value=prev;return;}invFormClearHidden(nt);}
+ if(INVEDIT.mode==='add'&&nt==='sealed_product'&&invfV('ivf_cond')===''){const c=$('ivf_cond');if(c)c.value='Sealed';}
+ INVEDIT._prevType=nt;INVEDIT.typeExplicit=true;INVEDIT.catDirty=true;invFormHideDerivedNote();invFormSync();}
+const _INVF_TS=[['manufacturer','ivf_brand','Brand'],['configuration','ivf_config','Configuration'],['package','ivf_package','Package type'],['bpc','ivf_bpc','Boxes per case'],['gc','ivf_gc','Grading company'],['grade','ivf_grade','Grade'],['cert','ivf_cert','Cert #'],['cardnum','ivf_cardnum','Card #'],['parallel','ivf_parallel','Parallel'],['itemcount','ivf_itemcount','Item count'],['description','ivf_desc','Description'],['cond','ivf_cond','Condition']];
+function invFormHiddenWithData(prev,nt){const cur=invFormVisMap(prev),next=invFormVisMap(nt);const out=[];_INVF_TS.forEach(([k,id,label])=>{if(cur[k]&&!next[k]&&invfV(id)!=='')out.push(label);});return out;}
+function invFormClearHidden(nt){const next=invFormVisMap(nt);_INVF_TS.forEach(([k,id])=>{if(!next[k]){const el=$(id);if(el)el.value='';}});}
+function invfImgPv(){const el=$('ivf_img'),pv=$('ivf_imgpv');if(pv&&el){pv.src=(el.value||'').trim();pv.style.display=(el.value||'').trim()?'inline-block':'none';}}
+function invfUpload(){pickImage(url=>{const el=$('ivf_img');if(el){el.value=url;invfImgPv();}});}
+async function invfCardSearch(q){const box=$('ivf_cardresults');if(!box)return;q=(q||'').trim();if(q.length<2){box.innerHTML='';return;}const list=await dbCardLibrarySearch(q);_invfCards=list;
+ box.innerHTML=list.length?`<div style="background:var(--surface);border:1px solid var(--line);border-radius:8px;max-height:180px;overflow:auto;box-shadow:0 8px 24px #0003">${list.map(c=>`<div class="grow" style="padding:6px 8px;cursor:pointer" onclick="invfPickCard('${c.id}')"><b>${esc(c.name||'')}</b> <span class="lab">${esc([c.set_name,c.num,c.parallel].filter(Boolean).join(' · '))}</span></div>`).join('')}</div>`:'';}
+function invfPickCard(id){const c=_invfCards.find(x=>x.id===id);if(!c)return;const set=(k,v)=>{const el=$(k);if(el&&v!=null&&(''+v).trim()!=='')el.value=v;};
+ if(invfV('ivf_name')==='')set('ivf_name',c.name);set('ivf_line',c.set_name);set('ivf_cardnum',c.num);set('ivf_parallel',c.parallel);if(c.set&&c.set.year)set('ivf_year',c.set.year);
+ if(INVEDIT)INVEDIT.cardLink={cardId:c.id,playerId:c.player_id||null,setId:c.set_id||null};invFormMarkExplicit();const box=$('ivf_cardresults');if(box)box.innerHTML='';const cs=$('ivf_cardsearch');if(cs)cs.value=c.name||'';}
+function invFormBodyHTML(mode,it,explicitType,derivedType){const isEdit=mode==='edit';it=it||{};
+ const typeVal=isEdit?(explicitType||derivedType||''):'';const legacyDerived=isEdit&&!explicitType&&!!derivedType;
+ const pbc=(it.perBoxCost!=null&&it.perBoxCost!=='')?+it.perBoxCost:(+it.cost||0);
+ const opt=(arr,cur)=>arr.map(o=>{const v=Array.isArray(o)?o[0]:o,l=Array.isArray(o)?o[1]:o;return `<option value="${esc(v)}" ${cur===v?'selected':''}>${esc(l)}</option>`;}).join('');
+ const fld=(key,label,ctrl,note)=>`<div data-ivf="${key}"><label>${label}</label>${ctrl}${note?`<div class="lab" style="text-transform:none;letter-spacing:0;font-size:11px">${note}</div>`:''}</div>`;
+ const num=(id,v,ph)=>`<input id="${id}" type="number" min="0" value="${esc(v==null?'':(''+v))}" ${ph?`placeholder="${esc(ph)}"`:''}>`;
+ const txt=(id,v,ph,extra)=>`<input id="${id}" value="${esc(v==null?'':(''+v))}" ${ph?`placeholder="${esc(ph)}"`:''} ${extra||''}>`;
+ const g=k=>it[k]!=null?it[k]:'';
+ return `<div class="row" style="justify-content:space-between;align-items:center"><h3 style="font-size:17px">${isEdit?'Edit item':'Add inventory'}</h3><button class="btn x sm" title="Close" aria-label="Close" onclick="invEditCloseRequest()">✕</button></div>
+   <div id="ivf_err" class="lab" style="display:none;color:var(--red);text-transform:none;letter-spacing:0;margin:4px 0"></div>
+   <div style="margin-top:4px"><label>Inventory type${isEdit?'':' *'}</label><select id="ivf_type" onchange="invFormTypeChange()"><option value="">Select type…</option>${opt(INVF_TYPES,typeVal)}</select>
+     <div id="ivf_derivednote" class="lab" style="text-transform:none;letter-spacing:0;font-size:11.5px;margin-top:3px;display:${legacyDerived?'block':'none'}">Derived from legacy Category — <a onclick="invFormUseClassification()" style="cursor:pointer;color:#2563eb">Use this classification</a></div></div>
+   <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-top:8px">
+   ${fld('domain','Domain'+(isEdit?'':' *'),`<select id="ivf_domain" onchange="invFormMarkExplicit();invFormSync()"><option value="">—</option>${opt(INVF_DOMAINS,g('domain'))}</select>`)}
+   ${fld('sport','Sport',`${pickInput({id:'ivf_sport',list:INVF_SPORTS,value:g('sport'),placeholder:'Baseball…',oninput:'invFormMarkExplicit()'})}`)}
+   ${fld('game','Game',`${pickInput({id:'ivf_game',list:INVF_GAMES,value:g('game'),placeholder:'Pokémon…',oninput:'invFormMarkExplicit()'})}`)}
+   ${fld('franchise','Franchise / property',txt('ivf_franchise',g('franchise'),'',`oninput="invFormMarkExplicit()"`))}
+   ${fld('catdetail','Category detail',txt('ivf_catdetail',it.category_detail,'',`oninput="invFormMarkExplicit()"`))}
+   ${fld('manufacturer','Manufacturer / brand',`${pickInput({id:'ivf_brand',list:INVF_BRANDS,value:it.manufacturer,placeholder:'Topps…',oninput:'invFormMarkExplicit()'})}`)}
+   ${fld('product_year','Year',num('ivf_year',it.product_year!=null&&it.product_year!==''?it.product_year:it.year,'2026'))}
+   ${fld('product_line','Product line / set',`${pickInput({id:'ivf_line',list:'sets',value:(it.product_line!=null&&it.product_line!==''?it.product_line:it.set),placeholder:'search sets…'})}`)}
+   ${fld('configuration','Configuration',`${pickInput({id:'ivf_config',list:INVF_CONFIGS,value:it.configuration,placeholder:'Hobby / Booster…',oninput:'invFormMarkExplicit()'})}`)}
+   ${fld('package','Package type',`<select id="ivf_package" onchange="invFormMarkExplicit();INVEDIT&&(INVEDIT.catDirty=true);invFormSync()"><option value="">—</option>${opt(INVF_PKGS,it.package_type||invPackage(it)||'')}</select>`)}
+   ${fld('bpc','Boxes per case',`<input id="ivf_bpc" type="number" min="1" value="${esc(''+Math.max(1,+(it.units_per_case||it.boxesPerCase)||1))}" oninput="invFormMarkExplicit();invFormBoxHint()">`)}
+   ${fld('basis','Cost basis',`<select id="ivf_basis" onchange="invFormMarkExplicit();invFormBoxHint()"><option value="perbox" ${((it.cost_basis_mode||'perbox')==='perbox')?'selected':''}>per box / unit</option><option value="percase" ${(it.cost_basis_mode==='percase')?'selected':''}>per case</option></select>`)}
+   ${fld('linkedcard','Linked card (optional)',`<input id="ivf_cardsearch" placeholder="search card library…" autocomplete="off" oninput="invfCardSearch(this.value)"><div id="ivf_cardresults" style="position:relative;z-index:5"></div>`)}
+   ${fld('cardnum','Card #',txt('ivf_cardnum',it.cardNumber,'199/191'))}
+   ${fld('parallel','Parallel / rarity',txt('ivf_parallel',it.parallel,'SIR…'))}
+   ${fld('gc','Grading company',`${pickInput({id:'ivf_gc',list:'grading',value:it.gradingCompany,placeholder:'PSA…'})}`)}
+   ${fld('grade','Grade',txt('ivf_grade',it.grade,'10 / 9.5'))}
+   ${fld('cert','Certification #',txt('ivf_cert',it.certification_number,'',`oninput="invFormMarkExplicit()"`))}
+   ${fld('cond','Condition',`${pickInput({id:'ivf_cond',list:'conditions',value:it.cond,placeholder:'NM / Sealed'})}`)}
+   ${fld('itemcount','Item count (approx contents)',`<input id="ivf_itemcount" type="number" min="0" value="${esc(it.item_count!=null?(''+it.item_count):'')}" placeholder="e.g. 60" oninput="invFormMarkExplicit()">`)}
+   ${fld('description','Description',txt('ivf_desc',it.description,'',`oninput="invFormMarkExplicit()"`))}
+   ${fld('qty','<span id="ivf_qtylabel">Quantity</span>',`<input id="ivf_qty" type="number" min="0" value="${esc(''+(it.qty!=null?it.qty:(isEdit?'':1)))}">`)}
+   ${fld('cost','Cost $',`<input id="ivf_cost" type="number" min="0" value="${esc(isEdit?(''+pbc):'')}" placeholder="0" oninput="invFormBoxHint()"><div id="ivf_boxhint" class="lab" style="text-transform:none;letter-spacing:0;font-size:11px"></div>`)}
+   ${fld('value','Market $',`<input id="ivf_value" type="number" min="0" value="${esc(it.value!=null?(''+it.value):(isEdit?'0':''))}" placeholder="0">`)}
+   ${fld('owner','Owner',`<select id="ivf_owner">${ownerOpts(isEdit?it.owner:ME)}</select>`)}
+   ${fld('img','Image',`<div class="row" style="gap:6px"><input id="ivf_img" value="${esc(it.img||'')}" placeholder="URL or upload" style="min-width:0" onchange="invfImgPv()"><button class="btn sm" onclick="invfUpload()">⬆</button></div><img id="ivf_imgpv" src="${esc(it.img||'')}" style="height:40px;border-radius:5px;margin-top:4px;border:1px solid var(--line);${it.img?'':'display:none'}">`)}
+   ${fld('name','Name'+(isEdit?'':' *'),txt('ivf_name',it.name,'item name'))}
+   </div>
+   <div class="row" style="margin-top:14px;gap:8px"><button class="btn v" onclick="invFormSave('${mode}','${isEdit?it.id:''}')">${isEdit?'Save changes':'Add item'}</button><button class="btn sm" onclick="invEditCloseRequest()">Cancel</button></div>`;}
+function invFormOpen(mode,id){if(!hasCap('act.inventory_edit')){toast('Editing inventory is restricted for your role');return;}
+ const it=mode==='edit'?(S.inventory||[]).find(x=>x.id===id):null;if(mode==='edit'&&!it)return;const item=it||{};
+ const explicitType=(mode==='edit'&&INV_TYPES.includes(item.inventory_type))?item.inventory_type:'';
+ const derivedType=mode==='edit'?invType(item):'';_invfCards=[];
+ $('modal').innerHTML=invFormBodyHTML(mode,item,explicitType,derivedType);
+ $('ov').style.display='flex';invEditOpen(id||null);
+ INVEDIT.mode=mode;INVEDIT.typeExplicit=(mode==='edit'&&!!explicitType);INVEDIT.catDirty=false;
+ INVEDIT.cardLink={cardId:item.cardId||null,playerId:item.playerId||null,setId:item.setId||null};INVEDIT._prevType=explicitType||derivedType||'';
+ invFormSync();setTimeout(()=>{const el=$(mode==='add'?'ivf_type':'ivf_name');if(el){el.focus();if(el.select)el.select();}},50);}
+function invFormValidate(mode){const type=invfV('ivf_type'),name=invfV('ivf_name'),domain=invfV('ivf_domain');
+ const q=invfV('ivf_qty'),c=invfV('ivf_cost'),v=invfV('ivf_value');
+ if(!name)return 'Name is required.';
+ if(q!==''&&(isNaN(+q)||+q<0))return 'Quantity must be a number ≥ 0.';
+ if(c!==''&&(isNaN(+c)||+c<0))return 'Cost must be a number ≥ 0.';
+ if(v!==''&&(isNaN(+v)||+v<0))return 'Market value must be a number ≥ 0.';
+ const classified=(mode==='add')||(INVEDIT&&INVEDIT.typeExplicit);if(!classified)return null;
+ if(!type)return 'Select an inventory type.';
+ if(!domain)return 'Select a domain.';
+ if(domain==='Sports cards'&&!invfV('ivf_sport'))return 'Sport is required for Sports cards.';
+ if(domain==='TCG'&&!invfV('ivf_game'))return 'Game is required for TCG.';
+ if(type==='sealed_product'){if(!invfV('ivf_line'))return 'Product line / set is required.';if(!invfV('ivf_config'))return 'Configuration is required.';if(!invfV('ivf_package'))return 'Package type is required.';if(invfV('ivf_package')==='case'&&!(Math.max(0,+invfV('ivf_bpc')||0)>0))return 'Boxes per case must be greater than 0.';}
+ else if(type==='graded_card'){if(!invfV('ivf_gc'))return 'Grading company is required.';if(!invfV('ivf_grade'))return 'Grade is required.';}
+ else if(type==='raw_card'){if(!invfV('ivf_cond'))return 'Condition is required.';}
+ else if(type==='lot_bundle'){if(q==='')return 'Quantity is required.';if(invfV('ivf_itemcount')!==''&&!(+invfV('ivf_itemcount')>0))return 'Item count must be positive.';}
+ return null;}
+function invFormSave(mode,id){if(!hasCap('act.inventory_edit')){toast('Editing is restricted for your role');return;}
+ const it=mode==='edit'?(S.inventory||[]).find(x=>x.id===id):null;if(mode==='edit'&&!it)return;
+ const err=m=>{const e=$('ivf_err');if(e){e.textContent=m;e.style.display='block';}};
+ const bad=invFormValidate(mode);if(bad)return err(bad);
+ const type=invfV('ivf_type');
+ const bpc=Math.max(1,+invfV('ivf_bpc')||1),basis=invfV('ivf_basis')||'perbox',rawCost=+invfV('ivf_cost')||0,pbc=(basis==='percase'&&bpc>1)?(rawCost/bpc):rawCost;
+ const qStr=invfV('ivf_qty'),qty=(qStr===''?(mode==='add'?1:0):Math.max(0,+qStr||0));
+ const line=invfV('ivf_line'),year=invfV('ivf_year'),val=Math.max(0,+invfV('ivf_value')||0);
+ const owEl=$('ivf_owner'),owner=owEl?(owEl.value||null):(it?it.owner:ME);
+ /* always-written legacy-mapped fields (identical cost semantics to the old form) */
+ const patch={name:invfV('ivf_name'),qty,cost:pbc,perBoxCost:pbc,boxesPerCase:bpc,value:val,img:invfV('ivf_img'),owner,
+   set:line,year:year,gradingCompany:invfV('ivf_gc'),grade:invfV('ivf_grade'),cardNumber:invfV('ivf_cardnum'),parallel:invfV('ivf_parallel'),cond:invfV('ivf_cond')};
+ const classified=(mode==='add')||(INVEDIT&&INVEDIT.typeExplicit);
+ if(classified){patch.inventory_type=type;patch.units_per_case=bpc;patch.cost_basis_mode=basis;
+   if(line!=='')patch.product_line=line;if(year!=='')patch.product_year=year;
+   [['domain','ivf_domain'],['sport','ivf_sport'],['game','ivf_game'],['franchise','ivf_franchise'],['category_detail','ivf_catdetail'],['manufacturer','ivf_brand'],['configuration','ivf_config'],['package_type','ivf_package'],['certification_number','ivf_cert'],['description','ivf_desc']].forEach(([k,fid])=>{const v=invfV(fid);if(v!=='')patch[k]=v;});
+   if(invfV('ivf_itemcount')!=='')patch.item_count=Math.max(0,+invfV('ivf_itemcount')||0);
+   if(INVEDIT&&INVEDIT.cardLink&&INVEDIT.cardLink.cardId){patch.cardId=INVEDIT.cardLink.cardId;patch.playerId=INVEDIT.cardLink.playerId||null;}}
+ if(mode==='add'||(INVEDIT&&INVEDIT.catDirty))patch.cat=invFormLegacyCat(type,invfV('ivf_package'));
+ let newId=null;
+ if(mode==='add'){const rec=Object.assign({id:'i'+Date.now(),reservations:[],addedAt:Date.now(),setId:(INVEDIT&&INVEDIT.cardLink&&INVEDIT.cardLink.setId)||null},patch);newId=rec.id;S.inventory.push(rec);}
+ else{patch.setId=(line===(it.set||'')?it.setId:null);Object.assign(it,patch);invClampRes(it);}
+ invEditTeardown();save();closeM();const sy=window.scrollY;dInventory();window.scrollTo(0,sy);invFocusRow(mode==='edit'?id:null);
+ toast(mode==='add'?('Added “'+patch.name+'”'):('Updated “'+patch.name+'”'));}
 function invEditSave(id){if(!hasCap('act.inventory_edit')){toast('Editing is restricted for your role');return;}
  const it=(S.inventory||[]).find(x=>x.id===id);if(!it)return;
  const err=m=>{const e=$('iveErr');if(e){e.textContent=m;e.style.display='block';}};
@@ -1815,8 +1903,10 @@ let INVEDIT=null;
 function cssq(s){return (window.CSS&&CSS.escape)?CSS.escape(String(s)):String(s).replace(/["\\\]]/g,'\\$&');}
 /* baseline = the editable field values, normalized so "1" and 1 (and trimmed strings) never read dirty.
    Derived/helper text (the $/box hint, image preview) is not part of the snapshot. */
-function invEditSnapshot(){const g=i2=>{const el=$(i2);return el?(''+el.value).trim():'';},n=i2=>{const el=$(i2);return el?(+el.value||0):0;};
- return JSON.stringify({name:g('iveN'),cat:g('iveC'),set:g('iveSet'),qty:n('iveQ'),cost:n('iveCo'),basis:g('iveBasis'),bpc:n('iveBPC'),value:n('iveV'),gc:g('iveGC'),grade:g('iveGrade'),num:g('iveNum'),year:g('iveYear'),parallel:g('ivePar'),cond:g('iveG'),owner:g('iveOwner'),img:g('iveImg')});}
+/* dirty baseline over the unified form fields (normalized so "1"/1 don't false-trigger; rendering a
+   derived legacy type keeps it in the baseline, so opening a legacy record without edits stays clean). */
+function invEditSnapshot(){if(!document.getElementById('ivf_type'))return '__noform__';const g=k=>{const el=$(k);return el?(''+el.value).trim():'';},n=k=>{const el=$(k);return el?(+el.value||0):0;};
+ return JSON.stringify({type:g('ivf_type'),domain:g('ivf_domain'),sport:g('ivf_sport'),game:g('ivf_game'),franchise:g('ivf_franchise'),catdetail:g('ivf_catdetail'),brand:g('ivf_brand'),year:g('ivf_year'),line:g('ivf_line'),config:g('ivf_config'),pkg:g('ivf_package'),bpc:n('ivf_bpc'),basis:g('ivf_basis'),cardnum:g('ivf_cardnum'),parallel:g('ivf_parallel'),gc:g('ivf_gc'),grade:g('ivf_grade'),cert:g('ivf_cert'),cond:g('ivf_cond'),itemcount:g('ivf_itemcount'),desc:g('ivf_desc'),qty:n('ivf_qty'),cost:n('ivf_cost'),value:n('ivf_value'),owner:g('ivf_owner'),img:g('ivf_img'),name:g('ivf_name'),card:(INVEDIT&&INVEDIT.cardLink&&INVEDIT.cardLink.cardId)||''});}
 function invEditDirty(){return !!INVEDIT&&INVEDIT.baseline!==invEditSnapshot();}
 function invEditOpen(id){
  invEditTeardown(); // never stack listeners if opened while already open
