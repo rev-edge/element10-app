@@ -780,3 +780,74 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --   Rollback (fold into the M2 revert): drop function _e10_inv_clamp_res(text,text); the extra column can
 --     stay (nullable, harmless) or `alter table e10_inventory_items drop column extra`. Re-create the M2
 --     bodies of add_item/edit_item/mark_sold/consume (without extra/clamp) if reverting past M2.
+
+-- ═════════════════════════════════════════════════════════════════════════════
+-- APPLIED (migration e10_m31_mutation_hardening — M3.1a): PRE-M4 BLOCKER CLOSURE.
+-- Hardens the M2/M3 inventory mutation layer. ADDITIVE + REPLACE; inserts ZERO ledger rows. The blob
+-- 'shared' stays operational source of truth; each RPC drives rows+reservations+ledger+blob in ONE txn.
+-- Reconciliation (a stopped earlier run left partial artifacts): dropped the old e10_mutation_receipts
+-- (response/no fingerprint), BOTH e10_inv_consume + BOTH e10_inv_reverse_consumption overloads, the
+-- per-item e10_inv_set_reservation, and the 3-arg baseline e10_inv_edit_item. All RPC bodies rebuilt.
+--   BLOCKER 3 — mutation-level idempotency via e10_mutation_receipts(idempotency_key PK, rpc, item_id,
+--     actor_uid, movement_id, input_fingerprint, created_at). RLS on, NO client grants/policies (definer
+--     RPCs only). Every RPC: requires a key (null/empty rejected); takes pg_advisory_xact_lock(hashtext
+--     (key)) then checks the receipt BEFORE mutating; a key reused for a different rpc/item/actor/args
+--     (input_fingerprint = md5 of the normalized payload) is REJECTED, not replayed. Receipts are written
+--     ONLY for successfully committed mutations, same txn. Replay returns {ok,replay:true} with the
+--     original receipt identity + movement_id AND the CURRENT authoritative item state + rev (never stale
+--     stored state). Works for NO-MOVEMENT mutations (name edit, add qty 0, delete of a 0/0 item) whose
+--     movement_id is null — the ledger-as-receipt scheme could not. Concurrent same-key calls serialize
+--     on the advisory lock (PK is the backstop): one commit, one receipt, at most one movement.
+--   BLOCKER 2 — release authorization: e10_inv_release (and set_reservations, and consume's reservation
+--     drawdown) let a non-admin touch ONLY their own rows: (created_by = auth.uid() OR (created_by IS
+--     NULL AND streamer_uid = auth.uid()::text)); admin unrestricted. Legacy created_by=null rows were
+--     backfilled from streamer_uid where it parses to a member uuid (6 rows).
+--   BLOCKER 4 — atomic batch e10_inv_set_reservations(p_show_ref, p_show_label, p_targets jsonb
+--     [{item_id,qty}], p_idempotency_key): locks all target items in ID order (deadlock avoidance),
+--     validates EVERY target on fresh data first, then mutates + emits net movements (reservation /
+--     reservation_release, signed reserved_delta; zero-delta emits nothing) only if all pass — else
+--     {ok:false} naming the failing item, ZERO mutation. One receipt for the batch. Per-caller scoping
+--     (blocker 2): a non-admin sets only their own portion and can never absorb another user's; an admin
+--     sets the full (item,show) target. Per-item ledger keys are '<batch-key>:<item_id>'.
+--   BLOCKER 5 — break consumption is SERVER-DERIVED. Signatures: e10_inv_consume(p_id,
+--     p_break_session_id, p_source_show_ref, p_qty, key) — NO caller p_reserved_qty. The reserved portion
+--     is derived from active reservations MATCHED BY p_source_show_ref (never the session id), scoped to
+--     the caller (blocker 2), drawn down FIFO (oldest first; closed→status 'consumed', or decremented),
+--     and the exact allocation recorded in movement meta:
+--       {consumed_qty, source_show_ref, reserved_drawn, allocation:[{qty, show_ref, show_label,
+--        streamer_uid, created_by}, …]}  ← 2.10's history UI renders this.
+--     e10_inv_reverse_consumption(p_id, p_reverses_movement_id, key) RECONSTRUCTS pre-consume state from
+--     that meta: restores the consumed on-hand AND recreates the reservation rows as they were; its
+--     reserved_delta equals the quantity re-reserved. Double-reversal rejected (emit's at-most-once guard,
+--     23505, caught → {ok:false}). A ref with no matching reservations consumes unreserved stock
+--     (reserved_delta 0). A cancelled show is a SEPARATE explicit release after reversal — reversal never
+--     guesses intent.
+--   BLOCKER 6 — server invariants in EVERY RPC (direct callers can't bypass client validation): qty may
+--     never go negative — oversell / consume-past-zero rejected for EVERYONE incl admin; reserve/set
+--     never push reserved > qty (rejected, not clamped — the clamp helper still trims on qty-REDUCERS);
+--     cost/value/perBoxCost/proceeds >= 0; boxesPerCase >= 1 when present; numeric params validated (garbage
+--     strings → {ok:false}, never a cast-crash); reserved<=qty maintained. Reject with {ok:false,msg};
+--     never partial-apply.
+--   BLOCKER 7 — e10_inv_edit_item(p_id, p_patch, key, p_remove_keys text[] default null): WHITELIST-
+--     enforced deletion of structured/extra keys. Removal of anything OUTSIDE the whitelist is rejected;
+--     id/name/qty/cost/value/per-box/boxes-per-case/owner/reservations/sold/timestamps are protected.
+--     WHITELIST (2.6 builds against this verbatim) — columns set NULL: cardId, playerId, grade,
+--     grading_company, card_number, parallel, set, year; extra keys removed (extra - key): domain, sport,
+--     game, franchise, category_detail, manufacturer, product_year, product_line, configuration,
+--     package_type, certification_number, description, item_count, inventory_type, units_per_case,
+--     cost_basis_mode. DUAL-FIELD RULE (explicit, no implicit cascade): removing product_line does NOT
+--     clear set, nor product_year → year; 2.6 lists both twins when it means both. Removal applies in the
+--     same txn as the patch.
+--   BLOCKER 1 — client-side (index.html, M3.1b): reassignInv now routes owner change through
+--     e10_inv_edit_item (was a direct S.inventory write + save() that _sharedPayload/_invServerOwned
+--     silently dropped). See the M3.1b commit + the S.inventory write audit in the build report.
+--   Amended signatures now on the DB: e10_inv_edit_item(text,jsonb,text,text[]),
+--     e10_inv_consume(text,text,text,numeric,text), e10_inv_reverse_consumption(text,uuid,text),
+--     e10_inv_set_reservations(text,text,jsonb,text). All SECURITY DEFINER, search_path pinned, EXECUTE
+--     to authenticated only. Verified live 2026-07-14 with throwaway data (all 7 blockers), then torn
+--     down: baseline BYTE-IDENTICAL 35 items / 223 on-hand / $29,486 / ledger 35 openings / 21 reserved /
+--     recon drift 0 / 0 receipts.
+--   Rollback (down-block in the migration file): drop the batch RPC + receipts + M3.1 helpers + the
+--     amended consume/reverse/edit signatures, then re-apply the M2/M3 bodies (..124500/..130000/..131500).
+--     The created_by backfill is data-safe to leave. A git revert of M3.1b is an APPLICATION rollback; the
+--     additive DB objects remain.
