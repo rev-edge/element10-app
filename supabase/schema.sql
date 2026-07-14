@@ -567,3 +567,44 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --     · Teams — add column filter/sort to the roster list INSIDE the sport→league view (keep the hierarchy).
 --     · Ship/fulfillment — keep the buyer-GROUPED view; grid only a flat "all sold line-items" view if added.
 --     · Break-planner chase-pool/product/auction lists — small editable lists; grid only if it clearly helps.
+
+-- ─────────────────────────────────────────────────────────────
+-- APPLIED (migration e10_inventory_movement_ledger — Pass 2.1): append-only inventory MOVEMENT
+-- LEDGER + opening balances. ADDITIVE ONLY — the JSONB workspace inventory stays the production
+-- source of truth; the app does NOT read this table yet (no UI, no mutation-path emission). No
+-- existing inventory/reservation/break/live/overlay code or data was changed.
+--   e10_inventory_movements(
+--     id uuid pk, workspace_id text (='shared'; inventory is single-workspace, not multi-tenant),
+--     item_id text (the JSONB inventory item id — the item is NOT relational, so NO foreign key),
+--     owner_ref text (item owner email or null), movement_type text CHECK in
+--       (opening_balance,intake,manual_increase,manual_decrease,correction,reservation,
+--        reservation_release,break_consumption,break_reversal,sale,return,transfer,loss_damage),
+--     on_hand_delta numeric, reserved_delta numeric  -- INDEPENDENT deltas: an opening with 10 on hand
+--       and 3 reserved stores on_hand_delta=10, reserved_delta=3, NOT the available 7. numeric so
+--       future fractional qty is never truncated (current data is all integer).
+--     cost_basis jsonb  -- snapshot cost/perBoxCost/boxesPerCase/value/qty/total_cost_basis at migration
+--       time; NO FIFO/LIFO/avg methodology introduced, existing costs untouched.
+--     source_entity_type/id/action text, actor_uid uuid (null=system/migration), reason_code text,
+--     note text, idempotency_key text UNIQUE, reverses_movement_id uuid → self (CHECK <> id so an
+--       opening cannot reference itself; reversal BEHAVIOR not implemented this pass), migration_version
+--       text, meta jsonb, created_at timestamptz).
+--   Idempotency: UNIQUE(idempotency_key) [='opening:e10_inventory_movement_ledger:shared:'||item_id]
+--     + partial UNIQUE(workspace_id,item_id,migration_version) WHERE movement_type='opening_balance'.
+--     Backfill uses ON CONFLICT DO NOTHING → a second run creates ZERO rows (verified: would-insert=0).
+--   Indexes: (workspace_id,item_id,created_at) item history; (workspace_id,created_at) ws history;
+--     (source_entity_type,source_entity_id); partial (reverses_movement_id) WHERE not null; idem unique.
+--   RLS: member READ only — imov_sel for select using ((select public.e10_is_member())) [InitPlan-wrapped,
+--     mirrors e10_cards]. NO insert/update/delete policies → APPEND-ONLY for app users; opening balances
+--     are written by the migration (postgres bypasses RLS). A future movement-emitting pass adds an
+--     insert policy. Verified: member read=35, non-member read=0, member update/delete=0 rows, member
+--     insert rejected (42501). Never weaker than the inventory/break-session policies.
+--   Opening backfill: exactly ONE opening_balance per inventory item (35/35), read from e10_workspace
+--     'shared'. Reconciled IN-MIGRATION (raises exception → rolls back the whole migration on any
+--     mismatch): on_hand Σ=223, reserved Σ=21, available=202, capital $29,486 — all reconcile to the
+--     live JSONB. Openings are labeled opening_balance ONLY (never purchase/sale/adjustment); NO
+--     historical acquisition dates inferred.
+--   Rollback (ledger-only, DO NOT run unless reverting this pass):
+--       drop table if exists public.e10_inventory_movements cascade;
+--     Removes the table, its policies, indexes, and every opening-balance row. Touches NOTHING else —
+--     the JSONB inventory / reservations / shows / break sessions / break products are never referenced,
+--     and no inventory needs rebuilding from the ledger.
