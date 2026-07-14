@@ -2443,25 +2443,78 @@ function isEditing(){const a=document.activeElement;return !!a&&(a.tagName==='IN
 function safeRender(){if(isEditing()){_pendingRender=true;return;}currentRender();}
 document.addEventListener('focusout',()=>{setTimeout(()=>{if(_pendingRender&&!isEditing()){_pendingRender=false;currentRender();}},0);});
 
-/* Returns true on a clean upsert, false on error. The optimistic REVS bump is rolled back on error,
-   GUARDED so a concurrent bump (a realtime apply or a second write) isn't clobbered — otherwise a
-   failed write leaves REVS claiming a rev that never landed and the tab then ignores legitimate remote
-   updates at the real rev. The failure TOAST is fired by doCloudWrite, not here, so the loadAll
-   bootstrap write stays silent. */
-async function writeRow(id,owner,data){const rev=(REVS[id]||0)+1;REVS[id]=rev;const row={id,data,rev,owner,updated_by:ME,updated_at:new Date().toISOString()};const{error}=await sb.from('e10_workspace').upsert(row);if(error){console.warn('save',id,error.message);if(REVS[id]===rev)REVS[id]=rev-1;return false;}return true;}
+/* ===== H2 — workspace compare-and-swap. A stale write FAILS at the DB (conditional UPDATE …WHERE
+   rev=<expected>) instead of blindly overwriting. On a rev drift we fetch the remote row and do a PURE
+   section-level three-way merge against the last-synced base; mergeable → retry once at the new rev;
+   a true section conflict is surfaced (Keep mine / Take theirs), never silently resolved. ===== */
+const _sharedPayload=()=>({comments:S.comments,todos:S.todos,streamers:S.streamers,lists:S.lists,attachments:S.attachments,checklists:S.checklists,inventory:S.inventory,repacks:S.repacks});
+const _scopedPayload=()=>({shows:S.shows,breaks:S.breaks,copySets:S.copySets,dashCfg:S.dashCfg,sales:S.sales,chaseLists:S.chaseLists});
+function _keysFor(id){return id==='shared'?SHARED_KEYS:SCOPED_KEYS;}
+function _splitFor(id,d){return id==='shared'?splitLegacy(d).sh:splitLegacy(d).sc;}      // reuse the SAME apply path realtime uses
+function _baseObj(id){const j=id==='shared'?_lastShared:(id===SCOPED_ID?_lastScoped:null);try{return j?JSON.parse(j):null;}catch(e){return null;}}
+function _setCache(id,obj){const j=JSON.stringify(obj);if(id==='shared')_lastShared=j;else if(id===SCOPED_ID)_lastScoped=j;}
+function _applyPayload(id,obj){_applyingRemote=true;if(id==='shared')SHARED=_splitFor('shared',obj);else SCOPED=_splitFor(SCOPED_ID,obj);rebuildS();safeRender();_applyingRemote=false;}
+/* PURE: (base, local, remote, keys) → {merged, conflicts[]}. Per section: local==base → take remote;
+   remote==base → take local; both→same → fine; both changed differently → conflict (default local). */
+function mergeWorkspace(base,local,remote,keys){base=base||{};local=local||{};remote=remote||{};const merged={},conflicts=[];
+ keys.forEach(k=>{const b=JSON.stringify(base[k]),l=JSON.stringify(local[k]),r=JSON.stringify(remote[k]);
+  if(l===r)merged[k]=local[k]; else if(l===b)merged[k]=remote[k]; else if(r===b)merged[k]=local[k]; else{merged[k]=local[k];conflicts.push(k);}});
+ return{merged,conflicts};}
+/* conditional UPDATE — Postgres statement atomicity makes this a true CAS. Legacy null/0-rev rows: match rev 0 OR null. */
+async function _cas(id,owner,data,expected){let q=sb.from('e10_workspace').update({data,rev:(expected||0)+1,owner,updated_by:ME,updated_at:new Date().toISOString()}).eq('id',id);
+ q=expected?q.eq('rev',expected):q.or('rev.eq.0,rev.is.null');const{data:up,error}=await q.select('rev');return{rows:(up&&up.length)||0,error};}
+async function writeRow(id,owner,data){
+ const expected=REVS[id]||0,base=_baseObj(id); /* snapshot base UP FRONT — it must correspond to `data`; a realtime apply during the awaits below can shift _lastShared, which would flip the 3-way merge */
+ const res=await _cas(id,owner,data,expected);
+ if(res.error){console.warn('save',id,res.error.message);return{ok:false};}
+ if(res.rows){REVS[id]=expected+1;_setCache(id,data);return{ok:true};}
+ /* zero rows: the row is missing (create it) or its rev drifted (conflict) */
+ let remote=null;try{remote=await fetchRow(id);}catch(e){return{ok:false};}
+ if(!remote){const{error}=await sb.from('e10_workspace').upsert({id,data,rev:expected+1,owner,updated_by:ME,updated_at:new Date().toISOString()});if(error){console.warn('save',id,error.message);return{ok:false};}REVS[id]=expected+1;_setCache(id,data);return{ok:true};}
+ const keys=_keysFor(id),remObj=_splitFor(id,remote.data||{}),remRev=remote.rev||0;
+ if(!base){_surfaceConflict(id,keys.slice(),data,remObj,remote,null);return{ok:false,conflict:true};} /* no base to 3-way against → surface, never silent-overwrite */
+ const{merged,conflicts}=mergeWorkspace(base,data,remObj,keys);
+ if(conflicts.length){_surfaceConflict(id,conflicts,data,remObj,remote,merged);return{ok:false,conflict:true};}
+ const rr=await _cas(id,owner,merged,remRev);          /* clean section merge → retry ONCE at the remote rev */
+ if(rr.error||!rr.rows)return{ok:false};              /* another write landed in the gap; next tick retries */
+ REVS[id]=remRev+1;_setCache(id,merged);_applyPayload(id,merged);return{ok:true,merged:true};
+}
+/* True-conflict surface: one terse toast + a minimal review affordance (section, other author, time). */
+let _conflict=null;
+function _surfaceConflict(id,sections,localObj,remoteObj,remoteRow,mergedObj){
+ _conflict={id,sections:sections.slice(),localObj,remoteObj,remRev:remoteRow.rev||0,by:remoteRow.updated_by,at:remoteRow.updated_at,merged:mergedObj};
+ toast('Sync conflict — review');const old=$('wsConflict');if(old)old.remove();
+ const box=document.createElement('div');box.id='wsConflict';box.className='ov';box.style.display='flex';
+ box.innerHTML=`<div class="modal" style="max-width:400px"><h3 style="font-size:16px">Sync conflict</h3>
+   <div class="lab" style="text-transform:none;letter-spacing:0;margin:6px 0 14px">${esc(_conflict.sections.join(', '))} · ${esc(ownerName(_conflict.by)||'another editor')}${_conflict.at?' · '+esc(new Date(_conflict.at).toLocaleTimeString()):''}</div>
+   <div class="row" style="gap:8px;justify-content:flex-end"><button class="btn" style="background:var(--red);color:#fff;border-color:var(--red)" onclick="wsConflictTake()">Take theirs</button><button class="btn v" onclick="wsConflictKeep()">Keep mine</button></div></div>`;
+ document.body.appendChild(box);}
+async function wsConflictKeep(){const c=_conflict;if(!c)return;const el=$('wsConflict');if(el)el.remove();_conflict=null;
+ const owner=(c.id==='shared')?null:((SCOPE==='mine')?MEID:(SCOPE==='universal'?null:SCOPE));const payload=c.merged||c.localObj; /* merged already keeps remote's non-conflicting sections + local for the conflicts */
+ const rr=await _cas(c.id,owner,payload,c.remRev);
+ if(!rr.error&&rr.rows){REVS[c.id]=c.remRev+1;_setCache(c.id,payload);_applyPayload(c.id,payload);toast('Kept your version');}else toast('Save failed — will retry');}
+async function wsConflictTake(){const c=_conflict;if(!c)return;const el=$('wsConflict');if(el)el.remove();_conflict=null;
+ const owner=(c.id==='shared')?null:((SCOPE==='mine')?MEID:(SCOPE==='universal'?null:SCOPE));
+ let payload; if(c.merged){payload=Object.assign({},c.merged);c.sections.forEach(k=>{payload[k]=c.remoteObj[k];});}else payload=c.remoteObj; /* take remote for the conflicts; keep local's non-conflicting edits */
+ const rr=await _cas(c.id,owner,payload,c.remRev);
+ if(!rr.error&&rr.rows){REVS[c.id]=c.remRev+1;_setCache(c.id,payload);_applyPayload(c.id,payload);toast('Took their version');}
+ else{REVS[c.id]=c.remRev;_setCache(c.id,c.remoteObj);_applyPayload(c.id,c.remoteObj);toast('Took their version');}}
 const _origSave=save;
 let _lsTimer=null;                        // debounce the localStorage mirror (was written on every keystroke)
 save=function(){clearTimeout(_lsTimer);_lsTimer=setTimeout(_origSave,400);cloudSave();};
 let _lastShared=null,_lastScoped=null,_saveFailing=false;     // last payloads written (skip redundant cloud writes); _saveFailing dedups the failure toast
 function cloudSave(){if(!sb||_applyingRemote)return;pushFromS();clearTimeout(_st);_st=setTimeout(doCloudWrite,600);}
-async function doCloudWrite(){_st=null;let failed=false;
- const shared={comments:S.comments,todos:S.todos,streamers:S.streamers,lists:S.lists,attachments:S.attachments,checklists:S.checklists,inventory:S.inventory,repacks:S.repacks};
- /* cache the payload as synced ONLY after a successful write — so a failed write leaves _lastShared
-    unchanged and the NEXT doCloudWrite re-sends it instead of silently skipping. */
- const sj=JSON.stringify(shared);if(sj!==_lastShared){if(await writeRow('shared',null,shared))_lastShared=sj;else failed=true;}
- if(canEditScoped()){const scoped={shows:S.shows,breaks:S.breaks,copySets:S.copySets,dashCfg:S.dashCfg,sales:S.sales,chaseLists:S.chaseLists};const cj=JSON.stringify(scoped);
-  if(cj!==_lastScoped){const owner=(SCOPE==='mine')?MEID:(SCOPE==='universal'?null:SCOPE);if(await writeRow(SCOPED_ID,owner,scoped))_lastScoped=cj;else failed=true;}}
- if(failed){if(!_saveFailing){_saveFailing=true;toast('Save failed — will retry');}}else _saveFailing=false; /* one toast on synced→failing, not per debounce tick; reset on a clean write */
+let _writing=false;
+async function doCloudWrite(){if(_writing){clearTimeout(_st);_st=setTimeout(doCloudWrite,300);return;} /* one write in flight at a time — a conflict-retry never races a second write from this tab */
+ _writing=true;_st=null;let failed=false;try{
+ /* writeRow() does the CAS and advances _lastShared/_lastScoped/REVS ONLY on confirmed success (or a
+    clean merge); a failed/conflicted write leaves the cache honest so the next tick re-sends. */
+ const shared=_sharedPayload();const sj=JSON.stringify(shared);
+ if(sj!==_lastShared){const r=await writeRow('shared',null,shared);if(!r||!r.ok)failed=true;}
+ if(canEditScoped()){const scoped=_scopedPayload();const cj=JSON.stringify(scoped);
+  if(cj!==_lastScoped){const owner=(SCOPE==='mine')?MEID:(SCOPE==='universal'?null:SCOPE);const r=await writeRow(SCOPED_ID,owner,scoped);if(!r||!r.ok)failed=true;}}
+ if(failed){if(!_saveFailing){_saveFailing=true;toast('Save failed — will retry');}}else _saveFailing=false; /* one toast on synced→failing, not per debounce tick */
+ }finally{_writing=false;}
 }
 /* Reservation-critical writes go through a read-modify-write on the shared row: re-read the latest
    'shared' JSONB, recompute availability against it, apply the mutation, then upsert with rev+1 —
@@ -2481,9 +2534,11 @@ async function cloudCommitShared(mutate){
  let res;try{res=mutate(base);}catch(e){return{ok:false,msg:e.message||'error'};}
  if(!res||!res.ok)return res||{ok:false,msg:'Rejected'};
  const payload={comments:base.comments,todos:base.todos,streamers:base.streamers,lists:base.lists,attachments:base.attachments,checklists:base.checklists,inventory:base.inventory,repacks:base.repacks};
- const rev=((fresh&&fresh.rev)||REVS['shared']||0)+1;REVS['shared']=rev;
- const{error}=await sb.from('e10_workspace').upsert({id:'shared',data:payload,rev,owner:null,updated_by:ME,updated_at:new Date().toISOString()});
- if(error){if(REVS['shared']===rev)REVS['shared']=rev-1;return{ok:false,msg:error.message};} /* roll back the optimistic REVS bump (guarded) so a failed reservation write doesn't make the tab ignore remote updates */
+ const expected=((fresh&&fresh.rev)||REVS['shared']||0);
+ const cas=await _cas('shared',null,payload,expected);       /* CAS on the freshly-read rev — a write that landed since the read fails here instead of clobbering it */
+ if(cas.error)return{ok:false,msg:cas.error.message};
+ if(!cas.rows)return{ok:false,msg:'Inventory changed just now — try again'}; /* lost the race; caller re-tries against the newer state */
+ REVS['shared']=expected+1;
  _applyingRemote=true;SHARED=base;_lastShared=JSON.stringify(payload);rebuildS();_applyingRemote=false;safeRender();
  return{ok:true,msg:res.msg};
 }
@@ -2499,8 +2554,9 @@ async function loadScopedFor(scope){const id=scopedIdFor(scope);SCOPED_ID=id;let
   if(scope!=='universal'){const owner=(scope==='mine')?MEID:scope;await sb.from('e10_workspace').upsert({id,data:base,rev:1,owner,updated_by:ME});REVS[id]=1;}
   SCOPED=base;}
  else{REVS[id]=row.rev||0;SCOPED=row.data&&Object.keys(row.data).length?splitLegacy(row.data).sc:blankScoped();}
- normScoped(SCOPED);}
-async function setScope(scope){SCOPE=scope;localStorage.setItem('e10_scope',scope);await loadScopedFor(scope);await loadOpShows();_lastScoped=null;rebuildS();renderScopebar();currentRender();toast(canEditScoped()?('Editing '+scopeLabel()):('Viewing '+scopeLabel()+' — read-only'));}
+ normScoped(SCOPED);
+ _lastScoped=JSON.stringify({shows:SCOPED.shows,breaks:SCOPED.breaks,copySets:SCOPED.copySets,dashCfg:SCOPED.dashCfg,sales:SCOPED.sales,chaseLists:SCOPED.chaseLists});} /* base for the scoped merge = the loaded state (fixes _lastScoped=null faking "everything changed" after a scope switch) */
+async function setScope(scope){SCOPE=scope;localStorage.setItem('e10_scope',scope);await loadScopedFor(scope);await loadOpShows();rebuildS();renderScopebar();currentRender();toast(canEditScoped()?('Editing '+scopeLabel()):('Viewing '+scopeLabel()+' — read-only'));} /* loadScopedFor set _lastScoped to the loaded base — no longer nulled here */
 /* Publish the current week's schedule to the Universal (team baseline) row. Admin-only; Universal is admin-write via RLS. Fetch-merge so other Universal fields (breaks/dashCfg/sales) are preserved. */
 async function copyWeekToUniversal(){
  if(ROLE!=='admin'){toast('Admin only — Universal is admin-managed');return;}
@@ -2519,9 +2575,25 @@ function renderScopebar(){let el=$('scopebar');if(!el){el=document.createElement
  el.innerHTML=`<div style="display:flex;align-items:center;gap:6px"><span class="lab" style="font-size:11px">Viewing</span><select id="scopeSel" style="padding:6px 9px;font-size:12.5px;max-width:170px" onchange="setScope(this.value)">${opts}</select>${canEditScoped()?'':'<span class="pill" style="margin:0">read-only</span>'}</div>`;
  const sel=$('scopeSel');if(sel)sel.value=SCOPE;}
 
+/* Apply a remote row (higher rev). Merge THIS tab's unsaved local edits in so a realtime update within
+   the debounce window can't silently clobber them; base advances to the remote (DB) state, and any
+   merged-in local edit is persisted next via the CAS. A true section conflict is surfaced, not resolved. */
+function applyRemoteRow(id,n){
+ const keys=_keysFor(id);
+ const remote=(n.data&&Object.keys(n.data).length)?_splitFor(id,n.data):(id==='shared'?blankShared():blankScoped());
+ const base=_baseObj(id),local=(id==='shared')?_sharedPayload():_scopedPayload();
+ let toApply=remote,conflicts=[],hadLocal=false;
+ if(base){const m=mergeWorkspace(base,local,remote,keys);conflicts=m.conflicts;toApply=m.merged;hadLocal=(JSON.stringify(m.merged)!==JSON.stringify(remote));}
+ REVS[id]=n.rev;
+ _applyPayload(id,toApply);
+ _setCache(id,remote);               /* base = the DB state; merged-in local edits now differ → written next */
+ if(conflicts.length)_surfaceConflict(id,conflicts,local,remote,n,toApply);
+ else if(hadLocal)cloudSave();        /* persist the local edits we kept, at the new rev, via CAS */
+ if(n.updated_by&&n.updated_by!==ME&&!conflicts.length)toast((id==='shared'?'Team update by ':'Update by ')+(ownerName(n.updated_by)||n.updated_by));
+}
 function subscribeRealtime(){sb.channel('e10ws').on('postgres_changes',{event:'*',schema:'public',table:'e10_workspace'},p=>{const n=p.new;if(!n||!n.id)return;
- if(n.id==='shared'&&(n.rev||0)>(REVS['shared']||0)){REVS['shared']=n.rev;_applyingRemote=true;SHARED=n.data&&Object.keys(n.data).length?splitLegacy(n.data).sh:blankShared();normShared(SHARED);_lastShared=null;rebuildS();safeRender();_applyingRemote=false;if(n.updated_by&&n.updated_by!==ME)toast('Team update by '+n.updated_by);}
- else if(n.id===SCOPED_ID&&(n.rev||0)>(REVS[SCOPED_ID]||0)){REVS[SCOPED_ID]=n.rev;_applyingRemote=true;SCOPED=n.data&&Object.keys(n.data).length?splitLegacy(n.data).sc:blankScoped();normScoped(SCOPED);_lastScoped=null;rebuildS();safeRender();_applyingRemote=false;if(n.updated_by&&n.updated_by!==ME)toast('Update by '+n.updated_by);}
+ if(n.id==='shared'&&(n.rev||0)>(REVS['shared']||0))applyRemoteRow('shared',n);
+ else if(n.id===SCOPED_ID&&(n.rev||0)>(REVS[SCOPED_ID]||0))applyRemoteRow(SCOPED_ID,n);
 }).subscribe();}
 
 async function loadAll(){
@@ -2530,6 +2602,7 @@ async function loadAll(){
  try{const mem=await sb.from('e10_members').select('user_id,email,display_name,role');MEMBERS=mem.data||[];}catch(e){MEMBERS=[];}
  await loadCaps();renderNav();renderSubnav();
  const sh=await fetchRow('shared');REVS['shared']=sh?(sh.rev||0):0;SHARED=sh&&sh.data&&Object.keys(sh.data).length?splitLegacy(sh.data).sh:blankShared();normShared(SHARED);
+ _lastShared=JSON.stringify({comments:SHARED.comments,todos:SHARED.todos,streamers:SHARED.streamers,lists:SHARED.lists,attachments:SHARED.attachments,checklists:SHARED.checklists,inventory:SHARED.inventory,repacks:SHARED.repacks}); /* base for H2's merge = the loaded (last-synced) state, never null */
  if(!sh||!sh.data||!Object.keys(sh.data).length)await writeRow('shared',null,SHARED);
  if(SCOPE!=='mine'&&SCOPE!=='universal'&&ROLE!=='admin')SCOPE='mine';
  await loadScopedFor(SCOPE);await loadOpShows();rebuildS();subscribeRealtime();}
