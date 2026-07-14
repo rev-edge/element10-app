@@ -25,6 +25,9 @@ T('deterministic (same in=out)', invIdemKey('reservation', 's', 'i') === invIdem
 T('distinct events differ',      invIdemKey('reservation', 's', 'i', 'a') !== invIdemKey('reservation', 's', 'i', 'b'));
 T('op distinguishes',            invIdemKey('reservation', 's', 'i') !== invIdemKey('reservation_release', 's', 'i'));
 T('no nonce omits trailing sep', invIdemKey('intake', 'i', 'i').split(':').length === 4);
+// M3.1 batch set-reservations: keyed by show (entity), empty item slot, per-action nonce.
+T('set_reservations batch shape', invIdemKey('set_reservations', 'show9', '') === 'set_reservations:shared:show9:');
+T('set_reservations batch nonce', invIdemKey('set_reservations', 'show9', '', 'n1') === 'set_reservations:shared:show9::n1');
 
 console.log('\n  ' + pass + ' pass · ' + fail + ' fail\n');
 process.exit(fail ? 1 : 0);

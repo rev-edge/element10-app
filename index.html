@@ -379,25 +379,29 @@ async function showPickBreak(id,bid){if(!bid)return;if(!canEditScoped())return r
 /* Attaching a model to a show converts its inventory pulls into hard reservations (and detach releases them). */
 async function reserveModelToShow(show,model){
  if(!model||!Array.isArray(model.invItems)||!model.invItems.length)return{ok:true,msg:'Break model attached'};
- const showId=show.id,showLabel=(show.name||'Untitled'),admin=ROLE==='admin';
- /* aggregate desired qty by itemId (a model listing the same item twice reserves the SUM). SET
-    semantics via release-then-reserve keeps re-attach idempotent (no doubling). */
+ const showId=show.id,showLabel=(show.name||'Untitled');
+ /* Aggregate desired qty by itemId (a model listing the same item twice reserves the SUM), then ONE
+    ATOMIC batch call (M3.1 blocker 4). SET semantics make re-attach idempotent; all-or-nothing means a
+    single over-reserved item fails the whole attach (named) rather than leaving a partial reservation. */
  const agg={};model.invItems.forEach(iv=>{if(iv&&iv.itemId)agg[iv.itemId]=(agg[iv.itemId]||0)+(+iv.qty||1);});
- const capped=[];
- for(const itemId of Object.keys(agg)){const it=(S.inventory||[]).find(x=>x.id===itemId);if(!it)continue;
-  await invRpc('e10_inv_release',{p_id:itemId,p_show_ref:showId,p_idempotency_key:invIdemKey('reservation_release',showId,itemId,_invEventTok())});
-  const otherRes=(it.reservations||[]).reduce((s,x)=>s+((x.showId===showId)?0:(+x.qty||0)),0);
-  const free=Math.max(0,(+it.qty||0)-otherRes),want=agg[itemId],grant=admin?want:Math.min(want,free);
-  if(grant<want)capped.push(it.name);
-  if(grant<=0)continue;
-  await invRpc('e10_inv_reserve',{p_id:itemId,p_show_ref:showId,p_show_label:showLabel,p_qty:grant,p_idempotency_key:invIdemKey('reservation',showId,itemId,_invEventTok())});}
- return{ok:true,msg:capped.length?('Attached · reservations capped by free stock: '+[...new Set(capped)].join(', ')):'Attached · inventory reserved to show'};
+ const targets=Object.keys(agg).map(itemId=>({item_id:itemId,qty:agg[itemId]}));
+ if(!targets.length)return{ok:true,msg:'Break model attached'};
+ const res=await invRpc('e10_inv_set_reservations',{p_show_ref:showId,p_show_label:showLabel,p_targets:targets,
+   p_idempotency_key:invIdemKey('set_reservations',showId,'',_invEventTok())},
+   r=>{if(r&&Array.isArray(r.items))r.items.forEach(x=>{if(x&&x.item)_applyInvItem(x.item);});});
+ if(res&&res.ok)return{ok:true,msg:'Attached · inventory reserved to show'};
+ return{ok:false,msg:(res&&res.msg)||'Reservation failed'};
 }
 async function releaseShowReservations(show,model){const showId=show.id;
  const ids=(model&&Array.isArray(model.invItems))?[...new Set(model.invItems.map(x=>x.itemId).filter(Boolean))]
    :(S.inventory||[]).filter(it=>(it.reservations||[]).some(r=>r.showId===showId)).map(it=>it.id);
- for(const itemId of ids){await invRpc('e10_inv_release',{p_id:itemId,p_show_ref:showId,p_idempotency_key:invIdemKey('reservation_release',showId,itemId,_invEventTok())});}
- return{ok:true,msg:'Released reservations'};
+ if(!ids.length)return{ok:true,msg:'Released reservations'};
+ /* ONE atomic batch: set every item's target to 0 (release the caller's reservations for this show). */
+ const targets=ids.map(itemId=>({item_id:itemId,qty:0}));
+ const res=await invRpc('e10_inv_set_reservations',{p_show_ref:showId,p_show_label:(show.name||''),p_targets:targets,
+   p_idempotency_key:invIdemKey('set_reservations',showId,'',_invEventTok())},
+   r=>{if(r&&Array.isArray(r.items))r.items.forEach(x=>{if(x&&x.item)_applyInvItem(x.item);});});
+ return{ok:(res&&res.ok)!==false,msg:'Released reservations'};
 }
 function showPickRepack(id,rid){if(!rid)return;if(!canEditScoped())return roGuard();const p=(S.repacks||[]).find(x=>x.id===rid);const r=showById(id);if(!p||!r)return;r.s.repackRef={id:p.id,name:p.name};save();showRerender(id);}
 async function showDetach(id,field){if(!canEditScoped())return roGuard();const r=showById(id);if(!r)return;
@@ -1898,7 +1902,7 @@ async function invFormSave(mode,id){if(!hasCap('act.inventory_edit')){toast('Edi
  if(mode==='add'){const rec=Object.assign({id:'i'+Date.now(),reservations:[],addedAt:Date.now(),setId:addSetId},patch);
    res=await invRpc('e10_inv_add_item',{p_item:rec,p_idempotency_key:invIdemKey('intake',rec.id,rec.id)});}
  else{patch.setId=(line===(it.set||'')?it.setId:null);
-   res=await invRpc('e10_inv_edit_item',{p_id:id,p_patch:patch,p_idempotency_key:invIdemKey('adjust',id,id,_invEventTok())});}
+   res=await invRpc('e10_inv_edit_item',{p_id:id,p_patch:patch,p_remove_keys:((INVEDIT&&Array.isArray(INVEDIT.removeKeys))?INVEDIT.removeKeys:[]),p_idempotency_key:invIdemKey('adjust',id,id,_invEventTok())});}
  const sy=window.scrollY;dInventory();window.scrollTo(0,sy);invFocusRow(mode==='edit'?id:null);
  toast((res&&res.ok)?(mode==='add'?('Added “'+patch.name+'”'):('Updated “'+patch.name+'”')):((mode==='add'?'Add':'Update')+' failed: '+((res&&res.msg)||'')));}
 async function invEditSave(id){if(!hasCap('act.inventory_edit')){toast('Editing is restricted for your role');return;}
@@ -1914,7 +1918,7 @@ async function invEditSave(id){if(!hasCap('act.inventory_edit')){toast('Editing 
  const patch={name,cat:gv('iveC'),set:newSet,setId:(newSet===(it.set||'')?it.setId:null),qty:(qv===''?0:Math.max(0,+qv||0)),cost:pbc,perBoxCost:pbc,boxesPerCase:bpc,value:Math.max(0,+mv||0),gradingCompany:gv('iveGC'),grade:gv('iveGrade'),cardNumber:gv('iveNum'),year:gv('iveYear'),parallel:gv('ivePar'),cond:gv('iveG'),img:($('iveImg').value||'').trim(),owner:(ow?(ow.value||null):it.owner)};
  /* authoritative via e10_inv_edit_item (server trims reservations to on-hand if qty drops) */
  invEditTeardown();closeM();
- const res=await invRpc('e10_inv_edit_item',{p_id:id,p_patch:patch,p_idempotency_key:invIdemKey('adjust',id,id,_invEventTok())});
+ const res=await invRpc('e10_inv_edit_item',{p_id:id,p_patch:patch,p_remove_keys:[],p_idempotency_key:invIdemKey('adjust',id,id,_invEventTok())});
  const _sy=window.scrollY;dInventory();window.scrollTo(0,_sy);invFocusRow(id);
  toast((res&&res.ok)?('Updated “'+name+'” · '+money(pbc)+'/box'):('Update failed: '+((res&&res.msg)||'')));}
 async function delInv(id){const it=(S.inventory||[]).find(x=>x.id===id);const nm=it?it.name:'this item';if(!confirm('Delete “'+nm+'” from inventory? This cannot be undone.'))return;
@@ -1995,7 +1999,12 @@ function invRenderChip(){const el=$('ivLinkChip');if(!el)return;if(!ivLinked){el
 function invClearLink(){ivLinked=null;invRenderChip();toast('Unlinked — this item will be added without a card link');}
 function invFromCard(id){const card=((SRV&&SRV.rows)||[]).find(x=>x.id===id);if(!card){toast('Card not found — reopen the grid and try again');return;}
  window._invPrefillCard=card;dataTab='inventory';SRV=null;clOpenId=null;go('data');window.scrollTo(0,0);}
-function reassignInv(id,val){const it=S.inventory.find(x=>x.id===id);if(!it)return;it.owner=val||null;save();dInventory();toast('Reassigned to '+ownerName(it.owner));}
+/* Owner reassignment is an authoritative inventory mutation → route through the RPC (M3.1 blocker 1).
+   The old direct S.inventory write + save() never persisted: _sharedPayload sources inventory from
+   _invServerOwned (the last-synced remote), so a client blob write can't touch the inventory section. */
+async function reassignInv(id,val){const it=(S.inventory||[]).find(x=>x.id===id);if(!it)return;
+ const res=await invRpc('e10_inv_edit_item',{p_id:id,p_patch:{owner:(val||null)},p_remove_keys:[],p_idempotency_key:invIdemKey('adjust',id,id,_invEventTok())});
+ dInventory();toast((res&&res.ok)?('Reassigned to '+ownerName(val||null)):('Reassign failed: '+((res&&res.msg)||'')));}
 /* ===== Chain M / M3 — inventory mutations now go through the transactional server RPCs
    (e10_inv_*). The client no longer mutates the inventory blob section: each RPC updates the
    relational rows, the blob's inventory section, and the ledger movement in ONE transaction, then
@@ -2057,7 +2066,7 @@ function reserveModal(itemId){const it=S.inventory.find(x=>x.id===itemId);if(!it
   <div style="margin-top:12px"><label>Reserve to show</label><select id="rvShow">${showPickerOptions('')}</select></div>
   <div style="margin-top:10px"><label>Units</label><input id="rvQty" type="number" value="1" min="1" onkeydown="if(event.key==='Enter')doReserve('${itemId}')"></div>
   <div class="row" style="margin-top:16px"><button class="btn v" onclick="doReserve('${itemId}')">Reserve</button><button class="btn sm" onclick="closeM()">Cancel</button></div>
-  ${ROLE==='admin'?'<div class="lab" style="margin-top:8px">Admin: you may reserve beyond what is free.</div>':''}`;
+  `;
  $('ov').style.display='flex';setTimeout(()=>{const e=$('rvShow');if(e)e.focus();},50);}
 async function doReserve(itemId){const ref=$('rvShow')?$('rvShow').value:'';const qty=$('rvQty')?+$('rvQty').value:1;if(!ref){toast('Pick a show');return;}const res=await reserveUnits(itemId,ref,qty);if(res&&res.ok)closeM();}
 function sellModal(itemId){const it=S.inventory.find(x=>x.id===itemId);if(!it)return;
@@ -3011,10 +3020,15 @@ function prodArr(){if(LIVE.session){if(!Array.isArray(LIVE.session.products))LIV
    stay exact. p.consumed / p.boxes / cost semantics are unchanged. */
 async function breakConsume(p){const desired=(+p.boxes||0),delta=desired-(+p.consumed||0);if(delta===0)return true;
  const sref=(LIVE.session&&LIVE.session.id)||'break';if(!Array.isArray(p._cmids))p._cmids=[];
+ /* M3.1 blocker 5: consume derives the reserved drawdown from reservations MATCHED BY the source show
+    ref (never the session id). The live session carries no show link yet, so this is null today →
+    consumption draws only unreserved stock (reserved_delta 0). FLAGGED: wiring session→show is a
+    separate workflow/schema pass; until then reserved release on consume is not auto-driven here. */
+ const showRef=(LIVE.session&&(LIVE.session.show_ref||LIVE.session.showId||LIVE.session.showRef))||null;
  if(delta>0){
    const it=(S.inventory||[]).find(x=>x.id===p.itemId);const onhand=it?Math.max(0,+it.qty||0):0;const take=Math.min(delta,onhand);
    if(take<=0){toast('Short stock: '+p.name+' isn’t in inventory — cost still committed for '+desired+' box'+(desired===1?'':'es')+'.');return false;}
-   const res=await invRpc('e10_inv_consume',{p_id:p.itemId,p_session_ref:sref,p_qty:take,p_reserved_qty:0,p_idempotency_key:invIdemKey('break_consumption',sref,p.itemId,_invEventTok())});
+   const res=await invRpc('e10_inv_consume',{p_id:p.itemId,p_break_session_id:sref,p_source_show_ref:showRef,p_qty:take,p_idempotency_key:invIdemKey('break_consumption',sref,p.itemId,_invEventTok())});
    if(!res||!res.ok){toast('Short stock: '+p.name+' isn’t in inventory — cost still committed for '+desired+' box'+(desired===1?'':'es')+'.');return false;}
    p._cmids.push({mid:res.movement_id,qty:take});p.consumed=(+p.consumed||0)+take;
    if(take<delta)toast('Short stock: only '+take+' of '+delta+' box'+(delta===1?'':'es')+' of '+p.name+' on hand — cost still committed for '+desired+'.');
@@ -3022,10 +3036,10 @@ async function breakConsume(p){const desired=(+p.boxes||0),delta=desired-(+p.con
  }else{
    let R=-delta;
    while(R>0&&p._cmids.length){const top=p._cmids.pop();
-     const res=await invRpc('e10_inv_reverse_consumption',{p_id:p.itemId,p_session_ref:sref,p_qty:top.qty,p_reserved_qty:0,p_reverses_movement_id:top.mid,p_idempotency_key:invIdemKey('break_reversal',sref,p.itemId,top.mid)});
+     const res=await invRpc('e10_inv_reverse_consumption',{p_id:p.itemId,p_reverses_movement_id:top.mid,p_idempotency_key:invIdemKey('break_reversal',sref,p.itemId,top.mid)});
      if(!res||!res.ok){p._cmids.push(top);break;}
      p.consumed=(+p.consumed||0)-top.qty;R-=top.qty;}
-   if(R<0){const take=-R;const res=await invRpc('e10_inv_consume',{p_id:p.itemId,p_session_ref:sref,p_qty:take,p_reserved_qty:0,p_idempotency_key:invIdemKey('break_consumption',sref,p.itemId,_invEventTok())});
+   if(R<0){const take=-R;const res=await invRpc('e10_inv_consume',{p_id:p.itemId,p_break_session_id:sref,p_source_show_ref:showRef,p_qty:take,p_idempotency_key:invIdemKey('break_consumption',sref,p.itemId,_invEventTok())});
      if(res&&res.ok){p._cmids.push({mid:res.movement_id,qty:take});p.consumed=(+p.consumed||0)+take;}}
    return true;
  }}
