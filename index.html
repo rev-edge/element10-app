@@ -115,6 +115,12 @@ details.gcfg>summary{list-style:none;cursor:pointer}details.gcfg>summary::-webki
 .gpop .grow .btn.x.sm{padding:0 5px}
 .ov{position:fixed;inset:0;background:#0008;display:none;align-items:center;justify-content:center;z-index:60;padding:18px}
 .modal{background:var(--surface);border-radius:var(--r);padding:22px;max-width:520px;width:100%;max-height:88vh;overflow:auto}
+/* Pass 2.2 — inventory rows open their edit surface (scoped to #invListBox; no grid-engine change) */
+#invListBox tbody tr:has(td[data-invid]){cursor:pointer}
+#invListBox tbody tr:has(td[data-invid]):hover{background:rgba(0,0,0,.035)}
+#invListBox td.ive-open:focus-visible{outline:2px solid #2563eb;outline-offset:-2px;border-radius:4px}
+#iveDiscard{position:fixed;inset:0;z-index:70;background:#0006;display:flex;align-items:center;justify-content:center;padding:18px}
+#iveDiscard .box{background:var(--surface);border-radius:var(--r);padding:20px;max-width:380px;width:100%;box-shadow:0 12px 40px #0007}
 .hero{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:14px}
 .hero h1{font-size:38px}.hero .sub{color:var(--mut);font-size:13.5px}
 .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 18px;border-radius:var(--rp);font-size:13px;opacity:0;transition:.2s;z-index:80}.toast.on{opacity:1}
@@ -404,7 +410,7 @@ function showAddNeed(id){if(!canEditScoped())return roGuard();const r=showById(i
 function showDelNeed(id,ni){if(!canEditScoped())return roGuard();const r=showById(id);if(!r||!r.s.needs)return;r.s.needs.splice(ni,1);save();showRerender(id);}
 function showStartLive(id){const r=showById(id);if(!r)return;BUILDER=null;LIVE_SEED={show:r.s.name,model:r.s.breakModel||null};closeM();go('live');}
 function delShow(k,i){if(!canEditScoped())return roGuard();const sh=(S.shows[k]||[])[i];if(!confirm('Delete show “'+((sh&&sh.name)||'Untitled')+'”? This cannot be undone.'))return;S.shows[k].splice(i,1);if(!S.shows[k].length)delete S.shows[k];save();closeM();rerenderSchedule();toast('Show deleted');}
-function closeM(){$('ov').style.display='none';}
+function closeM(){if(typeof INVEDIT!=='undefined'&&INVEDIT)invEditTeardown();$('ov').style.display='none';}
 
 /* ---------- HOME ---------- */
 function renderHome(){
@@ -1593,7 +1599,7 @@ function invRollup(items){items=items||invView();let cost=0,market=0,committed=0
    its own state/localStorage keys (see extension note near dInventory). */
 const INV_COLS=[
  {key:'name',label:'Item',core:true,first:true,type:'text',sortable:true,sortVal:i=>(i.name||'').toLowerCase(),
-  cell:(i,admin)=>{const sold=(+i.soldQty||0)>0?`<div class="lab" style="text-transform:none;letter-spacing:0;color:var(--mut2)">sold ${i.soldQty} · ${money(i.soldProceeds||0)}</div>`:'';return `<td><b>${esc(i.name)}</b>${sold}</td>`;}},
+  cell:(i,admin)=>{const sold=(+i.soldQty||0)>0?`<div class="lab" style="text-transform:none;letter-spacing:0;color:var(--mut2)">sold ${i.soldQty} · ${money(i.soldProceeds||0)}</div>`:'';return `<td class="ive-open" data-invid="${esc(i.id)}" tabindex="0" role="button" aria-label="Open ${esc(i.name)}"><b>${esc(i.name)}</b>${sold}</td>`;}},
  {key:'cat',label:'Category',type:'text',filter:'enum',enumGet:i=>i.cat||'',sortable:true,sortVal:i=>(i.cat||'').toLowerCase(),cell:i=>`<td>${esc(i.cat||'')||'—'}</td>`},
  {key:'set',label:'Set',type:'text',filter:'enum',enumGet:i=>i.set||'',sortable:true,sortVal:i=>(i.set||'').toLowerCase(),cell:i=>`<td>${esc(i.set||'')||'—'}</td>`},
  {key:'gradingCompany',label:'Grading',type:'text',filter:'enum',enumGet:i=>i.gradingCompany||'',sortable:true,sortVal:i=>(i.gradingCompany||''),cell:i=>`<td>${i.gradingCompany?`<span class="pill" style="margin:0">${esc(i.gradingCompany)}</span>`:'<span class="lab">—</span>'}</td>`},
@@ -1670,7 +1676,7 @@ function dInventory(){const admin=ROLE==='admin';const canEdit=hasCap('act.inven
    <div class="etool" style="margin-top:8px;align-items:center">${gColsBtn(INVG)}${gViewsHTML(INVG)}</div>
    <div id="invListBox"></div></div>`;
  h+=buyListHTML();
- $('dtc').innerHTML=h;gRenderCols(INVG);gRenderList(INVG);
+ $('dtc').innerHTML=h;gRenderCols(INVG);gRenderList(INVG);invEnsureDelegation();
  if(window._invPrefillCard){const c=window._invPrefillCard;window._invPrefillCard=null;invAutofillFromCard(c);}else if(ivLinked)invRenderChip();}
 /* Buy list: aggregate demand BY SET across scheduled shows (break-model allocations + manual
    needs) vs free-to-break supply. Driven by real shows + real inventory, not a placeholder. */
@@ -1710,7 +1716,7 @@ function ivBoxHint(){const el=$('ivPBHint');if(!el)return;const raw=+($('ivCo')&
 function invEdit(id){if(!hasCap('act.inventory_edit')){toast('Editing inventory is restricted for your role');return;}
  const it=(S.inventory||[]).find(x=>x.id===id);if(!it)return;
  const pbc=(it.perBoxCost!=null&&it.perBoxCost!=='')?+it.perBoxCost:(+it.cost||0);
- $('modal').innerHTML=`<h3 style="font-size:17px">Edit item</h3>
+ $('modal').innerHTML=`<div class="row" style="justify-content:space-between;align-items:center"><h3 style="font-size:17px">Edit item</h3><button class="btn x sm" title="Close" aria-label="Close" onclick="invEditCloseRequest()">✕</button></div>
    <div id="iveErr" class="lab" style="display:none;color:var(--red);text-transform:none;letter-spacing:0;margin:4px 0"></div>
    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-top:6px">
    <div><label>Name</label><input id="iveN" value="${esc(it.name||'')}" onkeydown="if(event.key==='Enter')invEditSave('${id}')"></div>
@@ -1732,8 +1738,8 @@ function invEdit(id){if(!hasCap('act.inventory_edit')){toast('Editing inventory 
    <div><label>Image</label><div class="row" style="gap:6px"><input id="iveImg" value="${esc(it.img||'')}" placeholder="URL or upload" style="min-width:0" onchange="ivePv()"><button class="btn sm" onclick="iveUpload()">⬆</button></div></div>
    </div>
    <div style="margin-top:6px"><img id="iveImgPv" src="${esc(it.img||'')}" style="height:44px;border-radius:5px;border:1px solid var(--line);${it.img?'':'display:none'}"></div>
-   <div class="row" style="margin-top:14px;gap:8px"><button class="btn v" onclick="invEditSave('${id}')">Save changes</button><button class="btn sm" onclick="closeM()">Cancel</button></div>`;
- $('ov').style.display='flex';iveBoxHint();setTimeout(()=>{const el=$('iveN');if(el){el.focus();el.select();}},50);}
+   <div class="row" style="margin-top:14px;gap:8px"><button class="btn v" onclick="invEditSave('${id}')">Save changes</button><button class="btn sm" onclick="invEditCloseRequest()">Cancel</button></div>`;
+ $('ov').style.display='flex';iveBoxHint();invEditOpen(id);setTimeout(()=>{const el=$('iveN');if(el){el.focus();el.select();}},50);}
 function iveBoxHint(){const el=$('ivePBHint');if(!el)return;const raw=+($('iveCo')&&$('iveCo').value)||0,bpc=Math.max(1,+($('iveBPC')&&$('iveBPC').value)||1),basis=(($('iveBasis')&&$('iveBasis').value)||'perbox');const pbc=(basis==='percase'&&bpc>1)?(raw/bpc):raw;el.textContent='= '+money(pbc)+'/box'+((basis==='percase'&&bpc>1)?(' · case '+money(raw)):'');el.style.color=pbc>0?'var(--red)':'';}
 function ivePv(){const el=$('iveImg'),pv=$('iveImgPv');if(pv&&el){pv.src=(el.value||'').trim();pv.style.display=(el.value||'').trim()?'inline-block':'none';}}
 function iveUpload(){pickImage(url=>{const el=$('iveImg');if(el)el.value=url;ivePv();});}
@@ -1754,8 +1760,56 @@ function invEditSave(id){if(!hasCap('act.inventory_edit')){toast('Editing is res
  const gv=i2=>{const el=$(i2);return el?el.value.trim():'';};const newSet=gv('iveSet');const ow=$('iveOwner');
  Object.assign(it,{name,cat:gv('iveC'),set:newSet,setId:(newSet===(it.set||'')?it.setId:null),qty:(qv===''?0:Math.max(0,+qv||0)),cost:pbc,perBoxCost:pbc,boxesPerCase:bpc,value:Math.max(0,+mv||0),gradingCompany:gv('iveGC'),grade:gv('iveGrade'),cardNumber:gv('iveNum'),year:gv('iveYear'),parallel:gv('ivePar'),cond:gv('iveG'),img:($('iveImg').value||'').trim(),owner:(ow?(ow.value||null):it.owner)});
  const trimmed=invClampRes(it);
- save();closeM();dInventory();toast('Updated “'+name+'” · '+money(pbc)+'/box'+(trimmed?(' · trimmed '+trimmed+' now-invalid reservation unit'+(trimmed===1?'':'s')):''));}
+ /* success: tear down the scoped surface, persist via the existing write path, re-render the row +
+    KPIs (keeps INVG filters/sort/view), preserve scroll, and return focus to the row. */
+ invEditTeardown();save();closeM();const _sy=window.scrollY;dInventory();window.scrollTo(0,_sy);invFocusRow(id);
+ toast('Updated “'+name+'” · '+money(pbc)+'/box'+(trimmed?(' · trimmed '+trimmed+' now-invalid reservation unit'+(trimmed===1?'':'s')):''));}
 function delInv(id){const it=(S.inventory||[]).find(x=>x.id===id);const nm=it?it.name:'this item';if(!confirm('Delete “'+nm+'” from inventory? This cannot be undone.'))return;S.inventory=S.inventory.filter(x=>x.id!==id);save();dInventory();toast('Deleted '+nm);}
+/* ===== Pass 2.2 — inventory row → edit surface: open by stable id, backdrop/Escape close, dirty-state
+   discard confirm. All state/handlers are SCOPED to the inventory edit surface only (no global modal or
+   click-outside behavior); the shared #ov/#modal and grid engine are untouched. ===== */
+let INVEDIT=null;
+function cssq(s){return (window.CSS&&CSS.escape)?CSS.escape(String(s)):String(s).replace(/["\\\]]/g,'\\$&');}
+/* baseline = the editable field values, normalized so "1" and 1 (and trimmed strings) never read dirty.
+   Derived/helper text (the $/box hint, image preview) is not part of the snapshot. */
+function invEditSnapshot(){const g=i2=>{const el=$(i2);return el?(''+el.value).trim():'';},n=i2=>{const el=$(i2);return el?(+el.value||0):0;};
+ return JSON.stringify({name:g('iveN'),cat:g('iveC'),set:g('iveSet'),qty:n('iveQ'),cost:n('iveCo'),basis:g('iveBasis'),bpc:n('iveBPC'),value:n('iveV'),gc:g('iveGC'),grade:g('iveGrade'),num:g('iveNum'),year:g('iveYear'),parallel:g('ivePar'),cond:g('iveG'),owner:g('iveOwner'),img:g('iveImg')});}
+function invEditDirty(){return !!INVEDIT&&INVEDIT.baseline!==invEditSnapshot();}
+function invEditOpen(id){
+ invEditTeardown(); // never stack listeners if opened while already open
+ const ov=$('ov');
+ const onDown=e=>{if(INVEDIT)INVEDIT._down=(e.target===ov);};                 // mousedown must start ON the backdrop
+ const onUp=e=>{if(INVEDIT){const ok=INVEDIT._down&&e.target===ov;INVEDIT._down=false;if(ok)invEditCloseRequest();}}; // ...and end on it (defeats drag-out / down-in-up-out)
+ /* bubble phase (NOT capture): a nested native <select>/datalist popup that consumes Escape closes
+    itself and never reaches this handler, so Escape doesn't first close the parent surface. */
+ const onKey=e=>{if(e.key!=='Escape'||!INVEDIT)return;e.preventDefault();if($('iveDiscard'))invEditDiscardKeep();else invEditCloseRequest();};
+ INVEDIT={id,baseline:invEditSnapshot(),onDown,onUp,onKey,_down:false,opener:document.querySelector('#invListBox td[data-invid="'+cssq(id)+'"]')};
+ ov.addEventListener('mousedown',onDown);ov.addEventListener('mouseup',onUp);document.addEventListener('keydown',onKey);}
+function invEditDetach(){if(!INVEDIT)return;const ov=$('ov');if(ov){ov.removeEventListener('mousedown',INVEDIT.onDown);ov.removeEventListener('mouseup',INVEDIT.onUp);}document.removeEventListener('keydown',INVEDIT.onKey);}
+function invEditTeardown(){invEditDetach();INVEDIT=null;const d=$('iveDiscard');if(d)d.remove();}
+/* single shared close-request: dirty → confirm; clean → close (no page re-render, so grid state + scroll survive) */
+function invEditCloseRequest(){if(!INVEDIT){closeM();return;}if(invEditDirty()){invEditDiscardPrompt();return;}invEditClose();}
+function invEditClose(){const id=INVEDIT&&INVEDIT.id,opener=INVEDIT&&INVEDIT.opener;invEditTeardown();closeM();invFocusRow(id,opener);}
+function invFocusRow(id,opener){const c=(id!=null)?document.querySelector('#invListBox td[data-invid="'+cssq(id)+'"]'):null;
+ const t=c||((opener&&document.body.contains(opener))?opener:null)||$('invListBox');if(t&&t.focus){try{t.focus({preventScroll:true});}catch(e){t.focus();}}}
+/* discard confirmation — its own scoped layer above #ov (z 70). Never shown when the form is clean. */
+function invEditDiscardPrompt(){if($('iveDiscard'))return;const d=document.createElement('div');d.id='iveDiscard';
+ d.innerHTML=`<div class="box" role="dialog" aria-modal="true" aria-label="Discard unsaved changes"><h3 style="font-size:16px;margin:0 0 6px">Discard unsaved changes?</h3><div class="lab" style="text-transform:none;letter-spacing:0;margin-bottom:14px">Your changes to this inventory item have not been saved.</div><div class="row" style="gap:8px;justify-content:flex-end"><button class="btn sm" onclick="invEditDiscardKeep()">Keep editing</button><button class="btn" style="background:var(--red);color:#fff;border-color:var(--red)" onclick="invEditDiscardGo()">Discard changes</button></div></div>`;
+ let dn=false;d.addEventListener('mousedown',e=>{dn=(e.target===d);});d.addEventListener('mouseup',e=>{if(dn&&e.target===d)invEditDiscardKeep();dn=false;});
+ document.body.appendChild(d);setTimeout(()=>{const b=d.querySelector('button');if(b)b.focus();},20);}
+function invEditDiscardKeep(){const d=$('iveDiscard');if(d)d.remove();}                 // closes only the confirm, edits intact
+function invEditDiscardGo(){const d=$('iveDiscard');if(d)d.remove();invEditClose();}      // closes surface, nothing persisted (it was never mutated)
+/* a click/keypress that originated inside any interactive control performs only that control's action */
+function invRowInteractive(el){return !!(el&&el.closest&&el.closest('button, a, input, select, textarea, label, details, summary, [role="menu"], .gpop'));}
+/* ONE delegated listener, attached once — survives every grid re-render, never accumulates. Guarded to
+   inventory data rows (a cell with data-invid), so headers, filter row, empty state, and footer are inert. */
+let _invDelegated=false;
+function invEnsureDelegation(){if(_invDelegated)return;_invDelegated=true;
+ document.addEventListener('click',e=>{const t=e.target;if(!t||!t.closest||!t.closest('#invListBox tbody'))return;
+   const tr=t.closest('#invListBox tbody tr');if(!tr)return;const idCell=tr.querySelector('td[data-invid]');if(!idCell)return; // data row only
+   if(invRowInteractive(t))return;const id=idCell.getAttribute('data-invid');if(id)invEdit(id);});
+ document.addEventListener('keydown',e=>{if(e.key!=='Enter'&&e.key!==' ')return;const c=e.target&&e.target.closest&&e.target.closest('#invListBox tbody td[data-invid]');
+   if(!c||e.target!==c)return;e.preventDefault();const id=c.getAttribute('data-invid');if(id)invEdit(id);});}
 /* ===== Quick-add inventory from the card library (search e10_cards → autofill + link) ===== */
 let ivLinked=null,ivSetLink=null,_ivResults=[],_ivT=null;
 function ivYearFromSet(s){const m=(s||'').match(/\b(19|20)\d{2}\b/);return m?m[0]:'';}
