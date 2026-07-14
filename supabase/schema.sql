@@ -675,3 +675,38 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --         text,text,numeric,numeric,text,text,text,text,text,text,uuid,jsonb);
 --     Restores read-only / append-only-by-absence. The Pass 2.1 rollback (drop table … cascade) is
 --     SEPARATE and is NOT part of this pass's rollback.
+
+-- ─────────────────────────────────────────────────────────────
+-- APPLIED (migration e10_inventory_relational_shadow — Chain M / M1): the SHADOW step of the
+-- inventory relational migration (D1 chose (a): migrate inventory to relational rows). Builds the
+-- relational tables and backfills them 1:1 from the JSONB blob, but the blob stays AUTHORITATIVE and
+-- NOTHING reads these tables yet (client cutover is M3, blob retirement is M4). ADDITIVE ONLY.
+--   TABLE public.e10_inventory_items — one row per item; PK = the EXISTING JSONB item id (text).
+--     Ids are NEVER regenerated: 30/35 are seed/import-origin strings and e10_inventory_movements.item_id
+--     already maps to them 1:1 (spike §4). Columns mirror the ~27-key item shape (display / economic /
+--     structural); every quantity & cost is numeric (never integer); all nullable (Pass-2.5 absent=null).
+--     card_set holds JSON "set" (reserved word); camelCase JSON keys (setId, cardNumber, perBoxCost,
+--     boxesPerCase, soldQty, soldProceeds, soldAt, gradingCompany, cardId, playerId, addedAt) map to
+--     snake_case columns. seed is boolean; added_at/sold_at are numeric epoch-ms.
+--   TABLE public.e10_inventory_reservations — one row per reservation, FK item_id -> items ON DELETE
+--     CASCADE (spike §5). The blob reservation {qty,showId,showLabel,streamerUid} has no id, so one is
+--     minted; streamer_uid stays text (blob-origin). status in ('active','released'); available = qty −
+--     Σ active reservation qty (mirrors invClampRes). Partial index (item_id) WHERE status='active'.
+--   RLS: member SELECT only on BOTH tables — inv_items_sel / inv_res_sel using ((select
+--     public.e10_is_member())) [InitPlan-wrapped]. NO insert/update/delete policy, and table grants to
+--     authenticated are SELECT only, so a member cannot mutate either table directly — ONLY the M2
+--     SECURITY DEFINER RPCs (owner, BYPASSRLS) write them. anon gets nothing. Verified with a real member
+--     JWT: SELECT items=35 / reservations=6; INSERT/UPDATE/DELETE refused on both; no probe row landed.
+--   Backfill (migration_version='chainM_m1', postgres bypasses RLS): 35 items 1:1; 6 reservation rows.
+--     Reconciled IN-MIGRATION (raises -> rolls back the whole migration on any mismatch): items=35,
+--     on_hand Σ(qty)=223, reserved Σ(active qty)=21 — all reconcile to the live JSONB and to the ledger.
+--   VIEW public.e10_inventory_recon (security_invoker; GRANT SELECT authenticated, REVOKE anon; mirrors
+--     e10_inventory_reserved_recon): per item, blob vs relational-rows vs ledger-derived on_hand and
+--     reserved, with four drift columns. REPORT ONLY. Drift = 0 for all items at M1 close; must stay 0
+--     through M3 (it is the split-brain tripwire). At M4 the blob columns retire from it.
+--   Rollback (Chain M / M1 only, DO NOT run unless reverting this checkpoint — touches NO other data):
+--       drop view if exists public.e10_inventory_recon;
+--       drop table if exists public.e10_inventory_reservations cascade;
+--       drop table if exists public.e10_inventory_items cascade;
+--     Equivalent id-scoped form (if the tables must be kept): delete from the two tables where
+--     migration_version='chainM_m1'. The JSONB inventory / reservations / ledger are never referenced.
