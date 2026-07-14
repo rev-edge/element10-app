@@ -710,3 +710,53 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --       drop table if exists public.e10_inventory_items cascade;
 --     Equivalent id-scoped form (if the tables must be kept): delete from the two tables where
 --     migration_version='chainM_m1'. The JSONB inventory / reservations / ledger are never referenced.
+
+-- ─────────────────────────────────────────────────────────────
+-- APPLIED (migration e10_inventory_mutation_rpcs — Chain M / M2): the authoritative inventory
+-- mutation surface. Eight SECURITY DEFINER RPCs; the relational rows are now written ONLY by these,
+-- and each mutation + its ledger movement commit in ONE PostgreSQL transaction. The JSONB blob is
+-- still kept in sync BY the RPCs (dual-write) so M3's client cutover can revert without data loss.
+--   FUNCTIONS (all returns jsonb {ok,msg,item,rev,movement_id}; grant execute to authenticated only;
+--   each re-checks membership + act.inventory_edit via _e10_inv_guard, mirroring the emit gates):
+--     e10_inv_add_item(p_item jsonb, key)                          -> intake
+--     e10_inv_edit_item(p_id, p_patch jsonb, key)                  -> manual_increase/decrease iff qty changed
+--     e10_inv_delete_item(p_id, key)                               -> one 'correction' zeroing on_hand+reserved
+--     e10_inv_reserve(p_id, show_ref, show_label, qty, key)        -> reservation (reserved_delta only)
+--     e10_inv_release(p_id, show_ref, key)                         -> reservation_release
+--     e10_inv_mark_sold(p_id, qty, proceeds, key)                  -> sale
+--     e10_inv_consume(p_id, session_ref, qty, reserved_qty, key)   -> break_consumption
+--     e10_inv_reverse_consumption(p_id, session_ref, qty, reserved_qty, reverses_id, key) -> break_reversal
+--   MUTATION-LEVEL IDEMPOTENCY (the emitter's replay-returns-id is necessary but not sufficient): each
+--     RPC (1) SELECT ... FOR UPDATE locks the item row; (2) checks the idempotency_key in the ledger
+--     BEFORE mutating -> if present, ZERO mutation and returns the existing movement id + current state;
+--     (3) validates on fresh data (availability, admin override via e10_is_admin, positive qty);
+--     (4) mutates the relational rows; (5) updates the blob inventory section in the SAME txn via the
+--     internal _e10_inv_blob_write (locks the shared workspace row, bumps rev); (6) appends the movement
+--     via the INTERNAL e10_emit_inventory_movement; (7) commits together. Key convention unchanged
+--     (schema.sql emit block): '<scope>:shared:<source_entity_id>:<item_id>[:<nonce>]'.
+--   PRIVATE HELPERS (SECURITY DEFINER, EXECUTE revoked from public/anon/authenticated — RPC-internal
+--     only, so they do NOT surface in the security advisor): _e10_inv_item_json (canonical row->blob
+--     JSON builder, reused by M4 reprojection), _e10_inv_blob_write (blob inventory upsert/remove + rev
+--     bump), _e10_inv_guard (membership + capability gate).
+--   RLS delta: DROPPED imov_ins on e10_inventory_movements — emission is now exclusively internal to
+--     these SECURITY DEFINER RPCs (which run as owner and BYPASS RLS), so members can no longer INSERT
+--     the ledger directly. imov_sel (member read) UNCHANGED; still NO update, NO delete policy.
+--   Verified (real member + non-admin JWTs, throwaway item, torn down): add->reserve->release->
+--     re-reserve->sale->consume->reverse all reconcile blob==rows==ledger (drift 0 at every step);
+--     replay of a committed key = zero extra mutation + same movement id; double-reversal rejected
+--     (ok:false, rolled back); non-admin reserve beyond available rejected; direct member ledger INSERT
+--     rejected; delete zeroes the ledger to 0/0. Gate 15 pass / 1 warn (legacy classification) / 0 HARD;
+--     baseline byte-identical after teardown: 35 / 223 / 21. New advisor findings: only the expected
+--     0029 (signed-in users can execute SECURITY DEFINER) for the 8 e10_inv_* RPCs, same class as emit.
+--   Rollback (Chain M / M2 only, DO NOT run unless reverting this checkpoint):
+--       drop function if exists public.e10_inv_add_item(jsonb,text), public.e10_inv_edit_item(text,jsonb,text),
+--         public.e10_inv_delete_item(text,text), public.e10_inv_reserve(text,text,text,numeric,text),
+--         public.e10_inv_release(text,text,text), public.e10_inv_mark_sold(text,numeric,numeric,text),
+--         public.e10_inv_consume(text,text,numeric,numeric,text),
+--         public.e10_inv_reverse_consumption(text,text,numeric,numeric,uuid,text);
+--       drop function if exists public._e10_inv_item_json(text), public._e10_inv_blob_write(text,boolean,text),
+--         public._e10_inv_guard();
+--       create policy imov_ins on public.e10_inventory_movements for insert to authenticated with check (
+--         (select public.e10_is_member()) and (select public.e10_has_cap('act.inventory_edit'))
+--         and coalesce(current_setting('e10.emit', true), '') = 'on');   -- restore the emit-context insert
+--     Restores the M1 resting state (rows are shadow, blob authoritative). Touches no rows.
