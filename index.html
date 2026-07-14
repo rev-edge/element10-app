@@ -252,7 +252,7 @@ if(!S.lists)S.lists=JSON.parse(JSON.stringify(DEF_LISTS));
 S.todos.forEach(t=>{if(t.desc==null)t.desc='';if(!t.comments)t.comments=[];});
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){toast('Storage full — large attachment not saved');}}
 const $=id=>document.getElementById(id);
-function esc(s){s=(s==null?'':''+s);return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+function esc(s){s=(s==null?'':''+s);return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function toast(m){const t=$('toast');t.textContent=m;t.classList.add('on');setTimeout(()=>t.classList.remove('on'),1800);}
 function copy(txt){navigator.clipboard&&navigator.clipboard.writeText(txt);toast('Copied');}
 function money(n){return '$'+Math.round(n).toLocaleString();}
@@ -1268,7 +1268,10 @@ async function plFetch(){const box=$('plListBox');if(box&&PLR.rows==null)box.inn
 let TM={sport:null,league:null,search:'',dir:null,all:null,pending:null},_tmT=null;
 /* same monogram the graphics overlay uses, so page + overlay fallbacks match exactly */
 function teamMonogram(label){const t=(label||'').replace(/[^A-Za-z0-9 ]/g,'').trim();const w=t.split(/\s+/).filter(Boolean);if(w.length>=2)return (w[0][0]+w[1][0]).toUpperCase();return (t||'?').slice(0,3).toUpperCase();}
-function jsq(s){return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;');}
+/* Safe interpolation of a data value into a QUOTED JS string inside an inline handler
+   (e.g. onclick="fn('${jsq(v)}')"). Backslash-escape the JS-string metachars, THEN HTML-escape via
+   esc() — so after the browser HTML-decodes the attribute, a valid JS string literal remains. */
+function jsq(s){return esc(String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'\\"'));}
 async function tmLoadDir(){TM.all=[];TM.dir={};
  try{const{data,error}=await sb.from('e10_teams').select('id,name,sport,league,logo_url').order('sport').order('league').order('name');if(error)throw error;
    TM.all=(data||[]).map(t=>({id:t.id,name:t.name,sport:t.sport,league:t.league,logo_url:t.logo_url}));
@@ -2252,8 +2255,8 @@ function updateExCount(){const el=$('exCount');if(el)el.textContent=exRows().cou
 function exportWhatnot(){const {rows,count}=exRows();if(!count){toast('No matching inventory');return;}csvDL('element10_whatnot_inventory.csv',rows);toast(count+' rows exported');}
 function dLists(){const lm=[['characters','Chase characters'],['sets','Sets / products'],['formats','Show formats'],['diff','Trust / hooks'],['invcats','Inventory categories'],['grading','Grading companies'],['conditions','Card conditions']];
  let h=`<div class="card"><h3 style="font-size:15px">Pick-lists</h3>`;
- lm.forEach(([k,label])=>{h+=`<div style="margin-bottom:14px"><div class="lab">${label}</div><div class="chipwrap">${L(k).map(v=>`<span class="pill">${esc(v)} <a onclick="rmList('${k}','${esc(v)}')" style="color:var(--red)">✕</a></span>`).join('')}</div><div class="row"><input id="add_${k}" placeholder="Add…" style="max-width:260px" onkeydown="if(event.key==='Enter')addList('${k}')"><button class="btn sm" onclick="addList('${k}')">+</button></div></div>`;});
- h+=`<div><div class="lab">Streamers</div><div class="chipwrap">${S.streamers.map(v=>`<span class="pill">${esc(v)} <a onclick="rmStreamer('${esc(v)}')" style="color:var(--red)">✕</a></span>`).join('')}</div><div class="row"><input id="add_str" placeholder="Add streamer…" style="max-width:260px" onkeydown="if(event.key==='Enter')addStreamer()"><button class="btn sm" onclick="addStreamer()">+</button></div></div></div>`;
+ lm.forEach(([k,label])=>{h+=`<div style="margin-bottom:14px"><div class="lab">${label}</div><div class="chipwrap">${L(k).map(v=>`<span class="pill">${esc(v)} <a onclick="rmList('${jsq(k)}','${jsq(v)}')" style="color:var(--red)">✕</a></span>`).join('')}</div><div class="row"><input id="add_${k}" placeholder="Add…" style="max-width:260px" onkeydown="if(event.key==='Enter')addList('${k}')"><button class="btn sm" onclick="addList('${k}')">+</button></div></div>`;});
+ h+=`<div><div class="lab">Streamers</div><div class="chipwrap">${S.streamers.map(v=>`<span class="pill">${esc(v)} <a onclick="rmStreamer('${jsq(v)}')" style="color:var(--red)">✕</a></span>`).join('')}</div><div class="row"><input id="add_str" placeholder="Add streamer…" style="max-width:260px" onkeydown="if(event.key==='Enter')addStreamer()"><button class="btn sm" onclick="addStreamer()">+</button></div></div></div>`;
  $('dtc').innerHTML=h;}
 
 /* ---------- TEAM (admin onboarding) ---------- */
@@ -2301,7 +2304,7 @@ function permDenied(role,cap){return (ROLE_PERMS||[]).some(r=>r.role===role&&r.c
 function dPerms(){
  if(ROLE!=='admin'){$('dtc').innerHTML='<div class="card" style="color:var(--mut)">Admin only — permissions are configured by admins.</div>';return;}
  const roles=permRoles();
- const capRow=(cap,label)=>`<tr><td style="text-align:left"><b>${esc(label)}</b> <span class="lab" style="text-transform:none;letter-spacing:0">${esc(cap)}</span></td>${roles.map(role=>{const lock=(role==='admin');const on=lock||!permDenied(role,cap);return `<td style="text-align:center"><input type="checkbox" ${on?'checked':''} ${lock?'disabled':''} onchange="permToggle('${role}','${esc(cap)}',this.checked)"></td>`;}).join('')}</tr>`;
+ const capRow=(cap,label)=>`<tr><td style="text-align:left"><b>${esc(label)}</b> <span class="lab" style="text-transform:none;letter-spacing:0">${esc(cap)}</span></td>${roles.map(role=>{const lock=(role==='admin');const on=lock||!permDenied(role,cap);return `<td style="text-align:center"><input type="checkbox" ${on?'checked':''} ${lock?'disabled':''} onchange="permToggle('${jsq(role)}','${jsq(cap)}',this.checked)"></td>`;}).join('')}</tr>`;
  let h=`<div class="card"><div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="font-size:15px">Roles &amp; permissions</h3><div class="row" style="gap:6px"><input id="permNewRole" placeholder="New role name" style="max-width:180px" onkeydown="if(event.key==='Enter')permAddRole()"><button class="btn sm" onclick="permAddRole()">+ Role</button></div></div>
    <div class="lab" style="text-transform:none;letter-spacing:0;margin-top:4px">Uncheck to <b>restrict</b> a role — default is full access; admin is always full and can't be reduced. Enforced server-side (RLS), not just in the UI.</div>
    <div class="egrid" style="margin-top:10px;overflow:auto"><table><tr><th style="text-align:left">Capability</th>${roles.map(r=>`<th>${esc(r)}${r==='admin'?' 🔒':''}</th>`).join('')}</tr>
@@ -2440,17 +2443,25 @@ function isEditing(){const a=document.activeElement;return !!a&&(a.tagName==='IN
 function safeRender(){if(isEditing()){_pendingRender=true;return;}currentRender();}
 document.addEventListener('focusout',()=>{setTimeout(()=>{if(_pendingRender&&!isEditing()){_pendingRender=false;currentRender();}},0);});
 
-async function writeRow(id,owner,data){const rev=(REVS[id]||0)+1;REVS[id]=rev;const row={id,data,rev,owner,updated_by:ME,updated_at:new Date().toISOString()};const{error}=await sb.from('e10_workspace').upsert(row);if(error){console.warn('save',id,error.message);toast('⚠ Sync failed — your last change may not be saved ('+error.message+')');}}
+/* Returns true on a clean upsert, false on error. The optimistic REVS bump is rolled back on error,
+   GUARDED so a concurrent bump (a realtime apply or a second write) isn't clobbered — otherwise a
+   failed write leaves REVS claiming a rev that never landed and the tab then ignores legitimate remote
+   updates at the real rev. The failure TOAST is fired by doCloudWrite, not here, so the loadAll
+   bootstrap write stays silent. */
+async function writeRow(id,owner,data){const rev=(REVS[id]||0)+1;REVS[id]=rev;const row={id,data,rev,owner,updated_by:ME,updated_at:new Date().toISOString()};const{error}=await sb.from('e10_workspace').upsert(row);if(error){console.warn('save',id,error.message);if(REVS[id]===rev)REVS[id]=rev-1;return false;}return true;}
 const _origSave=save;
 let _lsTimer=null;                        // debounce the localStorage mirror (was written on every keystroke)
 save=function(){clearTimeout(_lsTimer);_lsTimer=setTimeout(_origSave,400);cloudSave();};
-let _lastShared=null,_lastScoped=null;     // last payloads written — used to skip redundant cloud writes
+let _lastShared=null,_lastScoped=null,_saveFailing=false;     // last payloads written (skip redundant cloud writes); _saveFailing dedups the failure toast
 function cloudSave(){if(!sb||_applyingRemote)return;pushFromS();clearTimeout(_st);_st=setTimeout(doCloudWrite,600);}
-async function doCloudWrite(){_st=null;
+async function doCloudWrite(){_st=null;let failed=false;
  const shared={comments:S.comments,todos:S.todos,streamers:S.streamers,lists:S.lists,attachments:S.attachments,checklists:S.checklists,inventory:S.inventory,repacks:S.repacks};
- const sj=JSON.stringify(shared);if(sj!==_lastShared){_lastShared=sj;await writeRow('shared',null,shared);}
+ /* cache the payload as synced ONLY after a successful write — so a failed write leaves _lastShared
+    unchanged and the NEXT doCloudWrite re-sends it instead of silently skipping. */
+ const sj=JSON.stringify(shared);if(sj!==_lastShared){if(await writeRow('shared',null,shared))_lastShared=sj;else failed=true;}
  if(canEditScoped()){const scoped={shows:S.shows,breaks:S.breaks,copySets:S.copySets,dashCfg:S.dashCfg,sales:S.sales,chaseLists:S.chaseLists};const cj=JSON.stringify(scoped);
-  if(cj!==_lastScoped){_lastScoped=cj;const owner=(SCOPE==='mine')?MEID:(SCOPE==='universal'?null:SCOPE);await writeRow(SCOPED_ID,owner,scoped);}}
+  if(cj!==_lastScoped){const owner=(SCOPE==='mine')?MEID:(SCOPE==='universal'?null:SCOPE);if(await writeRow(SCOPED_ID,owner,scoped))_lastScoped=cj;else failed=true;}}
+ if(failed){if(!_saveFailing){_saveFailing=true;toast('Save failed — will retry');}}else _saveFailing=false; /* one toast on synced→failing, not per debounce tick; reset on a clean write */
 }
 /* Reservation-critical writes go through a read-modify-write on the shared row: re-read the latest
    'shared' JSONB, recompute availability against it, apply the mutation, then upsert with rev+1 —
@@ -2472,7 +2483,7 @@ async function cloudCommitShared(mutate){
  const payload={comments:base.comments,todos:base.todos,streamers:base.streamers,lists:base.lists,attachments:base.attachments,checklists:base.checklists,inventory:base.inventory,repacks:base.repacks};
  const rev=((fresh&&fresh.rev)||REVS['shared']||0)+1;REVS['shared']=rev;
  const{error}=await sb.from('e10_workspace').upsert({id:'shared',data:payload,rev,owner:null,updated_by:ME,updated_at:new Date().toISOString()});
- if(error)return{ok:false,msg:error.message};
+ if(error){if(REVS['shared']===rev)REVS['shared']=rev-1;return{ok:false,msg:error.message};} /* roll back the optimistic REVS bump (guarded) so a failed reservation write doesn't make the tab ignore remote updates */
  _applyingRemote=true;SHARED=base;_lastShared=JSON.stringify(payload);rebuildS();_applyingRemote=false;safeRender();
  return{ok:true,msg:res.msg};
 }
@@ -2795,9 +2806,9 @@ function liveActiveHTML(){const s=LIVE.session;const dir=liveDirUrl();const over
  <details class="card" style="margin-top:12px"><summary style="cursor:pointer;font-weight:600;font-size:14px">OBS overlays + broadcast links (vertical 1080×1920)</summary>
    ${(function(){const cfg=s.overlay_cfg||{};const onCam=overlayUrl+'&layout=oncam',graphics=overlayUrl+'&layout=graphics';return `
    <div class="lab" style="text-transform:none;letter-spacing:0;margin:8px 0 4px">Add each as an OBS <b>Browser</b> source at <b>1080×1920</b> (transparent). Put one layout per scene.</div>
-   <div class="row" style="margin-top:6px;gap:6px"><input value="${esc(onCam)}" readonly style="flex:2;font-size:12px" onclick="this.select()"><button class="btn sm" onclick="copy('${esc(onCam)}')">Copy On-cam</button></div>
-   <div class="row" style="margin-top:6px;gap:6px"><input value="${esc(graphics)}" readonly style="flex:2;font-size:12px" onclick="this.select()"><button class="btn sm" onclick="copy('${esc(graphics)}')">Copy Graphics</button></div>
-   <div class="row" style="margin-top:6px;gap:6px"><input value="${esc(companionUrl)}" readonly style="flex:2;font-size:12px" onclick="this.select()"><button class="btn sm" onclick="copy('${esc(companionUrl)}')">Copy companion</button></div>
+   <div class="row" style="margin-top:6px;gap:6px"><input value="${esc(onCam)}" readonly style="flex:2;font-size:12px" onclick="this.select()"><button class="btn sm" onclick="copy('${jsq(onCam)}')">Copy On-cam</button></div>
+   <div class="row" style="margin-top:6px;gap:6px"><input value="${esc(graphics)}" readonly style="flex:2;font-size:12px" onclick="this.select()"><button class="btn sm" onclick="copy('${jsq(graphics)}')">Copy Graphics</button></div>
+   <div class="row" style="margin-top:6px;gap:6px"><input value="${esc(companionUrl)}" readonly style="flex:2;font-size:12px" onclick="this.select()"><button class="btn sm" onclick="copy('${jsq(companionUrl)}')">Copy companion</button></div>
    <div class="lab" style="text-transform:none;letter-spacing:0;margin:12px 0 4px"><b>Overlay branding</b> (saved to this session, live on the overlay)</div>
    <div class="row" style="gap:6px;flex-wrap:wrap">
      <input id="ovShow" placeholder="Show title" value="${esc(cfg.showTitle||'')}" style="flex:1;min-width:150px;font-size:12px">
