@@ -2706,7 +2706,7 @@ async function liveStart(){const name=($('liveName')&&$('liveName').value.trim()
     consumption draws down the show's reservations; ad-hoc (no seed) stays null. */
  const{data,error}=await sb.from('e10_break_sessions').insert({streamer_uid:MEID,name,source_show_ref:(LIVE_SEED&&LIVE_SEED.showRef)||null}).select().maybeSingle();
  if(error){toast('Could not start: '+error.message);return;}
- LIVE.session=data;LIVE.slots=[];await liveEvent('session_started',null,{name});
+ LIVE.session=data;LIVE_SEED=null;LIVE.slots=[];await liveEvent('session_started',null,{name});  /* M3.2.1/M3.2.2 item 5: consume the seed immediately after the successful insert, before any await */
  let seedFails=0;
  if(seedModel){const rs=(seedModel.ruleSlots&&seedModel.ruleSlots.length)?seedModel.ruleSlots:null;
    if(rs){/* rich seed — carry the format's rule slots + tiers + bands + projection (same as Start-from-format,
@@ -2731,7 +2731,7 @@ async function liveStart(){const name=($('liveName')&&$('liveName').value.trim()
      for(let i=0;i<n;i++){const row=rows?rows[i]:null;const label=row?(row.label||('Spot '+(i+1))):('Spot '+(i+1));
        const ins={session_id:LIVE.session.id,label,position:i};if(row){if(row.price!=null)ins.price=row.price;if(row.tier)ins.tier=row.tier;}
        try{const{data:sl,error}=await sb.from('e10_break_slots').insert(ins).select().maybeSingle();if(error)throw error;if(sl)LIVE.slots.push(sl);}catch(e){seedFails++;}}}}
- LIVE_SEED=null;liveSubscribe();renderLive();toast('Live break started'+(seedModel?' — seeded '+LIVE.slots.length+' spots':'')+(seedFails?(' · ⚠ '+seedFails+' failed'):''));
+ liveSubscribe();renderLive();toast('Live break started'+(seedModel?' — seeded '+LIVE.slots.length+' spots':'')+(seedFails?(' · ⚠ '+seedFails+' failed'):''));
 }
 async function liveEnd(){if(!LIVE.session||!confirm('End this live break session?'))return;
  try{const{error}=await sb.from('e10_break_sessions').update({status:'ended',ended_at:new Date().toISOString()}).eq('id',LIVE.session.id);if(error)throw error;await liveEvent('session_ended',null,{});}catch(e){toast('Could not end session: '+e.message);return;}
@@ -3127,7 +3127,7 @@ async function liveConfirmReview(){if(!REVIEW)return;if(!canEditScoped())return 
    source_show_ref:(REVIEW&&REVIEW.showRef)||null,
    participants:REVIEW.participants||[],products:[]}).select().maybeSingle();
  if(error){toast('Could not start: '+error.message);return;}
- LIVE.session=sess;LIVE.slots=[];await liveEvent('session_started',null,{name:sess.name,format_id:REVIEW.modelId,participants:REVIEW.participants||[]});
+ LIVE.session=sess;LIVE_SEED=null;REVIEW.showRef=null;LIVE.slots=[];await liveEvent('session_started',null,{name:sess.name,format_id:REVIEW.modelId,participants:REVIEW.participants||[]});  /* M3.2.2 item 5: consume the seed pre-await, right after the successful insert */
  let slotFails=0;
  for(let i=0;i<rs.length;i++){const s=rs[i],take=modelTake(s,tb),tierName=(tb.find(t=>t.id===s.tierId)||{}).name||'';
    const teamC=(s.include||[]).find(c=>c.field==='team'&&c.valueId),playerC=(s.include||[]).find(c=>c.field==='player'&&c.valueId),cm=cardMap[i]||{count:null,cards:[]};
@@ -3141,7 +3141,7 @@ async function liveConfirmReview(){if(!REVIEW)return;if(!canEditScoped())return 
  LIVE.session.products=[];
  for(const p of (REVIEW.products||[])){p.consumed=0;await breakConsume(p);LIVE.session.products.push(p);}
  await prodPersist();
- REVIEW=null;LIVE_SEED=null;await liveLoadChases();liveSubscribe();go('live');renderLive();toast('Live break started — '+LIVE.slots.length+' spots · cost '+money(LIVE.session.cost||0)+(slotFails?(' · ⚠ '+slotFails+' spot(s) failed to save'):''));
+ REVIEW=null;await liveLoadChases();liveSubscribe();go('live');renderLive();toast('Live break started — '+LIVE.slots.length+' spots · cost '+money(LIVE.session.cost||0)+(slotFails?(' · ⚠ '+slotFails+' spot(s) failed to save'):''));
 }
 /* projection of a SAVED model (pure; mirrors phase-2 computeProjection, reads through the same band shape) */
 function modelBand(slot,tierBands){const o=slot.bandOverride;

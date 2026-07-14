@@ -79,10 +79,15 @@ const T = (n, ok, d) => ok ? (pass++, console.log('  PASS ' + n)) : (fail++, con
   const cMv = (await A.from('e10_inventory_movements').select('id').eq('idempotency_key', AKEY)).data;
   T('i1 concurrent add: exactly one movement (loser replayed)', cMv.length === 1, cMv.length);
 
-  // ---- teardown (rows + blob via RPC; ledger/receipts cleared by the SQL sweep afterward) ----
+  // ---- SELF-CONTAINED teardown: delete items via RPC, then e10_test_cleanup removes the append-only
+  //      ledger rows + receipts this run created (both 'zznode:' and 'zzconc' namespaces). ----
   await rpc(A, 'e10_inv_delete_item', { p_id: ID, p_idempotency_key: 'zznode:del:' + ID });
   await rpc(A, 'e10_inv_delete_item', { p_id: IDx, p_idempotency_key: 'zznode:delx:' + ID });
   await rpc(A, 'e10_inv_delete_item', { p_id: AID, p_idempotency_key: 'zznode:concdel:' + AID });
+  await rpc(A, 'e10_test_cleanup', { p_prefix: 'zznode' });
+  await rpc(A, 'e10_test_cleanup', { p_prefix: 'zzconc' });
+  const _leftMv = (await A.from('e10_inventory_movements').select('id').or('idempotency_key.like.zznode%,idempotency_key.like.zzconc%,item_id.like.zznode%,item_id.like.zzconc%')).data;
+  T('teardown self-contained: 0 residual ledger rows', (_leftMv || []).length === 0, (_leftMv || []).length);
 
   console.log('\n  ' + pass + ' pass · ' + fail + ' fail\n');
   process.exit(fail ? 1 : 0);
