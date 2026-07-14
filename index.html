@@ -619,7 +619,7 @@ function renderBreak(target){target=target||'dtc';const el=$(target);if(!el)retu
  <div class="card"><div class="etool" style="align-items:flex-end">
    <div style="min-width:190px;flex:1"><label>Product</label>${entityPicker('bkProd',{icon:'📦',placeholder:'search inventory / product…',value:it?{id:it.itemId,label:it.name}:null,search:invItemSearch,onpick:(iid)=>buildBreakFromProduct(iid),onclear:()=>newBlankModel()})}</div>
    <div><label>Cost $</label><input id="bCost" type="number" value="${BK.cost}" style="max-width:100px" oninput="BK.cost=+this.value||0;calcBreak();renderProjection()"></div>
-   <div><label>Format</label><select onchange="BK.format=this.value;calcBreak()">${[['random','Random spots'],['tiered','Tiered / ranked'],['team','Team / character'],['pick','Pick-your-Pokémon']].map(([v,l])=>`<option value="${v}" ${BK.format===v?'selected':''}>${l}</option>`).join('')}</select></div>
+   <div><label>Format</label><select onchange="BK.format=this.value;calcBreak()">${[['random','Random spots'],['tiered','Tiered / ranked'],['team','Team / character'],['pick','Pick your spot']].map(([v,l])=>`<option value="${v}" ${BK.format===v?'selected':''}>${l}</option>`).join('')}</select></div>
    <div><label>Spots</label><input type="number" min="1" value="${BK.spots}" style="max-width:72px" oninput="BK.spots=Math.max(1,+this.value||1);calcBreak()"></div>
    <div><label>Fees %</label><input type="number" step="0.5" value="${BK.feesPct}" style="max-width:70px" oninput="BK.feesPct=+this.value||0;calcBreak()"></div>
    <div><label>Ship $/spot</label><input type="number" step="0.5" value="${BK.shipPer}" style="max-width:82px" oninput="BK.shipPer=+this.value||0;calcBreak()"></div>
@@ -928,7 +928,7 @@ function bkPlanHTML(p){const tierCls={S:'tierS',A:'tierA',B:'tierB',C:'tierC'};c
   rows=sorted.map(b=>`<tr><td><span class="${tierCls[b.tier]||''}">${b.tier}</span></td><td>${esc(b.cards&&b.cards.length?b.cards.map(c=>c.name).join(' + '):b.label)}</td><td class="mono">${money(b.val)}</td><td class="mono"><b>${money(b.price)}</b></td><td class="mono">${money(reserveOf(b))}</td></tr>`).join('');}
  else{const lbl=p.fmt==='pick'?'Pick':'Slot';head=`<th>${lbl}</th><th>Cards</th><th>Value</th><th>Price</th><th>Reserve</th>`;
   rows=sorted.map(b=>`<tr><td><b>${esc(b.label)}</b></td><td class="lab" style="text-transform:none;letter-spacing:0;font-size:12px">${esc((b.cards||[]).map(c=>c.name+' ('+money(c.val)+')').join(', '))||'—'}</td><td class="mono">${money(b.val)}</td><td class="mono"><b>${money(b.price)}</b></td><td class="mono">${money(reserveOf(b))}</td></tr>`).join('');}
- const title={tiered:'Tiered / ranked',team:'Team / character',pick:'Pick-your-Pokémon'}[p.fmt];
+ const title={tiered:'Tiered / ranked',team:'Team / character',pick:'Pick your spot'}[p.fmt];
  return `<div class="card" style="margin-top:14px"><h3 style="font-size:15px">Spot plan — ${title}</h3><div class="egrid" style="max-height:360px;margin-top:8px"><table><tr>${head}</tr>${rows}</table></div><div class="lab" style="margin-top:6px;text-transform:none;letter-spacing:0">${p.spotCount} ${p.fmt==='tiered'?'spots':'slots'} · prices value-weighted, floored at the reserve so nothing sells under cost.</div></div>`;}
 function calcBreak(){const box=$('bkPlan');if(!box)return;
  const p=computePlan();
@@ -1124,8 +1124,7 @@ function renderChecklistReview(){const cl=PENDING_CL;if(!cl){clReviewMode=false;
  $('dtc').innerHTML=h;gRenderCols(G);gRenderList(G);}
 async function clApproveReview(){if(!canEditScoped())return roGuard();const cl=PENDING_CL;if(!cl)return;
  cl.cards.forEach(c=>{c.chase=!!c.chase;c.cardType=c.cardType||'base';c.parallel=c.parallel||'';if(c.value!==''&&c.value!=null)c.value=+c.value||0;});
- const isTCG=/pok[eé]mon|magic|mtg|lorcana|yu-?gi/i.test((cl.name||'')+' '+(cl.set||''));
- const setId=cl.setId||await dbEnsureSet(cl.set,isTCG?'Pokémon':null); /* use the picked set link if the reviewer chose an existing set */
+ const setId=cl.setId||await dbEnsureSet(cl.set,((cl.sport||'').trim())||inferSport((cl.name||'')+' '+(cl.set||''))||null); /* picked set link wins; else the reviewer's chosen sport/game; else honestly inferred from the name; else null for the reviewer to set — never a hardcoded default */
  if(cl._resolve!==false){toast('Resolving players…');const plan=await planResolution(cl.cards);if(plan.prompts.length){openResolveModal(cl,setId,plan);return;}commitImport(cl,setId,plan.linked);}
  else commitImport(cl,setId,{});}
 function clCancelReview(){clReviewMode=false;PENDING_CL=null;delete GRIDS['cl:__review__'];toast('Import discarded');dChecklists();}
@@ -1369,7 +1368,15 @@ function tmAddLeagueGo(){const sport=($('tmlSport').value||'').trim(),league=($(
    signal; anything else returns null so the reviewer picks and unknown stays NULL. Replaces
    the old bug where any sports-product name hardcoded every new player to 'Soccer'. */
 function inferSport(text){const t=(text||'').toLowerCase();
+ /* Domain-neutral: resolve the ACTUAL game/sport from the evidence. A detected game is never mapped to a
+    different game, and anything undetected returns null for the reviewer to set — never a hardcoded default. */
  if(/pok[eé]mon|\bpokemon\b|\b151\b|scarlet|violet|paldea/.test(t))return 'Pokémon';
+ if(/lorcana/.test(t))return 'Lorcana';
+ if(/magic: the gathering|\bmtg\b/.test(t))return 'Magic: The Gathering';
+ if(/yu-?gi-?oh|\byugioh\b/.test(t))return 'Yu-Gi-Oh!';
+ if(/one piece/.test(t))return 'One Piece';
+ if(/digimon/.test(t))return 'Digimon';
+ if(/dragon ball|\bdbz\b/.test(t))return 'Dragon Ball';
  if(/world cup|\bfifa\b|\bsoccer\b|\bla ?liga\b|premier league|\buefa\b|champions league|\bepl\b/.test(t))return 'Soccer';
  if(/\bbaseball\b|\bmlb\b/.test(t))return 'Baseball';
  if(/\bbasketball\b|\bnba\b|\bwnba\b/.test(t))return 'Basketball';
@@ -2334,7 +2341,7 @@ function rpCur(){return S.repacks.find(x=>x.id===REPEDIT);}
 function rpList(){const p=rpCur();return p.mode==='random'?(p.pool=p.pool||[]):(p.cards=p.cards||[]);}
 function rpSet(k,v){const p=rpCur();if(!p)return;p[k]=v;save();if(k==='name'){const hh=document.querySelector('#sec-repack .hero h1');if(hh)hh.textContent=v||'Product';}if(k==='mode')renderRepackEditor();}
 function rpCard(i,k,v){const l=rpList();if(l[i]){l[i][k]=v;save();}}
-function rpAddBlank(){rpList().push({name:'',category:'Pokémon',grade:'Raw',serial:'',year:'',set:'',era:'',img:'',marketValue:0,buyback:0,tier:'B',weight:1});save();renderRepackEditor();}
+function rpAddBlank(){rpList().push({name:'',category:'',grade:'Raw',serial:'',year:'',set:'',era:'',img:'',marketValue:0,buyback:0,tier:'B',weight:1});save();renderRepackEditor();}
 function rpAddFromInv(){const ix=$('rpInv').value;if(ix==='')return;const it=S.inventory[+ix];if(!it)return;rpList().push({name:it.name,category:'',grade:it.cond||'Raw',serial:'',year:'',set:it.set||'',era:'',img:it.img||'',marketValue:+it.value||0,buyback:0,tier:'B',weight:1});save();renderRepackEditor();}
 function rpAddFromInvById(itemId){const it=(S.inventory||[]).find(x=>x.id===itemId);if(!it)return;rpList().push({name:it.name,category:'',grade:it.cond||'Raw',serial:'',year:it.year||'',set:it.set||'',era:'',img:it.img||'',marketValue:+it.value||0,buyback:+it.cost||0,tier:'B',weight:1,invItemId:it.id,setId:it.setId||null});save();renderRepackEditor();toast('Pulled '+it.name+' — cost/value brought in');}
 /* link a repack card to a canonical e10_cards row (stores cardId/playerId; autofills name/set/value) */
@@ -2356,7 +2363,7 @@ function renderRepackEditor(){const p=rpCur();if(!p){REPEDIT=null;return renderR
    <div class="egrid wide" style="margin-top:10px"><table><tr><th>Name</th><th>Cat</th><th>Grade</th><th>Serial</th><th>Year</th><th>Value</th><th>Buyback</th><th>Tier</th>${rnd?'<th>Wt</th>':''}<th></th></tr>
    ${list.map((c,i)=>`<tr>
      <td><input value="${esc(c.name||'')}" oninput="rpCard(${i},'name',this.value)" style="min-width:150px"></td>
-     <td><input value="${esc(c.category||'')}" oninput="rpCard(${i},'category',this.value)" style="width:82px" placeholder="Pokémon"></td>
+     <td><input value="${esc(c.category||'')}" oninput="rpCard(${i},'category',this.value)" style="width:82px" placeholder="Category"></td>
      <td><input value="${esc(c.grade||'')}" oninput="rpCard(${i},'grade',this.value)" style="width:76px" placeholder="PSA 10"></td>
      <td><input value="${esc(c.serial||'')}" oninput="rpCard(${i},'serial',this.value)" style="width:64px" placeholder="/99"></td>
      <td><input value="${esc(c.year||'')}" oninput="rpCard(${i},'year',this.value)" style="width:56px"></td>
@@ -2365,7 +2372,7 @@ function renderRepackEditor(){const p=rpCur();if(!p){REPEDIT=null;return renderR
      <td><select onchange="rpCard(${i},'tier',this.value)">${['S','A','B','C'].map(t=>`<option ${c.tier===t?'selected':''}>${t}</option>`).join('')}</select></td>
      ${rnd?`<td><input type="number" value="${c.weight||1}" oninput="rpCard(${i},'weight',+this.value||1)" style="width:52px"></td>`:''}
      <td><button class="btn x" onclick="rpDelCard(${i})">✕</button></td></tr>
-     <tr><td colspan="${span}" style="padding-top:0"><input value="${esc(c.era||'')}" oninput="rpCard(${i},'era',this.value)" placeholder="Era (Pokémon: Vintage / Modern)" style="max-width:230px;font-size:12px"> <input value="${esc(c.set||'')}" oninput="rpCard(${i},'set',this.value)" placeholder="Set" style="max-width:170px;font-size:12px"> <input value="${esc(c.img||'')}" oninput="rpCard(${i},'img',this.value)" placeholder="Image URL or ⬆ upload" style="max-width:230px;font-size:12px"> <button class="btn sm" onclick="rpUploadImg(${i})">⬆ Upload</button> <button class="btn sm ${c.cardId?'v':''}" onclick="rpLinkCard(${i})" title="Link this to a card in the library">${c.cardId?'🔗 linked':'🔗 link card'}</button>${c.img?`<img src="${esc(c.img)}" style="height:34px;border-radius:5px;vertical-align:middle;margin-left:6px;border:1px solid var(--line)">`:''}</td></tr>`).join('')||`<tr><td colspan="${span}" style="color:var(--mut)">No cards yet.</td></tr>`}</table></div>
+     <tr><td colspan="${span}" style="padding-top:0"><input value="${esc(c.era||'')}" oninput="rpCard(${i},'era',this.value)" placeholder="Era" style="max-width:230px;font-size:12px"> <input value="${esc(c.set||'')}" oninput="rpCard(${i},'set',this.value)" placeholder="Set" style="max-width:170px;font-size:12px"> <input value="${esc(c.img||'')}" oninput="rpCard(${i},'img',this.value)" placeholder="Image URL or ⬆ upload" style="max-width:230px;font-size:12px"> <button class="btn sm" onclick="rpUploadImg(${i})">⬆ Upload</button> <button class="btn sm ${c.cardId?'v':''}" onclick="rpLinkCard(${i})" title="Link this to a card in the library">${c.cardId?'🔗 linked':'🔗 link card'}</button>${c.img?`<img src="${esc(c.img)}" style="height:34px;border-radius:5px;vertical-align:middle;margin-left:6px;border:1px solid var(--line)">`:''}</td></tr>`).join('')||`<tr><td colspan="${span}" style="color:var(--mut)">No cards yet.</td></tr>`}</table></div>
    <button class="btn sm" style="margin-top:10px" onclick="rpAddBlank()">+ Add blank card</button></div>`;
  $('sec-repack').innerHTML=h;}
 function rollRandom(p){const pool=(p.pool||[]).filter(c=>c.name);const n=Math.max(1,p.count||5);const out=[];if(!pool.length)return out;
