@@ -851,3 +851,34 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --     amended consume/reverse/edit signatures, then re-apply the M2/M3 bodies (..124500/..130000/..131500).
 --     The created_by backfill is data-safe to leave. A git revert of M3.1b is an APPLICATION rollback; the
 --     additive DB objects remain.
+
+-- ═════════════════════════════════════════════════════════════════════════════
+-- APPLIED (migration e10_break_session_source_show_ref — M3.2): additive nullable
+-- e10_break_sessions.source_show_ref text. Carries the source show's reference on a live break session
+-- so consumption draws THAT show's reservations. Value == e10_inventory_reservations.show_ref (the show
+-- id). Stamped at session creation (client) when the operator starts a break FROM a show; null for
+-- ad-hoc. RLS/policies UNCHANGED (inherits e10_break_sessions owner/admin). No data change.
+--   Rollback: alter table public.e10_break_sessions drop column source_show_ref;
+
+-- ═════════════════════════════════════════════════════════════════════════════
+-- APPLIED (migration e10_m321_lock_and_derive — M3.2.1a): corrective. ADDITIVE (CREATE OR REPLACE only);
+-- ZERO rows; no signature/grant/RLS change.
+--   ITEM 1 (owed from M3.1) — pg_advisory_xact_lock(hashtext(p_idempotency_key)) is now at the top of
+--     EVERY e10_inv_* RPC (before the receipt check), moved OUT of _e10_inv_receipt_check (the lock is
+--     the caller's responsibility, and auditable per-RPC). e10_inv_add_item wraps its insert in a
+--     unique_violation handler: a DIFFERENT-key concurrent add of the same id → clean {ok:false,'item
+--     already exists'}; SAME-key concurrent adds serialize on the lock and the loser replays. Proven:
+--     two genuinely concurrent same-key adds → one committed item, one receipt, both callers succeed.
+--   ITEM 4 — DERIVE-AND-VALIDATE contract for e10_inv_consume (signature unchanged): the source show ref
+--     is read from e10_break_sessions.source_show_ref by p_break_session_id (server value), NOT trusted
+--     from the browser. The session must exist and belong to the caller (streamer_uid = auth.uid() OR
+--     admin) else {ok:false,'not your break session'}. A non-null client p_source_show_ref that differs
+--     from the stored value is REJECTED ({ok:false,'source_show_ref does not match the session'}) — a
+--     tamper signal; the deployed client always sends the session's own value. A null/legacy (non-uuid)
+--     session id → v_show_ref null → unreserved draw. The derived value drives the drawdown match + the
+--     movement meta allocation.
+--   Verified live with throwaway data (concurrent add; tamper rejected; foreign-session rejected;
+--     server-derived draw; reverse reconstructs; ad-hoc untouched), torn down; baseline BYTE-IDENTICAL
+--     35 / 223 / 21 / $29,486, recon drift 0.
+--   Rollback: re-apply migration 20260714150000_e10_m31_mutation_hardening.sql (restores the M3.1a
+--     bodies). No data change.
