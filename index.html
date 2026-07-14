@@ -1597,9 +1597,43 @@ function invRollup(items){items=items||invView();let cost=0,market=0,committed=0
    Driven by a descriptor (INV_COLS below). Each column: {key,label,type:'num'|'text',core,sortable,
    sortVal(row), cell(row,admin)}. Reuse on another grid by supplying its own column descriptor +
    its own state/localStorage keys (see extension note near dInventory). */
+/* ===== Pass 2.4 — inventory TYPE compatibility helpers (read-only, PURE). Prefer a valid explicit
+   structured value; otherwise derive conservatively from legacy cat/name/qty. NEVER mutate the item,
+   never touch state, never call save(). Not yet adopted by Add/Edit forms, Break Planner, or cost/case
+   helpers — used only for the derived Type grid column this pass. ===== */
+const INV_TYPES=['sealed_product','graded_card','raw_card','lot_bundle'];   // 'unknown' is a read-time fallback only, never persisted
+function invType(it){if(!it)return 'unknown';
+ const ex=it.inventory_type; if(typeof ex==='string'&&INV_TYPES.includes(ex))return ex;   // A: explicit valid value wins (unrecognized -> fall through, not trusted)
+ const cat=(it.cat||'').replace(/\s+/g,' ').trim().toLowerCase();
+ if(cat==='box'||cat==='case'||cat==='etb / sealed'||cat==='pack')return 'sealed_product'; // B: sealed categories (precedence BEFORE name-based lot detection)
+ const name=(it.name||'').toLowerCase(), qty=+it.qty||0, lotName=/\b(lot|bundle)\b/.test(name);
+ if((cat==='raw card'||cat==='slab')&&qty>1&&lotName)return 'lot_bundle';                  // C: legacy raw/slab multi-item lots
+ if(cat==='slab')return 'graded_card';                                                     // D
+ if(cat==='raw card')return 'raw_card';                                                    // E
+ return 'unknown';}                                                                        // F: blank/unrecognized/ambiguous
+function invTypeLabel(t){return {sealed_product:'Sealed product',graded_card:'Graded card',raw_card:'Raw card',lot_bundle:'Lot / bundle',unknown:'Unclassified'}[t]||'Unclassified';}
+/* invPackage: PURE compatibility helper for FUTURE form/Break-Planner work — informational only this
+   pass (must NOT drive cost, slicing, reservations, or break behavior). Explicit package_type wins;
+   else conservative legacy fallback; null when unsafe. */
+const INV_PKGS=['case','box','pack','bundle','tin','blister','lot'];
+function invPackage(it){if(!it)return null;
+ const ex=it.package_type; if(typeof ex==='string'&&INV_PKGS.includes(ex))return ex;       // explicit valid value wins
+ if(invType(it)==='lot_bundle')return 'lot';
+ const cat=(it.cat||'').replace(/\s+/g,' ').trim().toLowerCase();
+ if(cat==='case')return 'case';
+ if(cat==='box'||cat==='etb / sealed')return 'box';
+ if(cat==='pack')return /\bbundle\b/.test((it.name||'').toLowerCase())?'bundle':'pack';
+ return null;}                                                                              // graded_card / raw_card / unknown
+function invPackageLabel(p){return {case:'Case',box:'Box',pack:'Pack',bundle:'Bundle',tin:'Tin',blister:'Blister',lot:'Lot'}[p]||'—';}
 const INV_COLS=[
  {key:'name',label:'Item',core:true,first:true,type:'text',sortable:true,sortVal:i=>(i.name||'').toLowerCase(),
   cell:(i,admin)=>{const sold=(+i.soldQty||0)>0?`<div class="lab" style="text-transform:none;letter-spacing:0;color:var(--mut2)">sold ${i.soldQty} · ${money(i.soldProceeds||0)}</div>`:'';return `<td class="ive-open" data-invid="${esc(i.id)}" tabindex="0" role="button" aria-label="Open ${esc(i.name)}"><b>${esc(i.name)}</b>${sold}</td>`;}},
+ /* Pass 2.4 — derived Type column (read-only from invType(); legacy Category kept separate & unchanged) */
+ {key:'invtype',label:'Type',type:'text',sortable:true,filter:'enum',
+  enumVals:['Sealed product','Graded card','Raw card','Lot / bundle','Unclassified'],
+  enumGet:i=>invTypeLabel(invType(i)),
+  sortVal:i=>['sealed_product','graded_card','raw_card','lot_bundle','unknown'].indexOf(invType(i)),
+  cell:i=>`<td>${esc(invTypeLabel(invType(i)))}</td>`},
  {key:'cat',label:'Category',type:'text',filter:'enum',enumGet:i=>i.cat||'',sortable:true,sortVal:i=>(i.cat||'').toLowerCase(),cell:i=>`<td>${esc(i.cat||'')||'—'}</td>`},
  {key:'set',label:'Set',type:'text',filter:'enum',enumGet:i=>i.set||'',sortable:true,sortVal:i=>(i.set||'').toLowerCase(),cell:i=>`<td>${esc(i.set||'')||'—'}</td>`},
  {key:'gradingCompany',label:'Grading',type:'text',filter:'enum',enumGet:i=>i.gradingCompany||'',sortable:true,sortVal:i=>(i.gradingCompany||''),cell:i=>`<td>${i.gradingCompany?`<span class="pill" style="margin:0">${esc(i.gradingCompany)}</span>`:'<span class="lab">—</span>'}</td>`},
@@ -1619,7 +1653,7 @@ const INV_COLS=[
  {key:'status',label:'Status',type:'text',filter:'enum',enumGet:i=>{const av=invAvailable(i),rsv=invReserved(i),sold=(+i.soldQty||0)>0;return av>0?'Free':(rsv>0?'Reserved':(sold?'Sold':'—'));},sortable:true,sortVal:i=>{const av=invAvailable(i);return av>0?'0free':(invReserved(i)>0?'1reserved':((+i.soldQty||0)>0?'2sold':'3none'));},cell:i=>{const av=invAvailable(i),rsv=invReserved(i),sold=(+i.soldQty||0)>0;return `<td><span class="lab">${av>0?'Free':(rsv>0?'Reserved':(sold?'Sold':'—'))}</span></td>`;}},
  {key:'actions',label:'',core:true,sortable:false,cell:(i,admin)=>`<td style="white-space:nowrap">${/box|case|etb|pack|sealed/i.test(i.cat||'')?`<button class="btn sm" title="Model a break from this product + its checklist" onclick="buildBreakFromProduct('${i.id}')">⚡ Break</button> `:''}${hasCap('act.inventory_edit')?`<button class="btn sm" title="Edit this item" onclick="invEdit('${i.id}')">Edit</button> `:''}<button class="btn sm" onclick="reserveModal('${i.id}')">Reserve</button> <button class="btn sm" onclick="sellModal('${i.id}')">Sold</button>${admin?` <select style="max-width:110px;font-size:11px" onchange="reassignInv('${i.id}',this.value)">${ownerOpts(i.owner)}</select>`:''} <button class="btn x" onclick="delInv('${i.id}')">✕</button></td>`},
 ];
-const INV_DEFAULT_COLS=['name','cat','set','gradingCompany','grade','onhand','cost','market','gain','alloc','age','actions'];
+const INV_DEFAULT_COLS=['name','invtype','cat','set','gradingCompany','grade','onhand','cost','market','gain','alloc','age','actions'];
 const invGridCfg={sk:'e10_inv',cols:INV_COLS,defaultCols:INV_DEFAULT_COLS,defaultSort:{col:'name',dir:1},colFilters:true,
  defaultFilters:{search:'',owner:'mine'},
  listBoxId:'invListBox',colsMenuId:'invColsMenu',viewPrompt:'Name this view (e.g. "PSA 10s", "Aging slabs", "Free sealed boxes")',
@@ -1631,7 +1665,16 @@ const invGridCfg={sk:'e10_inv',cols:INV_COLS,defaultCols:INV_DEFAULT_COLS,defaul
  /* one-time migration: carry over the pre-engine per-field localStorage selections so nothing resets */
  migrate:(G)=>{if(localStorage.getItem('e10_inv_filters')==null){const f=G.state.filters,gv=(k,d)=>{const v=localStorage.getItem(k);return v==null?d:v;};
    f.search=gv('e10_invSearch','');f.cat=gv('e10_invCatF','');f.set=gv('e10_invSetF','');f.status=gv('e10_invStatusF','all');f.gc=gv('e10_invGCF','');f.gradeMin=gv('e10_invGradeMin','');f.year=gv('e10_invYearF','');f.owner=gv('e10_invfilter','mine');
-   const s=gLoad('e10_invSort',null);if(s&&s.col)G.state.sort=s;}}
+   const s=gLoad('e10_invSort',null);if(s&&s.col)G.state.sort=s;}
+  /* Pass 2.4 — one-time: surface the derived Type column in the persisted default arrangement (just
+     before Category). Named saved views (G.state.views) are NOT touched; a device with no persisted
+     column arrangement falls through to INV_DEFAULT_COLS (which already includes it). Runs once. */
+  if(localStorage.getItem('e10_inv_typecol')==null&&Array.isArray(G.state.cols)&&G.state.cols.length){
+   /* only consume the one-time flag once a real persisted arrangement exists (a null-state device
+      falls through to INV_DEFAULT_COLS, which already includes invtype) */
+   try{localStorage.setItem('e10_inv_typecol','1');}catch(e){}
+   if(!G.state.cols.includes('invtype')){const ci=G.state.cols.indexOf('cat');G.state.cols.splice(ci>=0?ci:Math.min(1,G.state.cols.length),0,'invtype');}}
+ }
 };
 const INVG=makeGrid('inv',invGridCfg);
 function dInventory(){const admin=ROLE==='admin';const canEdit=hasCap('act.inventory_edit');const rl=invRollup();const sets=[...new Set(S.inventory.map(i=>i.set).filter(Boolean))].sort();const years=[...new Set(S.inventory.map(i=>i.year).filter(Boolean))].sort();
