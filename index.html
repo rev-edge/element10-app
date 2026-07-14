@@ -412,7 +412,7 @@ function showSetNotes(id,v){const r=showById(id);if(r){r.s.notes=v;save();}}
 async function showAddReserve(id){const r=showById(id);if(!r)return;const p=window._srPick;if(!p||!p.id){toast('Search and pick an item first');return;}const qty=$('srQty')?+$('srQty').value:1;const res=await reserveUnits(p.id,r.k+'|||'+r.i,qty);window._srPick=null;if(res&&res.ok)showRerender(id);}
 function showAddNeed(id){if(!canEditScoped())return roGuard();const r=showById(id);if(!r)return;const set=$('ndSet')?$('ndSet').value:'';if(!set){toast('Pick a set');return;}const qty=Math.max(1,$('ndQty')?+$('ndQty').value:1);const cost=$('ndCost')?+$('ndCost').value:0;(r.s.needs=r.s.needs||[]).push({id:'nd'+Date.now(),set,qty,approxCost:cost||0});save();showRerender(id);toast('Need added');}
 function showDelNeed(id,ni){if(!canEditScoped())return roGuard();const r=showById(id);if(!r||!r.s.needs)return;r.s.needs.splice(ni,1);save();showRerender(id);}
-function showStartLive(id){const r=showById(id);if(!r)return;BUILDER=null;LIVE_SEED={show:r.s.name,model:r.s.breakModel||null};closeM();go('live');}
+function showStartLive(id){const r=showById(id);if(!r)return;BUILDER=null;LIVE_SEED={show:r.s.name,showRef:r.s.id,model:r.s.breakModel||null};closeM();go('live');}
 function delShow(k,i){if(!canEditScoped())return roGuard();const sh=(S.shows[k]||[])[i];if(!confirm('Delete show “'+((sh&&sh.name)||'Untitled')+'”? This cannot be undone.'))return;S.shows[k].splice(i,1);if(!S.shows[k].length)delete S.shows[k];save();closeM();rerenderSchedule();toast('Show deleted');}
 function closeM(){if(typeof INVEDIT!=='undefined'&&INVEDIT)invEditTeardown();$('ov').style.display='none';}
 
@@ -2701,7 +2701,9 @@ async function liveRefresh(){if(!LIVE.session)return;await liveLoadSlots();liveR
 function liveRefreshRender(){if($('sec-live').classList.contains('on')&&!isEditing())renderLive();}
 async function liveStart(){const name=($('liveName')&&$('liveName').value.trim())||'Live Break';const mi=$('liveModel')?$('liveModel').value:'';
  const seedModel=(LIVE_SEED&&LIVE_SEED.model)||((mi!==''&&S.breaks[+mi])?S.breaks[+mi]:null);
- const{data,error}=await sb.from('e10_break_sessions').insert({streamer_uid:MEID,name}).select().maybeSingle();
+ /* M3.2: a session started from a show carries that show's ref (== reservation show_ref) so live
+    consumption draws down the show's reservations; ad-hoc (no seed) stays null. */
+ const{data,error}=await sb.from('e10_break_sessions').insert({streamer_uid:MEID,name,source_show_ref:(LIVE_SEED&&LIVE_SEED.showRef)||null}).select().maybeSingle();
  if(error){toast('Could not start: '+error.message);return;}
  LIVE.session=data;LIVE.slots=[];await liveEvent('session_started',null,{name});
  let seedFails=0;
@@ -3020,11 +3022,10 @@ function prodArr(){if(LIVE.session){if(!Array.isArray(LIVE.session.products))LIV
    stay exact. p.consumed / p.boxes / cost semantics are unchanged. */
 async function breakConsume(p){const desired=(+p.boxes||0),delta=desired-(+p.consumed||0);if(delta===0)return true;
  const sref=(LIVE.session&&LIVE.session.id)||'break';if(!Array.isArray(p._cmids))p._cmids=[];
- /* M3.1 blocker 5: consume derives the reserved drawdown from reservations MATCHED BY the source show
-    ref (never the session id). The live session carries no show link yet, so this is null today →
-    consumption draws only unreserved stock (reserved_delta 0). FLAGGED: wiring session→show is a
-    separate workflow/schema pass; until then reserved release on consume is not auto-driven here. */
- const showRef=(LIVE.session&&(LIVE.session.show_ref||LIVE.session.showId||LIVE.session.showRef))||null;
+ /* M3.2: consume derives the reserved drawdown from reservations MATCHED BY the source show ref (never
+    the session id). A session born from a show carries source_show_ref (stamped at creation); ad-hoc
+    sessions leave it null → consumption draws only unreserved stock (reserved_delta 0). */
+ const showRef=(LIVE.session&&LIVE.session.source_show_ref)||null;
  if(delta>0){
    const it=(S.inventory||[]).find(x=>x.id===p.itemId);const onhand=it?Math.max(0,+it.qty||0):0;const take=Math.min(delta,onhand);
    if(take<=0){toast('Short stock: '+p.name+' isn’t in inventory — cost still committed for '+desired+' box'+(desired===1?'':'es')+'.');return false;}
@@ -3093,7 +3094,11 @@ function liveStartFromFormat(modelId){const model=(S.breaks||[]).find(b=>b.id===
  const rs=(model.ruleSlots||[]);if(!rs.length){toast('This model has no formatted spots — build slots in the planner first.');return;}
  /* load the format into BK so the slot builder is editable in the review */
  BK.slots=JSON.parse(JSON.stringify(rs));BK.tierBands=JSON.parse(JSON.stringify(model.tierBands||[]));BK.checklistId=model.checklistId||null;BK.breakType=model.breakType||'team';BK.cost=+((model.inputs&&model.inputs.cost)||model.cost||0);BK.targetMargin=(model.inputs&&model.inputs.targetMargin!=null)?model.inputs.targetMargin:30;BK._slotEval=null;BK._modelId=model.id;
- REVIEW={modelId:model.id,title:model.name+' — live',participants:(S.streamers&&S.streamers.length)?[S.streamers[0]]:[],products:[]};
+ /* M3.2: carry the source show ref into the pre-flight → session. Prefer an explicit show seed (came
+    from the show pop-out); else if this format is attached to exactly ONE show, use that; else ad-hoc. */
+ let _showRef=(LIVE_SEED&&LIVE_SEED.showRef)||null;
+ if(!_showRef){const hits=[];Object.keys(S.shows||{}).forEach(k=>(S.shows[k]||[]).forEach(s=>{if(s&&s.breakModelId===modelId)hits.push(s.id);}));if(hits.length===1)_showRef=hits[0];}
+ REVIEW={modelId:model.id,title:model.name+' — live',showRef:_showRef,participants:(S.streamers&&S.streamers.length)?[S.streamers[0]]:[],products:[]};
  go('live');renderLive();
 }
 function liveCancelReview(){REVIEW=null;renderLive();}
@@ -3119,6 +3124,7 @@ async function liveConfirmReview(){if(!REVIEW)return;if(!canEditScoped())return 
    (data||[]).forEach(x=>{cardMap[x.i]={count:x.count,cards:x.cards||[]};});}catch(e){}}
  const{data:sess,error}=await sb.from('e10_break_sessions').insert({streamer_uid:MEID,name:title,
    format_id:REVIEW.modelId,break_type:breakType,checklist_id:checklistId,cost,proj_low:proj.low,proj_expected:proj.exp,proj_high:proj.high,
+   source_show_ref:(REVIEW&&REVIEW.showRef)||null,
    participants:REVIEW.participants||[],products:[]}).select().maybeSingle();
  if(error){toast('Could not start: '+error.message);return;}
  LIVE.session=sess;LIVE.slots=[];await liveEvent('session_started',null,{name:sess.name,format_id:REVIEW.modelId,participants:REVIEW.participants||[]});
