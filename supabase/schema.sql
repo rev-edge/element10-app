@@ -880,5 +880,31 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --   Verified live with throwaway data (concurrent add; tamper rejected; foreign-session rejected;
 --     server-derived draw; reverse reconstructs; ad-hoc untouched), torn down; baseline BYTE-IDENTICAL
 --     35 / 223 / 21 / $29,486, recon drift 0.
---   Rollback: re-apply migration 20260714150000_e10_m31_mutation_hardening.sql (restores the M3.1a
---     bodies). No data change.
+--   Rollback: CORRECTED (M3.2.2 item 3) — re-running migration 20260714150000_e10_m31_mutation_hardening.sql
+--     is NOT a safe rollback: it DROPs and recreates e10_mutation_receipts, DESTROYING accumulated
+--     idempotency history. To revert an inventory-RPC change, CREATE OR REPLACE the specific prior function
+--     body (touching no table), as M3.2.2a's down-block does. The "No data change" claim only holds for a
+--     function-body swap, never for re-running M3.1a.
+
+-- ═════════════════════════════════════════════════════════════════════════════
+-- APPLIED (migration e10_m322_session_validation — M3.2.2a): narrow closure. ADDITIVE (CREATE OR REPLACE
+-- of e10_inv_consume + e10_inv_reverse_consumption only); ZERO rows; no signature/grant/RLS/table change.
+--   ITEM 1 — e10_inv_consume: a well-formed UUID p_break_session_id that matches NO e10_break_sessions row
+--     is now REJECTED ({ok:false,'unknown break session'}), zero mutation/movement/receipt — it no longer
+--     falls through to an unreserved draw. Only an EXPLICIT bypass skips the lookup: null/empty
+--     p_break_session_id, or a legacy NON-UUID literal (e.g. 'break') → unreserved draw as documented.
+--   ITEM 2 — e10_inv_reverse_consumption: gains the same ownership rule as consume. The session is derived
+--     from the reversed break_consumption movement's source_entity_id; the caller must be the session owner
+--     (streamer_uid=auth.uid()) or admin. If the movement has no resolvable session linkage, it falls back
+--     to the original actor (actor_uid) or admin. A non-owner non-admin is rejected, zero mutation.
+--   ROLLBACK (ITEM 3): the migration file carries a RECEIPTS-PRESERVING down-block — re-run the two
+--     CREATE OR REPLACE statements (M3.2.1 bodies) to revert; it touches NO table and never drops/recreates
+--     e10_mutation_receipts. ⚠ Re-running M3.1a (20260714150000) is NOT a rollback path — it is destructive
+--     to receipt history (see the corrected M3.2.1 rollback note above).
+--   ROADMAP FACTUAL CORRECTION: M3.1 ALREADY serialized same-key mutations (the advisory lock lived in
+--     _e10_inv_receipt_check, called by every RPC before mutating). M3.2.1 made the lock auditable per-body
+--     and added different-key unique_violation handling; it did NOT introduce serialization. The prior
+--     audit's grep excluded underscore-prefixed helpers → false negative.
+--   Verified live (SQL-impersonation + committed node/UI tests under externally-supplied credentials):
+--     unknown-UUID rejected; null/legacy → unreserved; owned session draws; member cannot reverse another's
+--     consumption; owner/admin can. Baseline BYTE-IDENTICAL 35 / 223 / 21 / $29,486, recon drift 0.
