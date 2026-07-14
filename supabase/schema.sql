@@ -760,3 +760,23 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --         (select public.e10_is_member()) and (select public.e10_has_cap('act.inventory_edit'))
 --         and coalesce(current_setting('e10.emit', true), '') = 'on');   -- restore the emit-context insert
 --     Restores the M1 resting state (rows are shadow, blob authoritative). Touches no rows.
+
+-- ─────────────────────────────────────────────────────────────
+-- APPLIED (migrations e10_inventory_items_extra_passthrough + e10_inventory_clamp_reservations —
+-- Chain M / M3 support): two additive corrections found while cutting the client over to the RPCs.
+--   1) extra jsonb column on e10_inventory_items — the Pass-2.5 form writes STRUCTURED fields
+--      (inventory_type, domain, sport, game, franchise, category_detail, manufacturer, configuration,
+--      package_type, product_line, product_year, certification_number, description, item_count,
+--      cost_basis_mode, units_per_case, …) with no typed columns. Any item key not mapped to a typed
+--      column now flows into `extra` verbatim; _e10_inv_item_json merges it back so the blob round-trips
+--      byte-for-byte. add_item routes unmapped keys into extra; edit_item merges patch's unmapped keys.
+--      The 35 backfilled items are unclassified so extra is null for them. Verified: a classified item
+--      added via the client keeps every structured field through the RPC round-trip.
+--   2) _e10_inv_clamp_res(item, key) — preserves the invClampRes invariant server-side. When edit_item /
+--      mark_sold / consume drop on-hand below the active reserved total, the newest active reservations
+--      are trimmed so reserved never exceeds qty (the gate's HARD check), and ONE reservation_release
+--      movement (key '<op-key>:clamp') records the trim so blob==rows==ledger stay reconciled. Verified:
+--      editing qty below reserved trims reserved to qty; recon drift stays 0.
+--   Rollback (fold into the M2 revert): drop function _e10_inv_clamp_res(text,text); the extra column can
+--     stay (nullable, harmless) or `alter table e10_inventory_items drop column extra`. Re-create the M2
+--     bodies of add_item/edit_item/mark_sold/consume (without extra/clamp) if reverting past M2.

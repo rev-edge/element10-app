@@ -379,25 +379,25 @@ async function showPickBreak(id,bid){if(!bid)return;if(!canEditScoped())return r
 /* Attaching a model to a show converts its inventory pulls into hard reservations (and detach releases them). */
 async function reserveModelToShow(show,model){
  if(!model||!Array.isArray(model.invItems)||!model.invItems.length)return{ok:true,msg:'Break model attached'};
- const showId=show.id,showLabel=(show.name||'Untitled'),streamer=MEID,admin=ROLE==='admin';
- return await cloudCommitShared(base=>{const capped=[];
-  /* aggregate desired qty by itemId first, so a model that lists the same item twice reserves the SUM
-     (was: second line SET-overwrote the first → under-reserved). SET on the merged total keeps re-attach
-     idempotent (attaching the same model twice doesn't double the reservation). */
-  const agg={};model.invItems.forEach(iv=>{if(iv&&iv.itemId)agg[iv.itemId]=(agg[iv.itemId]||0)+(+iv.qty||1);});
-  Object.keys(agg).forEach(itemId=>{const it=base.inventory.find(x=>x.id===itemId);if(!it)return;if(!Array.isArray(it.reservations))it.reservations=[];
-   const ex=it.reservations.find(x=>x.showId===showId&&x.streamerUid===streamer);
-   const totalRes=it.reservations.reduce((s,x)=>s+(+x.qty||0),0);const freeForThis=(+it.qty||0)-(totalRes-(ex?ex.qty:0));
-   const want=agg[itemId],grant=admin?want:Math.min(want,Math.max(0,freeForThis));
-   if(grant<want)capped.push(it.name);
-   if(grant<=0)return;
-   if(ex)ex.qty=grant;else it.reservations.push({showId,showLabel,streamerUid:streamer,qty:grant});});
-  return{ok:true,msg:capped.length?('Attached · reservations capped by free stock: '+[...new Set(capped)].join(', ')):'Attached · inventory reserved to show'};});
+ const showId=show.id,showLabel=(show.name||'Untitled'),admin=ROLE==='admin';
+ /* aggregate desired qty by itemId (a model listing the same item twice reserves the SUM). SET
+    semantics via release-then-reserve keeps re-attach idempotent (no doubling). */
+ const agg={};model.invItems.forEach(iv=>{if(iv&&iv.itemId)agg[iv.itemId]=(agg[iv.itemId]||0)+(+iv.qty||1);});
+ const capped=[];
+ for(const itemId of Object.keys(agg)){const it=(S.inventory||[]).find(x=>x.id===itemId);if(!it)continue;
+  await invRpc('e10_inv_release',{p_id:itemId,p_show_ref:showId,p_idempotency_key:invIdemKey('reservation_release',showId,itemId,_invEventTok())});
+  const otherRes=(it.reservations||[]).reduce((s,x)=>s+((x.showId===showId)?0:(+x.qty||0)),0);
+  const free=Math.max(0,(+it.qty||0)-otherRes),want=agg[itemId],grant=admin?want:Math.min(want,free);
+  if(grant<want)capped.push(it.name);
+  if(grant<=0)continue;
+  await invRpc('e10_inv_reserve',{p_id:itemId,p_show_ref:showId,p_show_label:showLabel,p_qty:grant,p_idempotency_key:invIdemKey('reservation',showId,itemId,_invEventTok())});}
+ return{ok:true,msg:capped.length?('Attached · reservations capped by free stock: '+[...new Set(capped)].join(', ')):'Attached · inventory reserved to show'};
 }
-async function releaseShowReservations(show,model){const showId=show.id,ids=(model&&model.invItems)?model.invItems.map(x=>x.itemId):null,admin=ROLE==='admin';
- return await cloudCommitShared(base=>{base.inventory.forEach(it=>{if(!Array.isArray(it.reservations))return;
-   it.reservations=it.reservations.filter(rz=>{const match=rz.showId===showId&&(!ids||ids.includes(it.id));if(!match)return true;return !(admin||rz.streamerUid===MEID);});});
-  return{ok:true,msg:'Released reservations'};});
+async function releaseShowReservations(show,model){const showId=show.id;
+ const ids=(model&&Array.isArray(model.invItems))?[...new Set(model.invItems.map(x=>x.itemId).filter(Boolean))]
+   :(S.inventory||[]).filter(it=>(it.reservations||[]).some(r=>r.showId===showId)).map(it=>it.id);
+ for(const itemId of ids){await invRpc('e10_inv_release',{p_id:itemId,p_show_ref:showId,p_idempotency_key:invIdemKey('reservation_release',showId,itemId,_invEventTok())});}
+ return{ok:true,msg:'Released reservations'};
 }
 function showPickRepack(id,rid){if(!rid)return;if(!canEditScoped())return roGuard();const p=(S.repacks||[]).find(x=>x.id===rid);const r=showById(id);if(!p||!r)return;r.s.repackRef={id:p.id,name:p.name};save();showRerender(id);}
 async function showDetach(id,field){if(!canEditScoped())return roGuard();const r=showById(id);if(!r)return;
@@ -1731,7 +1731,7 @@ function buyListHTML(){
  return `<div class="card" style="margin-top:16px"><h3 style="font-size:15px">Buy list from the schedule</h3>
    <div class="egrid"><table><tr><th>Set / product</th><th>Needed by</th><th>Demand</th><th>Free</th><th>Gap</th><th>~Order</th></tr>${rows}</table></div>
    <div class="row" style="justify-content:flex-end;margin-top:8px"><b>Projected order: ~${money(projected)}</b></div></div>`;}
-function addInv(){const n=$('ivN').value.trim();if(!n){toast('Name is required');const e=$('ivN');if(e)e.focus();return;}const owner=($('ivOwner')&&$('ivOwner').value!=='')?$('ivOwner').value:(ROLE==='admin'&&$('ivOwner')?null:ME);
+async function addInv(){const n=$('ivN').value.trim();if(!n){toast('Name is required');const e=$('ivN');if(e)e.focus();return;}const owner=($('ivOwner')&&$('ivOwner').value!=='')?$('ivOwner').value:(ROLE==='admin'&&$('ivOwner')?null:ME);
  const gv=id=>{const el=$(id);return el?el.value.trim():'';};
  const L2=ivLinked||{};const SL=ivSetLink||{};
  /* box/case cost model: the stored `cost` is always PER BOX (so capital = boxes×cost is right).
@@ -1741,9 +1741,14 @@ function addInv(){const n=$('ivN').value.trim();if(!n){toast('Name is required')
  if(qraw!==''&&(isNaN(+qraw)||+qraw<0)){toast('Qty must be a number ≥ 0');return;}
  if(vraw!==''&&(isNaN(+vraw)||+vraw<0)){toast('Market must be a number ≥ 0');return;}
  const rawCost=+craw||0,bpc=Math.max(1,+($('ivBPC')&&$('ivBPC').value)||1),basis=(($('ivBasis')&&$('ivBasis').value)||'perbox'),pbc=(basis==='percase'&&bpc>1)?(rawCost/bpc):rawCost;
- S.inventory.push({id:'i'+Date.now(),name:n,cat:gv('ivC'),set:(SL.label||''),setId:(SL.id||null),qty:(qraw===''?1:Math.max(0,+qraw||0)),cost:pbc,value:Math.max(0,+vraw||0),boxesPerCase:bpc,perBoxCost:pbc,gradingCompany:gv('ivGC'),grade:gv('ivGrade'),cardNumber:gv('ivNum'),year:gv('ivYear'),cond:gv('ivG'),img:$('ivImg').value,owner,
-   cardId:L2.cardId||null,playerId:L2.playerId||null,parallel:L2.parallel||'',rarity:L2.rarity||'',addedAt:Date.now()});
- ivLinked=null;ivSetLink=null;save();dInventory();toast('Added'+(L2.cardId?' · linked to card':''));}
+ const rec={id:'i'+Date.now(),name:n,cat:gv('ivC'),set:(SL.label||''),setId:(SL.id||null),qty:(qraw===''?1:Math.max(0,+qraw||0)),cost:pbc,value:Math.max(0,+vraw||0),boxesPerCase:bpc,perBoxCost:pbc,gradingCompany:gv('ivGC'),grade:gv('ivGrade'),cardNumber:gv('ivNum'),year:gv('ivYear'),cond:gv('ivG'),img:$('ivImg').value,owner,
+   cardId:L2.cardId||null,playerId:L2.playerId||null,parallel:L2.parallel||'',rarity:L2.rarity||'',addedAt:Date.now()};
+ ivLinked=null;ivSetLink=null;
+ const res=await invRpc('e10_inv_add_item',{p_item:rec,p_idempotency_key:invIdemKey('intake',rec.id,rec.id)});
+ dInventory();toast((res&&res.ok)?('Added'+(L2.cardId?' · linked to card':'')):('Add failed: '+((res&&res.msg)||'')));}
+/* bulk add (CSV import) — one RPC per row, sequential (the in-flight guard serializes anyway) */
+async function _invBulkAdd(items,doneMsg){let ok=0;for(const it of items){const res=await invRpc('e10_inv_add_item',{p_item:it,p_idempotency_key:invIdemKey('intake',it.id,it.id)});if(res&&res.ok)ok++;}
+ dInventory();toast(ok+' '+doneMsg+(ok<items.length?(' · '+(items.length-ok)+' failed'):''));}
 function ivBoxHint(){const el=$('ivPBHint');if(!el)return;const raw=+($('ivCo')&&$('ivCo').value)||0,bpc=Math.max(1,+($('ivBPC')&&$('ivBPC').value)||1),basis=(($('ivBasis')&&$('ivBasis').value)||'perbox');const pbc=(basis==='percase'&&bpc>1)?(raw/bpc):raw;
  el.textContent=pbc>0?('= '+money(pbc)+'/box'+((basis==='percase'&&bpc>1)?(' · case '+money(raw)):'')):'';el.style.color=pbc>0?'var(--red)':'';}
 /* ---- In-place inventory edit (same cost-basis-aware fields as the add form; corrects legacy items) ---- */
@@ -1865,7 +1870,7 @@ function invFormValidate(mode){const type=invfV('ivf_type'),name=invfV('ivf_name
  else if(type==='raw_card'){if(!invfV('ivf_cond'))return 'Condition is required.';}
  else if(type==='lot_bundle'){if(q==='')return 'Quantity is required.';if(invfV('ivf_itemcount')!==''&&!(+invfV('ivf_itemcount')>0))return 'Item count must be positive.';}
  return null;}
-function invFormSave(mode,id){if(!hasCap('act.inventory_edit')){toast('Editing is restricted for your role');return;}
+async function invFormSave(mode,id){if(!hasCap('act.inventory_edit')){toast('Editing is restricted for your role');return;}
  const it=mode==='edit'?(S.inventory||[]).find(x=>x.id===id):null;if(mode==='edit'&&!it)return;
  const err=m=>{const e=$('ivf_err');if(e){e.textContent=m;e.style.display='block';}};
  const bad=invFormValidate(mode);if(bad)return err(bad);
@@ -1884,12 +1889,19 @@ function invFormSave(mode,id){if(!hasCap('act.inventory_edit')){toast('Editing i
    if(invfV('ivf_itemcount')!=='')patch.item_count=Math.max(0,+invfV('ivf_itemcount')||0);
    if(INVEDIT&&INVEDIT.cardLink&&INVEDIT.cardLink.cardId){patch.cardId=INVEDIT.cardLink.cardId;patch.playerId=INVEDIT.cardLink.playerId||null;}}
  if(mode==='add'||(INVEDIT&&INVEDIT.catDirty))patch.cat=invFormLegacyCat(type,invfV('ivf_package'));
- let newId=null;
- if(mode==='add'){const rec=Object.assign({id:'i'+Date.now(),reservations:[],addedAt:Date.now(),setId:(INVEDIT&&INVEDIT.cardLink&&INVEDIT.cardLink.setId)||null},patch);newId=rec.id;S.inventory.push(rec);}
- else{patch.setId=(line===(it.set||'')?it.setId:null);Object.assign(it,patch);invClampRes(it);}
- invEditTeardown();save();closeM();const sy=window.scrollY;dInventory();window.scrollTo(0,sy);invFocusRow(mode==='edit'?id:null);
- toast(mode==='add'?('Added “'+patch.name+'”'):('Updated “'+patch.name+'”'));}
-function invEditSave(id){if(!hasCap('act.inventory_edit')){toast('Editing is restricted for your role');return;}
+ /* Authoritative via the server RPCs (Chain M): add -> e10_inv_add_item, edit -> e10_inv_edit_item.
+    The client no longer mutates the inventory blob; the RPC commits rows + blob + ledger and returns
+    the committed item, which invRpc applies to the read model. */
+ const addSetId=(INVEDIT&&INVEDIT.cardLink&&INVEDIT.cardLink.setId)||null;
+ invEditTeardown();closeM();
+ let res;
+ if(mode==='add'){const rec=Object.assign({id:'i'+Date.now(),reservations:[],addedAt:Date.now(),setId:addSetId},patch);
+   res=await invRpc('e10_inv_add_item',{p_item:rec,p_idempotency_key:invIdemKey('intake',rec.id,rec.id)});}
+ else{patch.setId=(line===(it.set||'')?it.setId:null);
+   res=await invRpc('e10_inv_edit_item',{p_id:id,p_patch:patch,p_idempotency_key:invIdemKey('adjust',id,id,_invEventTok())});}
+ const sy=window.scrollY;dInventory();window.scrollTo(0,sy);invFocusRow(mode==='edit'?id:null);
+ toast((res&&res.ok)?(mode==='add'?('Added “'+patch.name+'”'):('Updated “'+patch.name+'”')):((mode==='add'?'Add':'Update')+' failed: '+((res&&res.msg)||'')));}
+async function invEditSave(id){if(!hasCap('act.inventory_edit')){toast('Editing is restricted for your role');return;}
  const it=(S.inventory||[]).find(x=>x.id===id);if(!it)return;
  const err=m=>{const e=$('iveErr');if(e){e.textContent=m;e.style.display='block';}};
  const name=($('iveN').value||'').trim();if(!name)return err('Name is required.');
@@ -1899,13 +1911,15 @@ function invEditSave(id){if(!hasCap('act.inventory_edit')){toast('Editing is res
  if(mv!==''&&(isNaN(+mv)||+mv<0))return err('Market must be a number ≥ 0.');
  const bpc=Math.max(1,+($('iveBPC')&&$('iveBPC').value)||1),basis=(($('iveBasis')&&$('iveBasis').value)||'perbox'),rawCost=+cv||0,pbc=(basis==='percase'&&bpc>1)?(rawCost/bpc):rawCost;
  const gv=i2=>{const el=$(i2);return el?el.value.trim():'';};const newSet=gv('iveSet');const ow=$('iveOwner');
- Object.assign(it,{name,cat:gv('iveC'),set:newSet,setId:(newSet===(it.set||'')?it.setId:null),qty:(qv===''?0:Math.max(0,+qv||0)),cost:pbc,perBoxCost:pbc,boxesPerCase:bpc,value:Math.max(0,+mv||0),gradingCompany:gv('iveGC'),grade:gv('iveGrade'),cardNumber:gv('iveNum'),year:gv('iveYear'),parallel:gv('ivePar'),cond:gv('iveG'),img:($('iveImg').value||'').trim(),owner:(ow?(ow.value||null):it.owner)});
- const trimmed=invClampRes(it);
- /* success: tear down the scoped surface, persist via the existing write path, re-render the row +
-    KPIs (keeps INVG filters/sort/view), preserve scroll, and return focus to the row. */
- invEditTeardown();save();closeM();const _sy=window.scrollY;dInventory();window.scrollTo(0,_sy);invFocusRow(id);
- toast('Updated “'+name+'” · '+money(pbc)+'/box'+(trimmed?(' · trimmed '+trimmed+' now-invalid reservation unit'+(trimmed===1?'':'s')):''));}
-function delInv(id){const it=(S.inventory||[]).find(x=>x.id===id);const nm=it?it.name:'this item';if(!confirm('Delete “'+nm+'” from inventory? This cannot be undone.'))return;S.inventory=S.inventory.filter(x=>x.id!==id);save();dInventory();toast('Deleted '+nm);}
+ const patch={name,cat:gv('iveC'),set:newSet,setId:(newSet===(it.set||'')?it.setId:null),qty:(qv===''?0:Math.max(0,+qv||0)),cost:pbc,perBoxCost:pbc,boxesPerCase:bpc,value:Math.max(0,+mv||0),gradingCompany:gv('iveGC'),grade:gv('iveGrade'),cardNumber:gv('iveNum'),year:gv('iveYear'),parallel:gv('ivePar'),cond:gv('iveG'),img:($('iveImg').value||'').trim(),owner:(ow?(ow.value||null):it.owner)};
+ /* authoritative via e10_inv_edit_item (server trims reservations to on-hand if qty drops) */
+ invEditTeardown();closeM();
+ const res=await invRpc('e10_inv_edit_item',{p_id:id,p_patch:patch,p_idempotency_key:invIdemKey('adjust',id,id,_invEventTok())});
+ const _sy=window.scrollY;dInventory();window.scrollTo(0,_sy);invFocusRow(id);
+ toast((res&&res.ok)?('Updated “'+name+'” · '+money(pbc)+'/box'):('Update failed: '+((res&&res.msg)||'')));}
+async function delInv(id){const it=(S.inventory||[]).find(x=>x.id===id);const nm=it?it.name:'this item';if(!confirm('Delete “'+nm+'” from inventory? This cannot be undone.'))return;
+ const res=await invRpc('e10_inv_delete_item',{p_id:id,p_idempotency_key:invIdemKey('correction',id,id,_invEventTok())},()=>_removeInvItem(id));
+ dInventory();toast((res&&res.ok)?('Deleted '+nm):('Delete failed: '+((res&&res.msg)||'')));}
 /* ===== Pass 2.2 — inventory row → edit surface: open by stable id, backdrop/Escape close, dirty-state
    discard confirm. All state/handlers are SCOPED to the inventory edit surface only (no global modal or
    click-outside behavior); the shared #ov/#modal and grid engine are untouched. ===== */
@@ -1982,41 +1996,60 @@ function invClearLink(){ivLinked=null;invRenderChip();toast('Unlinked — this i
 function invFromCard(id){const card=((SRV&&SRV.rows)||[]).find(x=>x.id===id);if(!card){toast('Card not found — reopen the grid and try again');return;}
  window._invPrefillCard=card;dataTab='inventory';SRV=null;clOpenId=null;go('data');window.scrollTo(0,0);}
 function reassignInv(id,val){const it=S.inventory.find(x=>x.id===id);if(!it)return;it.owner=val||null;save();dInventory();toast('Reassigned to '+ownerName(it.owner));}
-/* ---- Reservations & sold — app-enforced hard lock via cloudCommitShared ---- */
+/* ===== Chain M / M3 — inventory mutations now go through the transactional server RPCs
+   (e10_inv_*). The client no longer mutates the inventory blob section: each RPC updates the
+   relational rows, the blob's inventory section, and the ledger movement in ONE transaction, then
+   returns the committed item. We optimistically apply that authoritative item to the read model
+   (S.inventory) for an instant render; realtime later re-adopts it idempotently. The blob's
+   inventory is server-owned on the WRITE side too (see _sharedPayload → _invServerOwned). ===== */
+/* PURE: deterministic idempotency key (schema.sql convention '<op>:shared:<entity>:<item>[:<nonce>]')
+   so a retry of the same logical action collapses to one movement while distinct events stay distinct. */
+function invIdemKey(op,entity,item,nonce){return op+':shared:'+(entity==null?'':entity)+':'+(item==null?'':item)+(nonce?(':'+nonce):'');}
+let _invSeq=0;
+function _invEventTok(){return Date.now().toString(36)+(++_invSeq).toString(36);}   // per-action nonce for relative ops (reused across a call's auto-retry)
+/* Update the read model from an RPC's committed item (or remove on delete). NOT a cloud write. */
+function _applyInvItem(item){if(!item||!item.id)return;const arr=SHARED.inventory||(SHARED.inventory=[]);const j=arr.findIndex(x=>x.id===item.id);if(j>=0)arr[j]=item;else arr.push(item);rebuildS();safeRender();}
+function _removeInvItem(id){if(SHARED.inventory)SHARED.inventory=SHARED.inventory.filter(x=>x.id!==id);rebuildS();safeRender();}
+/* Call an inventory RPC. In-flight guard blocks a concurrent second inventory mutation from this tab.
+   One automatic retry on a transient/network error, REUSING the same idempotency key (so a
+   committed-but-lost-response can't double-apply). A replay (msg==='replay') is a success, never an
+   error toast. On success the committed item is applied to the read model. */
+let _invBusy=false;
+async function invRpc(fn,args,onItem){
+ if(!sb)return{ok:false,msg:'Not connected'};
+ if(_invBusy)return{ok:false,msg:'One inventory change at a time — try again'};
+ _invBusy=true;
+ try{
+  let res=null;
+  for(let attempt=0;attempt<2;attempt++){
+   let data=null,error=null;
+   try{const r=await sb.rpc(fn,args);data=r.data;error=r.error;}catch(e){error={message:e.message||'network'};}
+   if(!error){res=data||{ok:false,msg:'No response'};break;}
+   if(attempt===0){await new Promise(r=>setTimeout(r,400));continue;}   // one retry, same key
+   return{ok:false,msg:error.message||'Network error'};
+  }
+  if(res&&res.ok){if(onItem)onItem(res);else if('item' in res){if(res.item)_applyInvItem(res.item);}}
+  return res;
+ }finally{_invBusy=false;}
+}
+/* ---- Reservations & sold — authoritative via e10_inv_reserve / e10_inv_release / e10_inv_mark_sold ---- */
 async function reserveUnits(itemId,showRef,qty){
  qty=Math.max(1,+qty||1);const r=showByRef(showRef);if(!r)return{ok:false,msg:'Pick a show'};
- const showId=r.s.id,showLabel=(r.s.name||'Untitled')+' · '+r.k.replace('|',' '),streamer=MEID,admin=ROLE==='admin';
- const res=await cloudCommitShared(base=>{
-  const it=base.inventory.find(x=>x.id===itemId);if(!it)return{ok:false,msg:'Item not found'};
-  const avail=Math.max(0,(+it.qty||0)-(it.reservations||[]).reduce((s,x)=>s+(+x.qty||0),0));
-  if(!admin&&qty>avail)return{ok:false,msg:'Only '+avail+' free right now — reservation blocked'};
-  if(!Array.isArray(it.reservations))it.reservations=[];
-  const ex=it.reservations.find(x=>x.showId===showId&&x.streamerUid===streamer);
-  if(ex)ex.qty+=qty;else it.reservations.push({showId,showLabel,streamerUid:streamer,qty});
-  return{ok:true,msg:'Reserved '+qty+' → '+showLabel};});
- toast(res.ok?res.msg:('Reserve failed: '+res.msg));return res;
+ const showId=r.s.id,showLabel=(r.s.name||'Untitled')+' · '+r.k.replace('|',' ');
+ const res=await invRpc('e10_inv_reserve',{p_id:itemId,p_show_ref:showId,p_show_label:showLabel,p_qty:qty,
+   p_idempotency_key:invIdemKey('reservation',showId,itemId,_invEventTok())});
+ toast(res.ok?('Reserved '+qty+' → '+showLabel):('Reserve failed: '+res.msg));return res;
 }
 async function releaseReservation(itemId,showId,streamerUid){
- const admin=ROLE==='admin';
- const res=await cloudCommitShared(base=>{
-  const it=base.inventory.find(x=>x.id===itemId);if(!it)return{ok:false,msg:'Item not found'};
-  const arr=it.reservations||[];const j=arr.findIndex(x=>x.showId===showId&&x.streamerUid===streamerUid);
-  if(j<0)return{ok:false,msg:'Reservation already gone'};
-  if(!admin&&arr[j].streamerUid!==MEID)return{ok:false,msg:'Only the streamer who reserved it (or an admin) can release it'};
-  arr.splice(j,1);return{ok:true,msg:'Released'};});
- toast(res.ok?res.msg:('Release failed: '+res.msg));return res;
+ const res=await invRpc('e10_inv_release',{p_id:itemId,p_show_ref:showId,
+   p_idempotency_key:invIdemKey('reservation_release',showId,itemId,_invEventTok())});
+ toast(res.ok?'Released':('Release failed: '+res.msg));return res;
 }
 async function markSold(itemId,sellQty,proceeds){
- sellQty=Math.max(1,+sellQty||1);proceeds=Math.max(0,+proceeds||0);const admin=ROLE==='admin';
- const res=await cloudCommitShared(base=>{
-  const it=base.inventory.find(x=>x.id===itemId);if(!it)return{ok:false,msg:'Item not found'};
-  const reserved=(it.reservations||[]).reduce((s,x)=>s+(+x.qty||0),0);const avail=Math.max(0,(+it.qty||0)-reserved);
-  if(!admin&&sellQty>avail)return{ok:false,msg:'Only '+avail+' free to sell (rest reserved)'};
-  const n=admin?Math.min(sellQty,+it.qty||0):Math.min(sellQty,avail);
-  if(n<=0)return{ok:false,msg:'Nothing available to sell'};
-  it.qty=(+it.qty||0)-n;it.soldQty=(+it.soldQty||0)+n;it.soldProceeds=(+it.soldProceeds||0)+proceeds;it.soldAt=Date.now();invClampRes(it);
-  return{ok:true,msg:'Sold '+n+' · +'+money(proceeds)};});
- toast(res.ok?res.msg:('Sell failed: '+res.msg));return res;
+ sellQty=Math.max(1,+sellQty||1);proceeds=Math.max(0,+proceeds||0);
+ const res=await invRpc('e10_inv_mark_sold',{p_id:itemId,p_qty:sellQty,p_proceeds:proceeds,
+   p_idempotency_key:invIdemKey('sale',itemId,itemId,_invEventTok())});
+ toast(res.ok?('Sold '+sellQty+' · +'+money(proceeds)):('Sell failed: '+res.msg));return res;
 }
 function reserveModal(itemId){const it=S.inventory.find(x=>x.id===itemId);if(!it)return;
  $('modal').innerHTML=`<h3 style="font-size:18px">Reserve — ${esc(it.name)}</h3>
@@ -2074,9 +2107,9 @@ function validateInv(p){const idx=rx=>p.columns.findIndex(c=>new RegExp(rx,'i').
 }
 function importInv(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{const p=parseCSV(e.target.result);const res=validateInv(p);
  if(res.missing.length){importReport('Inventory import',`Missing required column(s): ${res.missing.join(', ')}. Download the CSV template and keep its header row.`,null,null);return;}
- if(res.errors.length){importReport('Inventory import',null,res.errors,res.valid.length?function(){res.valid.forEach(it=>S.inventory.push(it));save();dInventory();toast(res.valid.length+' valid row(s) imported');}:null);return;}
+ if(res.errors.length){importReport('Inventory import',null,res.errors,res.valid.length?function(){_invBulkAdd(res.valid,'valid row(s) imported');}:null);return;}
  if(!res.valid.length){importReport('Inventory import','No data rows found in the file.',null,null);return;}
- res.valid.forEach(it=>S.inventory.push(it));save();dInventory();toast(res.valid.length+' items imported');
+ _invBulkAdd(res.valid,'items imported');
 };r.readAsText(f);inp.value='';}
 /* ===== Checklists as structured, configurable card grids (reuses the grid engine) ===== */
 function clColMap(cols){const idx=rx=>cols.findIndex(c=>new RegExp(rx,'i').test(c));return {num:idx('number|card ?#|^#$|^no\\.?$'),name:idx('card ?name|^name$|name|title'),set:idx('^set$|^set |product'),rarity:idx('rarity|rare'),value:idx('value|market|price|\\$'),chase:idx('chase'),parallel:idx('parallel|variation|variant|finish|^foil$'),cardType:idx('card ?type|^type$'),team:idx('^team$|club|squad')};}
@@ -2447,7 +2480,12 @@ document.addEventListener('focusout',()=>{setTimeout(()=>{if(_pendingRender&&!is
    rev=<expected>) instead of blindly overwriting. On a rev drift we fetch the remote row and do a PURE
    section-level three-way merge against the last-synced base; mergeable → retry once at the new rev;
    a true section conflict is surfaced (Keep mine / Take theirs), never silently resolved. ===== */
-const _sharedPayload=()=>({comments:S.comments,todos:S.todos,streamers:S.streamers,lists:S.lists,attachments:S.attachments,checklists:S.checklists,inventory:S.inventory,repacks:S.repacks});
+/* Chain M / M3 — inventory is SERVER-OWNED on the write side. The client never writes the inventory
+   section: we source it from the last-synced remote (_lastShared) so local.inventory always equals
+   base.inventory, and H2's merge (local==base → take remote) makes a client save never touch it. Only
+   the e10_inv_* RPCs mutate inventory (rows + blob + ledger); realtime brings their result back. */
+function _invServerOwned(){try{const b=_lastShared?JSON.parse(_lastShared):null;return (b&&('inventory' in b))?b.inventory:S.inventory;}catch(e){return S.inventory;}}
+const _sharedPayload=()=>({comments:S.comments,todos:S.todos,streamers:S.streamers,lists:S.lists,attachments:S.attachments,checklists:S.checklists,inventory:_invServerOwned(),repacks:S.repacks});
 const _scopedPayload=()=>({shows:S.shows,breaks:S.breaks,copySets:S.copySets,dashCfg:S.dashCfg,sales:S.sales,chaseLists:S.chaseLists});
 function _keysFor(id){return id==='shared'?SHARED_KEYS:SCOPED_KEYS;}
 function _splitFor(id,d){return id==='shared'?splitLegacy(d).sh:splitLegacy(d).sc;}      // reuse the SAME apply path realtime uses
@@ -2516,32 +2554,10 @@ async function doCloudWrite(){if(_writing){clearTimeout(_st);_st=setTimeout(doCl
  if(failed){if(!_saveFailing){_saveFailing=true;toast('Save failed — will retry');}}else _saveFailing=false; /* one toast on synced→failing, not per debounce tick */
  }finally{_writing=false;}
 }
-/* Reservation-critical writes go through a read-modify-write on the shared row: re-read the latest
-   'shared' JSONB, recompute availability against it, apply the mutation, then upsert with rev+1 —
-   merging so concurrent edits to other shared fields/items aren't clobbered. This lock is
-   APPLICATION-ENFORCED, NOT database-guaranteed: any member can write the shared blob, so a truly
-   simultaneous write could still race in the gap between read and write. Acceptable at this team
-   size; real enforcement is the future per-entity table migration (out of scope). mutate(base)
-   mutates base.inventory and returns {ok,msg}. */
-async function cloudCommitShared(mutate){
- if(!sb)return{ok:false,msg:'Not connected'};
- /* Flush any pending debounced write first, so the fresh read includes local edits that haven't
-    been persisted yet (e.g. an item just added) — otherwise the read-modify-write can't see them
-    and adopting the cloud base would drop them. */
- if(_st){clearTimeout(_st);_st=null;try{await doCloudWrite();}catch(e){}}
- let fresh=null;try{fresh=await fetchRow('shared');}catch(e){return{ok:false,msg:'Network error'};}
- const base=(fresh&&fresh.data&&Object.keys(fresh.data).length)?splitLegacy(fresh.data).sh:blankShared();normShared(base);
- let res;try{res=mutate(base);}catch(e){return{ok:false,msg:e.message||'error'};}
- if(!res||!res.ok)return res||{ok:false,msg:'Rejected'};
- const payload={comments:base.comments,todos:base.todos,streamers:base.streamers,lists:base.lists,attachments:base.attachments,checklists:base.checklists,inventory:base.inventory,repacks:base.repacks};
- const expected=((fresh&&fresh.rev)||REVS['shared']||0);
- const cas=await _cas('shared',null,payload,expected);       /* CAS on the freshly-read rev — a write that landed since the read fails here instead of clobbering it */
- if(cas.error)return{ok:false,msg:cas.error.message};
- if(!cas.rows)return{ok:false,msg:'Inventory changed just now — try again'}; /* lost the race; caller re-tries against the newer state */
- REVS['shared']=expected+1;
- _applyingRemote=true;SHARED=base;_lastShared=JSON.stringify(payload);rebuildS();_applyingRemote=false;safeRender();
- return{ok:true,msg:res.msg};
-}
+/* (Chain M / M3) cloudCommitShared was the app-enforced read-modify-write lock on the shared blob for
+   inventory reserve/release/sell/consume. It is REMOVED: those are now transactional server RPCs
+   (e10_inv_*) — the authoritative inventory mutation path — so there is no second, competing write
+   path to the inventory section from the client. */
 /* Flush pending debounced saves before the tab is hidden/closed so the last edits aren't lost. */
 function flushSaves(){if(_lsTimer){clearTimeout(_lsTimer);_lsTimer=null;try{_origSave();}catch(e){}}if(_st){clearTimeout(_st);_st=null;if(sb&&!_applyingRemote)doCloudWrite();}}
 window.addEventListener('pagehide',flushSaves);
@@ -2989,17 +3005,30 @@ function prodArr(){if(LIVE.session){if(!Array.isArray(LIVE.session.products))LIV
    p.consumed tracks how many boxes THIS break has actually pulled from stock, so we only apply the
    remaining delta. Cost is DECOUPLED from stock: p.boxes (and therefore the line + Break cost) is set
    by the slice and never touched here — a shortage only warns, it never freezes the committed cost. */
-async function breakConsume(p){const desired=(+p.boxes||0),delta=desired-(+p.consumed||0);if(delta===0)return true;let applied=0;
- const res=await cloudCommitShared(base=>{const it=base.inventory.find(x=>x.id===p.itemId);if(!it)return{ok:false,msg:'notinv'};
-   if(delta>0){const take=Math.min(delta,Math.max(0,+it.qty||0));it.qty=(+it.qty||0)-take;applied=take;invClampRes(it);}
-   else{it.qty=(+it.qty||0)+(-delta);applied=delta;}
-   return{ok:true,msg:''};});
- if(!res||!res.ok){/* item no longer in inventory — keep the committed cost, just can't move stock */
-   if(delta>0)toast('Short stock: '+p.name+' isn’t in inventory — cost still committed for '+desired+' box'+(desired===1?'':'es')+'.');
-   return false;}
- p.consumed=(+p.consumed||0)+applied;/* actual stock movement ONLY — does not drive p.boxes or the cost */
- if(delta>0&&applied<delta)toast('Short stock: only '+applied+' of '+delta+' box'+(delta===1?'':'es')+' of '+p.name+' on hand — cost still committed for '+desired+'.');
- return true;}
+/* Chain M: stock movement now goes through the transactional break RPCs. A consume records a
+   break_consumption and pushes {mid,qty} onto p._cmids; a return (delta<0) reverses movements LIFO
+   (break_reversal by movement id, at-most-once), re-consuming any over-return so p.consumed and qty
+   stay exact. p.consumed / p.boxes / cost semantics are unchanged. */
+async function breakConsume(p){const desired=(+p.boxes||0),delta=desired-(+p.consumed||0);if(delta===0)return true;
+ const sref=(LIVE.session&&LIVE.session.id)||'break';if(!Array.isArray(p._cmids))p._cmids=[];
+ if(delta>0){
+   const it=(S.inventory||[]).find(x=>x.id===p.itemId);const onhand=it?Math.max(0,+it.qty||0):0;const take=Math.min(delta,onhand);
+   if(take<=0){toast('Short stock: '+p.name+' isn’t in inventory — cost still committed for '+desired+' box'+(desired===1?'':'es')+'.');return false;}
+   const res=await invRpc('e10_inv_consume',{p_id:p.itemId,p_session_ref:sref,p_qty:take,p_reserved_qty:0,p_idempotency_key:invIdemKey('break_consumption',sref,p.itemId,_invEventTok())});
+   if(!res||!res.ok){toast('Short stock: '+p.name+' isn’t in inventory — cost still committed for '+desired+' box'+(desired===1?'':'es')+'.');return false;}
+   p._cmids.push({mid:res.movement_id,qty:take});p.consumed=(+p.consumed||0)+take;
+   if(take<delta)toast('Short stock: only '+take+' of '+delta+' box'+(delta===1?'':'es')+' of '+p.name+' on hand — cost still committed for '+desired+'.');
+   return true;
+ }else{
+   let R=-delta;
+   while(R>0&&p._cmids.length){const top=p._cmids.pop();
+     const res=await invRpc('e10_inv_reverse_consumption',{p_id:p.itemId,p_session_ref:sref,p_qty:top.qty,p_reserved_qty:0,p_reverses_movement_id:top.mid,p_idempotency_key:invIdemKey('break_reversal',sref,p.itemId,top.mid)});
+     if(!res||!res.ok){p._cmids.push(top);break;}
+     p.consumed=(+p.consumed||0)-top.qty;R-=top.qty;}
+   if(R<0){const take=-R;const res=await invRpc('e10_inv_consume',{p_id:p.itemId,p_session_ref:sref,p_qty:take,p_reserved_qty:0,p_idempotency_key:invIdemKey('break_consumption',sref,p.itemId,_invEventTok())});
+     if(res&&res.ok){p._cmids.push({mid:res.movement_id,qty:take});p.consumed=(+p.consumed||0)+take;}}
+   return true;
+ }}
 async function prodPersist(){if(!LIVE.session)return;LIVE.session.cost=breakCost(LIVE.session.products);
  try{await sb.from('e10_break_sessions').update({products:LIVE.session.products,cost:LIVE.session.cost}).eq('id',LIVE.session.id);}catch(e){toast(e.message);}}
 /* Re-render the whole surface so EVERY cost-derived field updates, not just the product box:
