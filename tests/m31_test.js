@@ -3,21 +3,25 @@
 // Covers: adversarial direct-RPC rejections (b6/b3/b7), foreign-release rejection (b2), the CONCURRENT
 // same-key test (b3 — sequential-only is insufficient), and mid-batch failure atomicity (b4).
 // Creates its own throwaway items and deletes them; a follow-up SQL sweep clears their ledger rows/receipts.
-//   Run: node tests/m31_test.js
+//   Credentials from the environment ONLY (no committed defaults): E10_ADMIN_EMAIL/E10_ADMIN_PW and
+//   E10_MEMBER_EMAIL/E10_MEMBER_PW; optional E10_URL/E10_ANON default to the app's public project.
+//   Run: E10_ADMIN_EMAIL=… E10_ADMIN_PW=… E10_MEMBER_EMAIL=… E10_MEMBER_PW=… node tests/m31_test.js
 const { createClient } = require('@supabase/supabase-js');
-const URL = 'https://ddhkkumiyidorzmajwde.supabase.co';
-const ANON = 'sb_publishable_wRoaFNiqpZJaEJkQvLpnUw_7bpcXllv';
-const PW = 'Test!23456';
+const URL = process.env.E10_URL || 'https://ddhkkumiyidorzmajwde.supabase.co';
+const ANON = process.env.E10_ANON || 'sb_publishable_wRoaFNiqpZJaEJkQvLpnUw_7bpcXllv';
+const ADMIN = process.env.E10_ADMIN_EMAIL, ADMIN_PW = process.env.E10_ADMIN_PW;
+const MEMBER = process.env.E10_MEMBER_EMAIL, MEMBER_PW = process.env.E10_MEMBER_PW;
+if (!ADMIN || !ADMIN_PW || !MEMBER || !MEMBER_PW) { console.error('Set E10_ADMIN_EMAIL/E10_ADMIN_PW and E10_MEMBER_EMAIL/E10_MEMBER_PW in the environment.'); process.exit(2); }
 
 function client() { return createClient(URL, ANON, { auth: { persistSession: false, autoRefreshToken: false } }); }
-async function signIn(email) { const c = client(); const { error } = await c.auth.signInWithPassword({ email, password: PW }); if (error) throw new Error('signin ' + email + ': ' + error.message); return c; }
+async function signIn(email, pw) { const c = client(); const { error } = await c.auth.signInWithPassword({ email, password: pw }); if (error) throw new Error('signin ' + email + ': ' + error.message); return c; }
 const rpc = (c, fn, args) => c.rpc(fn, args).then(r => r.error ? { ok: false, msg: r.error.message, _err: true } : r.data);
 
 let pass = 0, fail = 0;
 const T = (n, ok, d) => ok ? (pass++, console.log('  PASS ' + n)) : (fail++, console.log('  FAIL ' + n + (d !== undefined ? '  → ' + JSON.stringify(d) : '')));
 
 (async () => {
-  const A = await signIn('m31a@example.com'), B = await signIn('m31b@example.com');
+  const A = await signIn(ADMIN, ADMIN_PW), B = await signIn(MEMBER, MEMBER_PW);
   const ID = 'zznode' + Date.now().toString(36), IDx = ID + 'x';
   console.log('\nElement 10 — M3.1 hardening (item ' + ID + ')\n');
 

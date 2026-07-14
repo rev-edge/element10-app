@@ -32,3 +32,25 @@ It asserts three things:
 
 The publishable (anon) key and project URL are read from the constants at the top of the
 script — the same values the client app ships. No service-role key is used.
+
+## Inventory hardening tests (M3.1) — credentials via environment only
+
+No credentials are committed. Provide them via env vars:
+
+- **`tests/verify_inventory.js`** — the inventory GATE (baseline 35 / 223 / 21 / $29,486, recon
+  drift 0). Reads a STANDING gate member:
+  `E10_GATE_EMAIL=… E10_GATE_PW=… node tests/verify_inventory.js`
+- **`tests/m31_test.js`** — adversarial + blocker-2 authorization + concurrent same-key + mid-batch
+  atomicity, through real JWT/PostgREST. Needs an admin + a member:
+  `E10_ADMIN_EMAIL=… E10_ADMIN_PW=… E10_MEMBER_EMAIL=… E10_MEMBER_PW=… node tests/m31_test.js`
+- `E10_URL` / `E10_ANON` are optional (default to the app's public project URL + publishable key —
+  those are public, they ship in `index.html`; only the passwords/emails are secret).
+
+**Standing gate member:** `e10gate@example.com` (role `member`) is provisioned permanently for the
+gate; its password is held only in the environment (never committed). `m31_test.js` reuses it as the
+member and needs a disposable admin provisioned per run.
+
+**Provisioning gotcha:** a raw `auth.users` insert leaves GoTrue token columns NULL → sign-in returns
+HTTP 500 (empty body). Set `confirmation_token / recovery_token / email_change /
+email_change_token_new / email_change_token_current / phone_change / phone_change_token /
+reauthentication_token = ''` and `is_sso_user / is_anonymous = false` at insert.

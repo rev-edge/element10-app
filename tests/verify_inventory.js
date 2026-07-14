@@ -1,12 +1,16 @@
 // Element 10 — inventory GATE. Asserts the production baseline is intact after an inventory pass:
 // 35 items / 223 on-hand / $29,486 capital, ledger 35 openings summing 223/21, reserved-recon drift 0.
 // Reads through REAL member RLS via supabase-js (not a service key). Exit non-zero on any HARD failure.
-//   Run: node tests/verify_inventory.js [member-email]   (default m31a@example.com, password Test!23456)
+//   Credentials come from the environment ONLY (no committed defaults):
+//     E10_GATE_EMAIL / E10_GATE_PW  — the standing gate member (provisioned once, permanent).
+//     E10_URL / E10_ANON            — optional; default to the app's public project URL + publishable key.
+//   Run: E10_GATE_EMAIL=… E10_GATE_PW=… node tests/verify_inventory.js
 const { createClient } = require('@supabase/supabase-js');
-const URL = 'https://ddhkkumiyidorzmajwde.supabase.co';
-const ANON = 'sb_publishable_wRoaFNiqpZJaEJkQvLpnUw_7bpcXllv';
-const PW = 'Test!23456';
-const EMAIL = process.argv[2] || 'm31a@example.com';
+const URL = process.env.E10_URL || 'https://ddhkkumiyidorzmajwde.supabase.co';
+const ANON = process.env.E10_ANON || 'sb_publishable_wRoaFNiqpZJaEJkQvLpnUw_7bpcXllv';
+const EMAIL = process.env.E10_GATE_EMAIL;
+const PW = process.env.E10_GATE_PW;
+if (!EMAIL || !PW) { console.error('Set E10_GATE_EMAIL and E10_GATE_PW (the standing gate member) in the environment.'); process.exit(2); }
 
 (async () => {
   const c = createClient(URL, ANON, { auth: { persistSession: false, autoRefreshToken: false } });
