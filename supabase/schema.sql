@@ -608,3 +608,70 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --     Removes the table, its policies, indexes, and every opening-balance row. Touches NOTHING else —
 --     the JSONB inventory / reservations / shows / break sessions / break products are never referenced,
 --     and no inventory needs rebuilding from the ledger.
+
+-- ─────────────────────────────────────────────────────────────
+-- APPLIED (migration e10_inventory_movement_emit — Pass 2.6): the single idempotent
+-- movement-EMITTER RPC + Pass-2.8 reconciliation view. ADDITIVE ONLY, inserts ZERO rows.
+-- Server foundation for Passes 2.7 (intake/adjustment), 2.8 (reservation/release), 2.9
+-- (break consumption/reversal) — every one of those UI passes calls this ONE function.
+-- NO client code, NO UI, NO ledger reads changed; the JSONB workspace 'shared' stays the
+-- production source of truth. This RPC RECORDS movements; it does not drive inventory,
+-- reservations, cost, or availability.
+--   FUNCTION public.e10_emit_inventory_movement(
+--     p_item_id text, p_movement_type text, p_on_hand_delta numeric default 0,
+--     p_reserved_delta numeric default 0, p_idempotency_key text default null,
+--     p_reason_code text default null, p_note text default null,
+--     p_source_entity_type text default null, p_source_entity_id text default null,
+--     p_source_action text default null, p_reverses_movement_id uuid default null,
+--     p_meta jsonb default '{}') RETURNS uuid  -- the movement id (existing id on replay).
+--   SECURITY DEFINER, search_path pinned to 'public'; REVOKE ALL FROM public, anon;
+--     GRANT EXECUTE TO authenticated. The owner (postgres) BYPASSES RLS, so the RPC does NOT
+--     rely on the table policy to keep non-members out — it re-checks e10_is_member() and
+--     e10_has_cap('act.inventory_edit') INTERNALLY (raises 42501 otherwise). actor_uid is
+--     stamped from auth.uid() and owner_ref is derived from the item's JSONB 'owner' — NEITHER
+--     is ever read from caller input (there is no actor/owner parameter to supply). cost_basis
+--     is left null this pass (no methodology introduced; deltas stay independent & signed, numeric).
+--   Idempotency is the CONTRACT, not the caller's problem: a replayed idempotency_key returns the
+--     existing row's id and inserts nothing (INSERT ... ON CONFLICT (idempotency_key) DO NOTHING,
+--     with a replay fast-path SELECT so a break_reversal replay does not trip its own
+--     already-reversed guard). N retries -> exactly one row, one stable id (proven with a 3x replay).
+--   Rejections enforced by the RPC: opening_balance (migration-only), unknown movement_type,
+--     zero/zero no-op (emits nothing, returns null), and structurally incoherent sign/type combos
+--     (e.g. reservation with on_hand_delta<>0, manual_decrease with on_hand_delta>=0, break_reversal
+--     with a null reverses pointer). Reversal guard: reverses_movement_id must exist in workspace
+--     'shared', must not be an opening_balance, and a movement can be reversed at MOST once — enforced
+--     both in-RPC (23505) AND by a DB-level UNIQUE partial index e10_invmov_reverses_uk
+--     (reverses_movement_id WHERE not null).
+--   RLS delta: ADDED exactly one INSERT policy imov_ins (to authenticated) with InitPlan-wrapped
+--     check ((select e10_is_member()) and (select e10_has_cap('act.inventory_edit')) and
+--     coalesce(current_setting('e10.emit',true),'')='on'). The emit-context clause means the RPC
+--     (which sets e10.emit) is the ONLY write path; a DIRECT client INSERT is rejected 42501. imov_sel
+--     (member read) is UNCHANGED. Still NO update, NO delete policy — the table stays append-only.
+--     Verified: member 3x-replay=1 row/1 id; actor stamped from auth.uid(); client-supplied actor in
+--     meta ignored; direct member insert=42501; member update/delete=0 rows; RPC as non-member=42501;
+--     opening_balance/incoherent-sign/double-reversal all rejected; no-op=0 rows; a member without
+--     act.inventory_edit is gated (42501). Baseline BYTE-IDENTICAL after teardown: 35 / 223 / 21.
+--   RECON view public.e10_inventory_reserved_recon (security_invoker => runs under the querying
+--     member's RLS; GRANT SELECT TO authenticated, REVOKE FROM anon; mirrors e10_checklist_facet's
+--     SECURITY INVOKER precedent): per-item reserved_jsonb (from e10_workspace 'shared' reservations[])
+--     vs. reserved_ledger (sum reserved_delta) vs. drift. REPORT ONLY — writes/corrects/reconciles
+--     nothing. Drift at rest = 0 for all 35 items; reserved_jsonb Σ = reserved_ledger Σ = 21.
+--   Idempotency-key CONVENTION for the three UI passes (deterministic, caller-supplied; one key per
+--     logical event so a retry collapses but distinct events never do). General shape:
+--       '<scope>:<workspace>:<source_entity_id>:<item_id>[:<nonce>]'   (workspace = 'shared')
+--     · Pass 2.7 intake:            'intake:shared:<batch_or_receipt_id>:<item_id>'
+--       Pass 2.7 manual adjust:     'adjust:shared:<client_event_id>:<item_id>'   (per adjustment event)
+--     · Pass 2.8 reserve:           'reservation:shared:<show_id>:<item_id>'      (one active per show-item)
+--       Pass 2.8 release:           'reservation_release:shared:<show_id>:<item_id>'
+--       (re-reserve after release appends ':'||<nonce> so the new instance is distinct)
+--     · Pass 2.9 break consume:     'break_consumption:shared:<break_session_id>:<item_id>'
+--       Pass 2.9 break reverse:     'break_reversal:shared:<break_session_id>:<item_id>'
+--       (2.9 reversal MUST also pass p_reverses_movement_id = the consumption row's id)
+--   Rollback (emitter-only, DO NOT run unless reverting THIS pass — touches NO rows):
+--       drop view if exists public.e10_inventory_reserved_recon;
+--       drop policy if exists imov_ins on public.e10_inventory_movements;
+--       drop index if exists public.e10_invmov_reverses_uk;
+--       drop function if exists public.e10_emit_inventory_movement(
+--         text,text,numeric,numeric,text,text,text,text,text,text,uuid,jsonb);
+--     Restores read-only / append-only-by-absence. The Pass 2.1 rollback (drop table … cascade) is
+--     SEPARATE and is NOT part of this pass's rollback.
