@@ -1,0 +1,84 @@
+name: CI + Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # CI-local test credentials — the stack is an EPHEMERAL local Supabase, so these are not secrets.
+      E10_ADMIN_EMAIL: e10adm@example.com
+      E10_ADMIN_PW: CiLocal!23456
+      E10_MEMBER_EMAIL: e10mem@example.com
+      E10_MEMBER_PW: CiLocal!23456
+      E10_GATE_EMAIL: e10gate@example.com
+      E10_GATE_PW: CiLocal!23456
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install test deps
+        working-directory: tests
+        run: npm install --no-audit --no-fund
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Start local Supabase (proves A1 reproducibility on a clean stack)
+        run: supabase start
+      - name: Provision local test users
+        run: node tests/provision_local_users.js
+      - name: Pure-helper suites
+        run: |
+          node tests/genname_test.js
+          node tests/idemkey_test.js
+          node tests/merge_test.js
+      - name: Local integration + RLS suites
+        run: |
+          node tests/m31_test.js
+          node tests/m32_test.js
+          node tests/rls_test.js
+          node tests/genname_persist_test.js
+      - name: Browser suites (headless)
+        run: |
+          node tests/picker_test.js
+          node tests/genname_ui_test.js
+          node tests/m32_ui_test.js
+          node tests/live_flow_test.js
+          node tests/m4_realtime_test.js
+      - name: Schema reproducibility (re-apply migrations cleanly)
+        run: supabase db reset
+
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Stage WEB ASSETS ONLY (never tests/, supabase/, docs/, .github/)
+        run: |
+          mkdir -p dist
+          cp index.html open.html overlay.html companion.html .nojekyll dist/
+          echo "Published files:" && ls -la dist/
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - id: deployment
+        uses: actions/deploy-pages@v5
