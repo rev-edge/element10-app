@@ -516,7 +516,7 @@ function renderShowBuilder(id){const r=showById(id);if(!r){BUILDER=null;renderSc
  $('sec-schedule').innerHTML=`<div class="hero"><div><h1>Show builder</h1><div class="sub">${esc(s.name||'Untitled')} · ${day} ${dp}${cost>0?(' · break cost '+money(cost)):''}</div></div><button class="btn" onclick="closeBuilder()">← Back to schedule</button></div>
    <div class="card" style="margin-bottom:14px"><h3 style="font-size:15px">Show details</h3>${showDetailFieldsHTML(s,id,day,dp,ro)}${ro?'':`<div class="row" style="margin-top:10px"><button class="btn v sm" onclick="saveShowDetail('${id}')">Save details</button><button class="btn x" style="margin-left:auto" onclick="delShowById('${id}')">Delete show</button></div>`}</div>
    <div class="card" style="margin-bottom:14px"><h3 style="font-size:15px">Break / format</h3><div style="margin-top:8px">${showBreakBoxHTML(s,id,ro)}</div></div>
-   <div class="card" style="margin-bottom:14px"><div id="prodBox">${productEditorHTML()}</div></div>
+   <div class="card" style="margin-bottom:14px"><div id="prodBox_builder">${productEditorHTML('builder')}</div></div>
    <div class="card" style="margin-bottom:14px"><h3 style="font-size:15px">Reserved inventory</h3><div style="margin-top:8px">${showResBoxHTML(s,id,ro)}</div></div>
    <div class="card" style="margin-bottom:14px"><h3 style="font-size:15px">Title / description copy</h3><div style="margin-top:8px">${showCopyBoxHTML(s,id,ro)}</div></div>
    <div class="card" style="margin-bottom:14px"><h3 style="font-size:15px">Repack</h3><div style="margin-top:8px">${showRepackBoxHTML(s,id,ro)}</div></div>
@@ -3012,7 +3012,7 @@ function liveActiveHTML(){const s=LIVE.session;const dir=liveDirUrl();const over
    <button class="btn sm ${s.see_2_pick_1?'v':''}" onclick="liveToggleSee2()">See 2 pick 1: <b>${s.see_2_pick_1?'ON':'off'}</b></button>
    <a class="btn sm" onclick="go('fulfill')">📦 Ship list</a></div>
    </div>
- <div class="card" style="margin-bottom:12px"><div id="prodBox">${productEditorHTML()}</div></div>
+ <div class="card" style="margin-bottom:12px"><div id="prodBox_live">${productEditorHTML('live')}</div></div>
  ${liveChasesHTML()}
  <div class="card">
    <div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="font-size:15px">Worklist — ${open.length} open · ${sold.length} sold</h3></div>
@@ -3191,12 +3191,17 @@ function prodRowHTML(p,i){const it=(S.inventory||[]).find(x=>x.id===p.itemId);co
      <select onchange="prodSlice(${i},this.value)" style="font-size:12px">${[['case','Full case ('+bpc+')'],['half','Half case ('+Math.max(1,Math.round(bpc/2))+')'],['boxes','N boxes']].map(o=>`<option value="${o[0]}" ${p.slice===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select>
      ${p.slice==='boxes'?`<input type="number" min="1" value="${p.n||1}" style="width:64px;font-size:12px" onchange="prodSlice(${i},'boxes',this.value)">`:''}
      <button class="btn x sm" onclick="prodRemove(${i})" title="Remove (returns boxes to stock)">✕</button></div></div>`;}
-function productEditorHTML(){const arr=prodArr(),cost=breakCost(arr);
- return `<div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="font-size:15px">Products / cost</h3><b id="breakCostVal" style="font-size:17px">Break cost: ${money(cost)}</b></div>
+/* The product editor mounts at up to two surfaces simultaneously (the show builder in #sec-schedule stays
+   in the DOM behind the live board in #sec-live, since go() only toggles .on). Every id must therefore be
+   SURFACE-specific — a bare 'prodPick'/'prodBox' collided, and $ (getElementById) returned the first,
+   stealing the picker node (the live click-through failed here). The surface key mirrors the precedence
+   prodArr() already uses (live > builder > review) so the container and the array can never disagree. */
+function productEditorHTML(surface){const arr=prodArr(),cost=breakCost(arr);
+ return `<div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="font-size:15px">Products / cost</h3><b id="breakCostVal_${surface}" style="font-size:17px">Break cost: ${money(cost)}</b></div>
    
    <div style="margin-top:8px">${arr.map((p,i)=>prodRowHTML(p,i)).join('')||'<div class="lab" style="text-transform:none;letter-spacing:0">No products yet.</div>'}</div>
-   <div class="row" style="margin-top:10px;gap:8px;align-items:flex-start"><div style="flex:2;min-width:0">${entityPicker('prodPick',{icon:'📦',placeholder:'search inventory to add…',search:invItemSearch,onpick:(id)=>{prodAdd(id);}})}</div></div>`;}
-function renderProductsUI(){const box=$('prodBox');if(box)box.innerHTML=productEditorHTML();}
+   <div class="row" style="margin-top:10px;gap:8px;align-items:flex-start"><div style="flex:2;min-width:0">${entityPicker('prodPick_'+surface,{icon:'📦',placeholder:'search inventory to add…',search:invItemSearch,onpick:(id)=>{prodAdd(id);}})}</div></div>`;}
+function renderProductsUI(){const s=LIVE.session?'live':(BUILDER?'builder':(REVIEW?'review':null));if(!s)return;const box=$('prodBox_'+s);if(box)box.innerHTML=productEditorHTML(s);}
 /* ===== Participants (review) ===== */
 function participantsHTML(){const ps=(REVIEW&&REVIEW.participants)||[];
  return `<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px">${ps.map((p,i)=>`<span class="pill" style="margin:0">${esc(p)} <a onclick="partRemove(${i})" style="color:var(--red);cursor:pointer">✕</a></span>`).join('')||'<span class="lab" style="text-transform:none;letter-spacing:0">No hosts yet.</span>'}</div>
@@ -3227,7 +3232,7 @@ function liveReviewHTML(){const model=(S.breaks||[]).find(b=>b.id===REVIEW.model
    ${avgT>0?`<div class="lab" style="text-transform:none;letter-spacing:0;font-size:13px;margin-top:4px">Break cost <b>${money(brkCost)}</b> ÷ ${nSlots} spots = <b style="color:var(--red)">${money(avgT)}</b> avg slot target to break even</div>`:''}</div>
   <div class="card" style="margin-bottom:12px"><label>Stream title</label><input id="rvTitle" value="${esc(REVIEW.title)}" oninput="REVIEW.title=this.value" style="font-size:16px;width:100%;max-width:520px"></div>
   <div class="card" style="margin-bottom:12px"><h3 style="font-size:15px">Participants / hosts</h3><div id="partBox">${participantsHTML()}</div></div>
-  <div class="card" style="margin-bottom:12px"><div id="prodBox">${productEditorHTML()}</div></div>
+  <div class="card" style="margin-bottom:12px"><div id="prodBox_review">${productEditorHTML('review')}</div></div>
   <div class="card" style="margin-bottom:12px"><h3 style="font-size:15px">Slots — load or edit the spot list</h3>${slotLoaderHTML('review')}<div id="bkSlots" style="margin-top:10px"></div></div>
   <div class="row" style="gap:8px;margin-bottom:20px"><button class="btn v" onclick="liveConfirmReview()">✓ Confirm &amp; go live</button><button class="btn" onclick="liveCancelReview()">Cancel</button></div>`;}
 async function liveConfirmReview(){if(!REVIEW)return;if(!canEditScoped())return roGuard();
