@@ -2119,17 +2119,16 @@ function invClearLink(){ivLinked=null;invRenderChip();toast('Unlinked — this i
 function invFromCard(id){const card=((SRV&&SRV.rows)||[]).find(x=>x.id===id);if(!card){toast('Card not found — reopen the grid and try again');return;}
  window._invPrefillCard=card;dataTab='inventory';SRV=null;clOpenId=null;go('data');window.scrollTo(0,0);}
 /* Owner reassignment is an authoritative inventory mutation → route through the RPC (M3.1 blocker 1).
-   The old direct S.inventory write + save() never persisted: _sharedPayload sources inventory from
-   _invServerOwned (the last-synced remote), so a client blob write can't touch the inventory section. */
+   The client never writes inventory to the blob (M4: inventory is a relational read source, not a blob
+   section) — the RPC updates the rows + ledger and returns the committed item, applied via _applyInvItem. */
 async function reassignInv(id,val){const it=(S.inventory||[]).find(x=>x.id===id);if(!it)return;
  const res=await invRpc('e10_inv_edit_item',{p_id:id,p_patch:{owner:(val||null)},p_remove_keys:[],p_idempotency_key:invIdemKey('adjust',id,id,_invEventTok())});
  dInventory();toast((res&&res.ok)?('Reassigned to '+ownerName(val||null)):('Reassign failed: '+((res&&res.msg)||'')));}
-/* ===== Chain M / M3 — inventory mutations now go through the transactional server RPCs
-   (e10_inv_*). The client no longer mutates the inventory blob section: each RPC updates the
-   relational rows, the blob's inventory section, and the ledger movement in ONE transaction, then
-   returns the committed item. We optimistically apply that authoritative item to the read model
-   (S.inventory) for an instant render; realtime later re-adopts it idempotently. The blob's
-   inventory is server-owned on the WRITE side too (see _sharedPayload → _invServerOwned). ===== */
+/* ===== Chain M / M4 — inventory is a RELATIONAL read source. Mutations go through the transactional
+   server RPCs (e10_inv_*): each updates the relational rows + the ledger movement in ONE transaction and
+   returns the committed item, which we apply to the read model (S.inventory) via _applyInvItem for an
+   instant render. Cross-session, the inventory-tables realtime channel re-fetches (e10_inv_get) and
+   patches per-row. The blob no longer carries inventory (M4 migration dropped it). ===== */
 /* PURE: deterministic idempotency key (schema.sql convention '<op>:shared:<entity>:<item>[:<nonce>]')
    so a retry of the same logical action collapses to one movement while distinct events stay distinct. */
 function invIdemKey(op,entity,item,nonce){return op+':shared:'+(entity==null?'':entity)+':'+(item==null?'':item)+(nonce?(':'+nonce):'');}
@@ -2561,19 +2560,15 @@ let SHARED={},SCOPED={},SCOPED_ID='',REVS={},MEMBERS=[];
 let SCOPE=localStorage.getItem('e10_scope')||'mine';         // 'mine' | 'universal' | '<uid>'
 let invFilter=localStorage.getItem('e10_invfilter')||'mine'; // 'mine' | 'all'
 const SCOPED_KEYS=['shows','breaks','copySets','dashCfg','sales','chaseLists'];
-const SHARED_KEYS=['comments','todos','streamers','lists','attachments','checklists','inventory','repacks'];
+/* M4: `inventory` is NO LONGER a blob section — it is sourced from e10_inventory_items via e10_inv_list
+   and patched per-row by realtime. Removed from SHARED_KEYS so splitLegacy/mergeWorkspace/_keysFor never
+   touch it and a blob write never carries an inventory section. S.inventory/SHARED.inventory live on,
+   populated by loadInventoryRows() + _applyInvItem, and preserved across blob re-splits in _applyPayload. */
+const SHARED_KEYS=['comments','todos','streamers','lists','attachments','checklists','repacks'];
 
-function blankShared(){return{comments:[],todos:[],streamers:['Trent'],lists:JSON.parse(JSON.stringify(DEF_LISTS)),attachments:[],checklists:[],inventory:[],repacks:[]};}
+function blankShared(){return{comments:[],todos:[],streamers:['Trent'],lists:JSON.parse(JSON.stringify(DEF_LISTS)),attachments:[],checklists:[],repacks:[]};}
 function blankScoped(){return{shows:{},breaks:[],copySets:[],dashCfg:{catValue:true,costMarket:true,movement:true},sales:null,chaseLists:[]};}
-function normShared(o){o=o||{};if(!o.comments)o.comments=[];if(!o.todos)o.todos=[];o.todos.forEach(t=>{if(t.desc==null)t.desc='';if(!t.comments)t.comments=[];});if(!o.streamers)o.streamers=['Trent'];if(!o.lists)o.lists=JSON.parse(JSON.stringify(DEF_LISTS));['characters','sets','formats','diff','invcats','grading','conditions'].forEach(k=>{if(!o.lists[k])o.lists[k]=(DEF_LISTS[k]||[]).slice();});['attachments','checklists','inventory','repacks'].forEach(k=>{if(!o[k])o[k]=[];});o.inventory.forEach(it=>{if(!it.id)it.id='i'+Math.random().toString(36).slice(2);if(!('owner'in it))it.owner=null;if(!(+it.qty>=0))it.qty=(+it.qty||1);if(!Array.isArray(it.reservations))it.reservations=[];it.reservations.forEach(r=>{r.qty=+r.qty||0;});if(!it.addedAt)it.addedAt=Date.now();
-  if(!('cardId'in it))it.cardId=null;if(!('playerId'in it))it.playerId=null;if(!('parallel'in it))it.parallel='';/* links to e10_cards / e10_players when added from the library */
-  /* box/case model (v2): wax tracks stock in boxes; boxesPerCase for case-bought product; perBoxCost
-     per box. Backward compatible — default boxesPerCase=1 and derive perBoxCost from unit cost. */
-  if(!(+it.boxesPerCase>=1))it.boxesPerCase=Math.max(1,+it.boxesPerCase||1);
-  if(it.perBoxCost==null||it.perBoxCost==='')it.perBoxCost=(+it.cost||0);
-  /* structured grade fields — backfill once, losslessly, from the free-text cond */
-  if(!('gradingCompany'in it)){it.gradingCompany='';it.grade=('grade'in it)?it.grade:'';const g=parseGrade(it.cond);if(g){it.gradingCompany=g.gradingCompany;it.grade=g.grade;it.cond='';}}
-  if(!('grade'in it))it.grade='';if(!('cardNumber'in it))it.cardNumber='';if(!('year'in it))it.year='';});o.repacks.forEach(p=>{if(!p.cards)p.cards=[];if(!p.pool)p.pool=[];});o.checklists.forEach(clNormalize);return o;}
+function normShared(o){o=o||{};if(!o.comments)o.comments=[];if(!o.todos)o.todos=[];o.todos.forEach(t=>{if(t.desc==null)t.desc='';if(!t.comments)t.comments=[];});if(!o.streamers)o.streamers=['Trent'];if(!o.lists)o.lists=JSON.parse(JSON.stringify(DEF_LISTS));['characters','sets','formats','diff','invcats','grading','conditions'].forEach(k=>{if(!o.lists[k])o.lists[k]=(DEF_LISTS[k]||[]).slice();});['attachments','checklists','inventory','repacks'].forEach(k=>{if(!o[k])o[k]=[];});/* M4: inventory is row-sourced (e10_inv_list) + already canonical — no per-item blob normalization here; the array guard above just keeps S.inventory defined. */o.repacks.forEach(p=>{if(!p.cards)p.cards=[];if(!p.pool)p.pool=[];});o.checklists.forEach(clNormalize);return o;}
 function normScoped(o){o=o||{};if(!o.shows)o.shows={};if(!o.breaks)o.breaks=[];if(!o.copySets)o.copySets=[];if(!o.dashCfg)o.dashCfg={catValue:true,costMarket:true,movement:true};if(!('sales'in o))o.sales=null;
  Object.keys(o.shows).forEach(k=>{(o.shows[k]||[]).forEach(s=>{if(!s.id)s.id='sh'+Math.random().toString(36).slice(2);if(s.notes==null)s.notes='';if(!('titleSet'in s))s.titleSet=null;if(!('breakModel'in s))s.breakModel=null;if(!Array.isArray(s.inventoryAlloc))s.inventoryAlloc=[];if(!('repackRef'in s))s.repackRef=null;if(!Array.isArray(s.needs))s.needs=[];});});
  o.breaks.forEach(b=>{if(!b.id)b.id='bk'+Math.random().toString(36).slice(2);if(!('ts'in b))b.ts=null;});
@@ -2595,7 +2590,7 @@ function roGuard(){toast('Read-only — switch to “My space” to edit');retur
 function rebuildS(){normShared(SHARED);normScoped(SCOPED);
  S={comments:SHARED.comments,todos:SHARED.todos,streamers:SHARED.streamers,lists:SHARED.lists,attachments:SHARED.attachments,checklists:SHARED.checklists,inventory:SHARED.inventory,repacks:SHARED.repacks,
     shows:SCOPED.shows,breaks:SCOPED.breaks,copySets:SCOPED.copySets,dashCfg:SCOPED.dashCfg,sales:SCOPED.sales,chaseLists:SCOPED.chaseLists,user:ME};}
-function pushFromS(){SHARED.comments=S.comments;SHARED.todos=S.todos;SHARED.streamers=S.streamers;SHARED.lists=S.lists;SHARED.attachments=S.attachments;SHARED.checklists=S.checklists;SHARED.inventory=S.inventory;SHARED.repacks=S.repacks;
+function pushFromS(){SHARED.comments=S.comments;SHARED.todos=S.todos;SHARED.streamers=S.streamers;SHARED.lists=S.lists;SHARED.attachments=S.attachments;SHARED.checklists=S.checklists;SHARED.repacks=S.repacks;/* M4: inventory is row-owned — never mirrored into the blob */
  SCOPED.shows=S.shows;SCOPED.breaks=S.breaks;SCOPED.copySets=S.copySets;SCOPED.dashCfg=S.dashCfg;SCOPED.sales=S.sales;SCOPED.chaseLists=S.chaseLists;}
 function currentRender(){const on=document.querySelector('.sec.on');const s=on?on.id.replace('sec-',''):'home';({home:renderHome,schedule:renderSchedule,copy:renderCopy,gen:renderGen,break:renderBreak,data:renderData,repack:renderRepack,live:renderLive,fulfill:renderFulfill}[s]||renderHome)();}
 /* Preserve typing across realtime updates: defer a section re-render while an input is focused. */
@@ -2608,18 +2603,17 @@ document.addEventListener('focusout',()=>{setTimeout(()=>{if(_pendingRender&&!is
    rev=<expected>) instead of blindly overwriting. On a rev drift we fetch the remote row and do a PURE
    section-level three-way merge against the last-synced base; mergeable → retry once at the new rev;
    a true section conflict is surfaced (Keep mine / Take theirs), never silently resolved. ===== */
-/* Chain M / M3 — inventory is SERVER-OWNED on the write side. The client never writes the inventory
-   section: we source it from the last-synced remote (_lastShared) so local.inventory always equals
-   base.inventory, and H2's merge (local==base → take remote) makes a client save never touch it. Only
-   the e10_inv_* RPCs mutate inventory (rows + blob + ledger); realtime brings their result back. */
-function _invServerOwned(){try{const b=_lastShared?JSON.parse(_lastShared):null;return (b&&('inventory' in b))?b.inventory:S.inventory;}catch(e){return S.inventory;}}
-const _sharedPayload=()=>({comments:S.comments,todos:S.todos,streamers:S.streamers,lists:S.lists,attachments:S.attachments,checklists:S.checklists,inventory:_invServerOwned(),repacks:S.repacks});
+/* Chain M / M4 — inventory is fully off the blob. The client reads it from e10_inventory_items via
+   e10_inv_list() and patches per-row via realtime + the e10_inv_* RPC results (_applyInvItem). It is NOT
+   a blob section: absent from SHARED_KEYS, blankShared, _sharedPayload and the H2 merge — so a shared
+   write never carries an inventory section, and the blob's inventory copy is dropped by the M4 migration. */
+const _sharedPayload=()=>({comments:S.comments,todos:S.todos,streamers:S.streamers,lists:S.lists,attachments:S.attachments,checklists:S.checklists,repacks:S.repacks});
 const _scopedPayload=()=>({shows:S.shows,breaks:S.breaks,copySets:S.copySets,dashCfg:S.dashCfg,sales:S.sales,chaseLists:S.chaseLists});
 function _keysFor(id){return id==='shared'?SHARED_KEYS:SCOPED_KEYS;}
 function _splitFor(id,d){return id==='shared'?splitLegacy(d).sh:splitLegacy(d).sc;}      // reuse the SAME apply path realtime uses
 function _baseObj(id){const j=id==='shared'?_lastShared:(id===SCOPED_ID?_lastScoped:null);try{return j?JSON.parse(j):null;}catch(e){return null;}}
 function _setCache(id,obj){const j=JSON.stringify(obj);if(id==='shared')_lastShared=j;else if(id===SCOPED_ID)_lastScoped=j;}
-function _applyPayload(id,obj){_applyingRemote=true;if(id==='shared')SHARED=_splitFor('shared',obj);else SCOPED=_splitFor(SCOPED_ID,obj);rebuildS();safeRender();_applyingRemote=false;}
+function _applyPayload(id,obj){_applyingRemote=true;if(id==='shared'){const _inv=SHARED.inventory;SHARED=_splitFor('shared',obj);SHARED.inventory=_inv;/* M4: inventory is row-owned — never rebuilt from the blob split, so a shared-row realtime event (e.g. a todo edit) can't blank it */}else SCOPED=_splitFor(SCOPED_ID,obj);rebuildS();safeRender();_applyingRemote=false;}
 /* PURE: (base, local, remote, keys) → {merged, conflicts[]}. Per section: local==base → take remote;
    remote==base → take local; both→same → fine; both changed differently → conflict (default local). */
 function mergeWorkspace(base,local,remote,keys){base=base||{};local=local||{};remote=remote||{};const merged={},conflicts=[];
@@ -2738,7 +2732,10 @@ function applyRemoteRow(id,n){
 function subscribeRealtime(){sb.channel('e10ws').on('postgres_changes',{event:'*',schema:'public',table:'e10_workspace'},p=>{const n=p.new;if(!n||!n.id)return;
  if(n.id==='shared'&&(n.rev||0)>(REVS['shared']||0))applyRemoteRow('shared',n);
  else if(n.id===SCOPED_ID&&(n.rev||0)>(REVS[SCOPED_ID]||0))applyRemoteRow(SCOPED_ID,n);
-}).subscribe();}
+}) /* M4: inventory read source is relational — patch S.inventory per-row from the inventory tables */
+ .on('postgres_changes',{event:'*',schema:'public',table:'e10_inventory_items'},_invRealtimeEvent)
+ .on('postgres_changes',{event:'*',schema:'public',table:'e10_inventory_reservations'},_invRealtimeEvent)
+ .subscribe();}
 
 async function loadAll(){
  try{await sb.from('e10_members').upsert({user_id:MEID,email:ME},{onConflict:'user_id',ignoreDuplicates:true});}catch(e){}
@@ -2746,10 +2743,22 @@ async function loadAll(){
  try{const mem=await sb.from('e10_members').select('user_id,email,display_name,role');MEMBERS=mem.data||[];}catch(e){MEMBERS=[];}
  await loadCaps();renderNav();renderSubnav();
  const sh=await fetchRow('shared');REVS['shared']=sh?(sh.rev||0):0;SHARED=sh&&sh.data&&Object.keys(sh.data).length?splitLegacy(sh.data).sh:blankShared();normShared(SHARED);
- _lastShared=JSON.stringify({comments:SHARED.comments,todos:SHARED.todos,streamers:SHARED.streamers,lists:SHARED.lists,attachments:SHARED.attachments,checklists:SHARED.checklists,inventory:SHARED.inventory,repacks:SHARED.repacks}); /* base for H2's merge = the loaded (last-synced) state, never null */
+ _lastShared=JSON.stringify({comments:SHARED.comments,todos:SHARED.todos,streamers:SHARED.streamers,lists:SHARED.lists,attachments:SHARED.attachments,checklists:SHARED.checklists,repacks:SHARED.repacks}); /* base for H2's merge = the loaded (last-synced) state, never null; M4: inventory is not a blob section */
  if(!sh||!sh.data||!Object.keys(sh.data).length)await writeRow('shared',null,SHARED);
  if(SCOPE!=='mine'&&SCOPE!=='universal'&&ROLE!=='admin')SCOPE='mine';
- await loadScopedFor(SCOPE);await loadOpShows();rebuildS();subscribeRealtime();}
+ await loadScopedFor(SCOPE);await loadOpShows();await loadInventoryRows();rebuildS();subscribeRealtime();}
+/* M4: inventory READ source = e10_inventory_items (projected by e10_inv_list, the canonical shape the blob
+   held). Populates SHARED.inventory; realtime patches it per-row thereafter. Failure leaves the last array. */
+async function loadInventoryRows(){if(!sb)return;try{const{data,error}=await sb.rpc('e10_inv_list');if(error)throw error;if(Array.isArray(data))SHARED.inventory=data;}catch(e){console.warn('inv load',e.message||e);if(!Array.isArray(SHARED.inventory))SHARED.inventory=[];}}
+/* Per-row realtime: any change to an item or its reservations re-fetches that item's canonical projection
+   (e10_inv_get) and upserts it by id — RE-FETCH-LATEST so out-of-order/duplicate events converge and can't
+   corrupt the array. An item delete drops it. Reuses the same _applyInvItem/_removeInvItem the RPCs use. */
+function _invRealtimeEvent(p){
+ const isDel=p.eventType==='DELETE',row=isDel?p.old:p.new;if(!row)return;
+ const itemId=(p.table==='e10_inventory_reservations')?row.item_id:row.id;if(!itemId)return;
+ if(p.table==='e10_inventory_items'&&isDel){_removeInvItem(itemId);return;}
+ sb.rpc('e10_inv_get',{p_id:itemId}).then(({data,error})=>{if(error)return;if(data)_applyInvItem(data);else _removeInvItem(itemId);});
+}
 renderWho=function(){if(!$('who'))return;$('who').innerHTML=`<div style="position:relative"><button class="btn sm" onclick="toggleProfileMenu(event)">\u{1F464} ${esc(ME||'')}${ROLE==='admin'?' · admin':''} ▾</button><div id="profMenu" class="profmenu" style="display:none"></div></div>`;};
 function signOut(){LIVE_SEED=null;if(REVIEW)REVIEW.showRef=null;sb.auth.signOut().then(()=>location.reload());}  /* M3.2.1 item 3: sign-out clears any pending show seed */
 function closeProfileMenu(){const m=$('profMenu');if(m)m.style.display='none';}

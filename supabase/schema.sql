@@ -931,3 +931,29 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --     dropped). It restores security if those functions are ever accidentally replaced; it never restores
 --     the pre-M3.2.2 defects. Proven by apply→assert-signatures/security→assert unknown-session-rejected→
 --     assert foreign-reversal-rejected→assert movement/receipt counts unchanged→rollback (P0R report).
+
+-- ═════════════════════════════════════════════════════════════════════════════
+-- APPLIED (Chain M — M4: inventory blob retirement, THE ONE-WAY DOOR). Inventory's system of record is
+-- now the relational rows; the shared JSONB blob no longer carries an `inventory` section.
+--   STAGED, prod-safe deploy (an old client must never see a dropped blob):
+--     (1) ADDITIVE migration 20260715120210_e10_m4_inventory_read_source.sql — e10_inv_list()/e10_inv_get(text)
+--         member-gated read RPCs (project rows via _e10_inv_item_json, the canonical blob shape; anon revoked);
+--         e10_inventory_items + e10_inventory_reservations added to supabase_realtime + REPLICA IDENTITY FULL;
+--         e10_inventory_reserved_recon + e10_inventory_recon redefined ROWS-vs-LEDGER (blob CTE gone; the gate
+--         reads .drift, still 0). Backward-compatible — old client keeps working.
+--     (2) deploy the M4 client (reads inventory from e10_inv_list; per-row realtime patches S.inventory via
+--         e10_inv_get→_applyInvItem; inventory removed from SHARED_KEYS/_sharedPayload/the H2 merge; SHARED.inventory
+--         preserved across blob re-splits in _applyPayload).
+--     (3) DESTRUCTIVE migration 20260715130000_e10_m4_blob_retire.sql — _e10_inv_blob_write becomes a NO-OP
+--         (returns the shared rev; the 8 e10_inv_* RPCs stop dual-writing the blob) and `data - 'inventory'`
+--         drops the blob copy. THIS closes the rollback window.
+--   HAZARD (verified real, designed around): once the M4 client is live it drops the blob's inventory on any
+--     shared-row write (its payload omits inventory + writeRow writes the whole data column). Harmless after
+--     step 3; the client-deploy→destructive window is kept short + coordinated so no old client reads an empty blob.
+--   ROLLBACK (down-path): supabase/recovery/m4_revert_down_path.sql re-projects the blob inventory from rows
+--     (jsonb_agg(_e10_inv_item_json(id) order by id) — proven to reproduce e10_inv_list()/the blob per-item
+--     after null-normalization, 0 non-null keys missing), restores _e10_inv_blob_write + the blob-inclusive
+--     recon views, and drops the realtime membership. Run it, THEN git-revert the M4 client. Any mutation after
+--     step 3 lives only in rows+ledger; the re-projection reconstructs the blob from them. Array order is not
+--     load-bearing (client reads by id). Verification: m4_realtime_test.js (2-session per-row realtime patch,
+--     out-of-order/duplicate convergence); gate 0 HARD; recon drift 0.
