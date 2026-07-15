@@ -4,8 +4,8 @@
 // Provisioning + teardown of the fixtures is done out-of-band via the Supabase MCP.
 const { createClient } = require('@supabase/supabase-js');
 
-const URL = 'https://ddhkkumiyidorzmajwde.supabase.co';
-const ANON = 'sb_publishable_wRoaFNiqpZJaEJkQvLpnUw_7bpcXllv';
+const { requireLocal } = require('./env');
+const { url: URL, anon: ANON } = requireLocal('rls_test'); // LOCAL by default; prod refused (mutating suite)
 const PW = 'Test!23456';
 
 // ids passed in from provisioning (argv: A B C)

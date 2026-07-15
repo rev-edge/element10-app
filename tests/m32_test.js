@@ -7,8 +7,8 @@
 //   Run: (source .env.local) node tests/m32_test.js
 const { createClient } = require('@supabase/supabase-js');
 const { serviceCleanup } = require('./cleanup');
-const URL = process.env.E10_URL || 'https://ddhkkumiyidorzmajwde.supabase.co';
-const ANON = process.env.E10_ANON || 'sb_publishable_wRoaFNiqpZJaEJkQvLpnUw_7bpcXllv';
+const { requireLocal } = require('./env');
+const { url: URL, anon: ANON } = requireLocal('m32_test'); // LOCAL by default; prod refused (mutating suite)
 const ADMIN = process.env.E10_ADMIN_EMAIL, ADMIN_PW = process.env.E10_ADMIN_PW;
 const MEMBER = process.env.E10_MEMBER_EMAIL, MEMBER_PW = process.env.E10_MEMBER_PW;
 const MEMBER2 = process.env.E10_GATE_EMAIL, MEMBER2_PW = process.env.E10_GATE_PW;   // second member (non-owner)

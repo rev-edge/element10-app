@@ -8,8 +8,8 @@
 //   Run: (source .env.local) node tests/genname_persist_test.js
 const { createClient } = require('@supabase/supabase-js');
 const { serviceCleanup } = require('./cleanup');
-const URL = process.env.E10_URL || 'https://ddhkkumiyidorzmajwde.supabase.co';
-const ANON = process.env.E10_ANON || 'sb_publishable_wRoaFNiqpZJaEJkQvLpnUw_7bpcXllv';
+const { requireLocal } = require('./env');
+const { url: URL, anon: ANON } = requireLocal('genname_persist_test'); // LOCAL by default; prod refused (mutating suite)
 const MEMBER = process.env.E10_MEMBER_EMAIL, MEMBER_PW = process.env.E10_MEMBER_PW;
 if (!MEMBER || !MEMBER_PW) { console.error('Set E10_MEMBER_EMAIL / E10_MEMBER_PW.'); process.exit(2); }
 
