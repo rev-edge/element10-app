@@ -10,8 +10,8 @@
 const puppeteer = require('puppeteer');
 const { createClient } = require('@supabase/supabase-js');
 const { serviceCleanup } = require('./cleanup');
-const URL = process.env.E10_URL || 'https://ddhkkumiyidorzmajwde.supabase.co';
-const ANON = process.env.E10_ANON || 'sb_publishable_wRoaFNiqpZJaEJkQvLpnUw_7bpcXllv';
+const { target } = require('./env');
+const { url: URL, anon: ANON } = target(); // LOCAL by default; the browser client (file://) also connects to LOCAL
 const APP = process.env.E10_APP_URL || ('file://' + require('path').resolve(__dirname, '..', 'index.html'));
 const MEMBER = process.env.E10_MEMBER_EMAIL, MEMBER_PW = process.env.E10_MEMBER_PW;
 const ADMIN = process.env.E10_ADMIN_EMAIL, ADMIN_PW = process.env.E10_ADMIN_PW;
@@ -50,7 +50,7 @@ const rpc = (c, fn, a) => c.rpc(fn, a).then(r => r.error ? { ok: false, msg: r.e
     const waitB = async (pred, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (pred(await bItem())) return true; await sleep(400); } return false; };
 
     const initCount = await bCount();
-    T('session B loaded inventory from rows (e10_inv_list, >0 items)', initCount >= 35, initCount);
+    T('session B loaded inventory from rows (e10_inv_list, >0 items)', initCount >= 1, initCount);
     T('session B does not yet have the test item', (await bItem()) === null);
 
     // ── ADD (session A) → realtime INSERT on e10_inventory_items → B sees it, no reload ──

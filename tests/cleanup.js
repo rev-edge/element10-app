@@ -21,16 +21,14 @@ function projRefFromUrl(u) { const m = /^https?:\/\/([a-z0-9]+)\.supabase\.co/i.
 
 async function serviceCleanup(manifest) {
   manifest = manifest || {};
-  const URL = process.env.E10_URL;
-  const KEY = process.env.SUPABASE_SERVICE_KEY;
-  const REF = process.env.E10_CLEANUP_PROJECT_REF;
-  if (!URL || !KEY || !REF) {
-    throw new Error('cleanup requires E10_URL, SUPABASE_SERVICE_KEY, and E10_CLEANUP_PROJECT_REF (no defaults).');
-  }
-  const urlRef = projRefFromUrl(URL);
-  if (!urlRef || urlRef !== REF) {
-    throw new Error('cleanup project-ref mismatch: URL ref [' + urlRef + '] != E10_CLEANUP_PROJECT_REF [' + REF + ']');
-  }
+  // LOCAL by default (env.js). Teardown DELETES rows, so it refuses production outright — mutating suites
+  // run against the local stack, so their teardown does too.
+  const { target } = require('./env');
+  const t = target();
+  if (t.isProd) throw new Error('serviceCleanup refuses to run against PRODUCTION (it deletes rows). Run mutating suites against the local stack.');
+  const URL = t.url;
+  const KEY = t.serviceKey || process.env.SUPABASE_SERVICE_KEY;
+  if (!KEY) throw new Error('serviceCleanup: no service key for the local stack (is it up? `supabase start`).');
 
   const itemIds = [...new Set(manifest.itemIds || [])];
   const keys = [...new Set(manifest.idempotencyKeys || [])];

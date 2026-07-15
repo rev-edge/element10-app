@@ -12,8 +12,12 @@
 //     E10_URL / E10_ANON            — optional; default to the app's public project URL + publishable key.
 //   Run: E10_GATE_EMAIL=… E10_GATE_PW=… node tests/verify_inventory.js
 const { createClient } = require('@supabase/supabase-js');
-const URL = process.env.E10_URL || 'https://ddhkkumiyidorzmajwde.supabase.co';
-const ANON = process.env.E10_ANON || 'sb_publishable_wRoaFNiqpZJaEJkQvLpnUw_7bpcXllv';
+const { target } = require('./env');
+// The gate verifies the PRODUCTION baseline (35/223/$29,486) read-only. It is the ONE suite allowed
+// against prod — and ONLY against prod (E10_ALLOW_PROD=1 + E10_ANON). Local has different data.
+const _t = target();
+if (!_t.isProd) { console.error('verify_inventory checks the PRODUCTION baseline — run with E10_ALLOW_PROD=1 and E10_ANON set (read-only).'); process.exit(2); }
+const URL = _t.url, ANON = _t.anon;
 const EMAIL = process.env.E10_GATE_EMAIL;
 const PW = process.env.E10_GATE_PW;
 if (!EMAIL || !PW) { console.error('Set E10_GATE_EMAIL and E10_GATE_PW (the standing gate member) in the environment.'); process.exit(2); }

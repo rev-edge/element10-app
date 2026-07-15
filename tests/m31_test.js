@@ -7,8 +7,8 @@
 //   E10_MEMBER_EMAIL/E10_MEMBER_PW; optional E10_URL/E10_ANON default to the app's public project.
 //   Run: E10_ADMIN_EMAIL=… E10_ADMIN_PW=… E10_MEMBER_EMAIL=… E10_MEMBER_PW=… node tests/m31_test.js
 const { createClient } = require('@supabase/supabase-js');
-const URL = process.env.E10_URL || 'https://ddhkkumiyidorzmajwde.supabase.co';
-const ANON = process.env.E10_ANON || 'sb_publishable_wRoaFNiqpZJaEJkQvLpnUw_7bpcXllv';
+const { requireLocal } = require('./env');
+const { url: URL, anon: ANON } = requireLocal('m31_test'); // LOCAL by default; prod refused (mutating suite)
 const ADMIN = process.env.E10_ADMIN_EMAIL, ADMIN_PW = process.env.E10_ADMIN_PW;
 const MEMBER = process.env.E10_MEMBER_EMAIL, MEMBER_PW = process.env.E10_MEMBER_PW;
 if (!ADMIN || !ADMIN_PW || !MEMBER || !MEMBER_PW) { console.error('Set E10_ADMIN_EMAIL/E10_ADMIN_PW and E10_MEMBER_EMAIL/E10_MEMBER_PW in the environment.'); process.exit(2); }

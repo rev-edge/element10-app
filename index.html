@@ -130,7 +130,7 @@ details.gcfg>summary{list-style:none;cursor:pointer}details.gcfg>summary::-webki
 .drop:hover{border-color:var(--ink);color:var(--ink)}
 .filerow{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;font-size:13px;background:var(--surface)}
 .filerow .nm{flex:1}.chipwrap{margin:8px 0}
-</style><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</style><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.5/dist/umd/supabase.js" integrity="sha384-fTq5g8tD1IgcQKSKKNu5HdZncuhKN6e5MmGdzPNCK4jk3lh0tfnPZAtrUvyvgt4i" crossorigin="anonymous"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" integrity="sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw" crossorigin="anonymous"></script>
 </head><body>
 <header><div class="logo">ELEMENT<b>10</b></div><nav id="nav"></nav><div id="who" style="margin-left:auto"></div></header>
 <div id="subnav" class="subnav" style="display:none"></div>
@@ -2144,6 +2144,7 @@ function _removeInvItem(id){if(SHARED.inventory)SHARED.inventory=SHARED.inventor
 let _invBusy=false;
 async function invRpc(fn,args,onItem){
  if(!sb)return{ok:false,msg:'Not connected'};
+ if(!_mutationGuard())return{ok:false,msg:'read-only — app/schema version mismatch'};
  if(_invBusy)return{ok:false,msg:'One inventory change at a time — try again'};
  _invBusy=true;
  try{
@@ -2553,8 +2554,25 @@ function rpUploadImg(i){pickImage(url=>{const l=rpList();if(l[i]){l[i].img=url;s
 function invUploadImg(){pickImage(url=>{const el=$('ivImg');if(el)el.value=url;const pv=$('ivImgPv');if(pv){pv.src=url;pv.style.display='inline-block';}toast('Image ready — click Add item');});}
 
 /* ===== Element 10 cloud: multi-tenant (shared + universal + personal) + auth + realtime ===== */
-const SB_URL='https://ddhkkumiyidorzmajwde.supabase.co';
-const SB_KEY='sb_publishable_wRoaFNiqpZJaEJkQvLpnUw_7bpcXllv';
+/* Foundation Gate A2 — a LOCAL page (file:// or localhost) NEVER silently talks to production. Any real
+   deployment (github.io / a hosted domain) uses prod; a local page defaults to the LOCAL Supabase stack,
+   overridable ONLY by an explicit ?e10_supabase_url=…&e10_supabase_key=… (or matching localStorage). This
+   makes the M4-style "local client mutated production" accident impossible by construction. */
+const SB_PROD_URL='https://ddhkkumiyidorzmajwde.supabase.co', SB_PROD_KEY='sb_publishable_wRoaFNiqpZJaEJkQvLpnUw_7bpcXllv';
+const SB_LOCAL_URL='http://127.0.0.1:54321', SB_LOCAL_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0';
+function _sbTarget(){
+ const p=location.protocol,h=location.hostname,isLocalPage=(p==='file:'||h===''||h==='localhost'||h==='127.0.0.1');
+ if(!isLocalPage)return{url:SB_PROD_URL,key:SB_PROD_KEY};                     // any hosted deployment → production
+ const q=new URLSearchParams(location.search),ls=k=>{try{return localStorage.getItem(k);}catch(e){return null;}};
+ const url=q.get('e10_supabase_url')||ls('e10_supabase_url'),key=q.get('e10_supabase_key')||ls('e10_supabase_key');
+ return (url&&key)?{url,key}:{url:SB_LOCAL_URL,key:SB_LOCAL_KEY};             // local page → LOCAL stack (or explicit override)
+}
+const _sbt=_sbTarget(),SB_URL=_sbt.url,SB_KEY=_sbt.key;
+/* Fail-closed schema-version handshake: the client refuses mutations against a DB whose schema it wasn't
+   built for. Bump SCHEMA_VERSION whenever a migration changes the client-visible contract, and update the
+   matching e10_schema_version() RPC in the same migration. */
+const SCHEMA_VERSION='2026-07-15.fg1';
+let _schemaLocked=false;
 let sb=null,ME=null,MEID=null,_st=null,_applyingRemote=false;
 let SHARED={},SCOPED={},SCOPED_ID='',REVS={},MEMBERS=[];
 let SCOPE=localStorage.getItem('e10_scope')||'mine';         // 'mine' | 'universal' | '<uid>'
@@ -2663,7 +2681,7 @@ const _origSave=save;
 let _lsTimer=null;                        // debounce the localStorage mirror (was written on every keystroke)
 save=function(){clearTimeout(_lsTimer);_lsTimer=setTimeout(_origSave,400);cloudSave();};
 let _lastShared=null,_lastScoped=null,_saveFailing=false;     // last payloads written (skip redundant cloud writes); _saveFailing dedups the failure toast
-function cloudSave(){if(!sb||_applyingRemote)return;pushFromS();clearTimeout(_st);_st=setTimeout(doCloudWrite,600);}
+function cloudSave(){if(!sb||_applyingRemote)return;if(!_mutationGuard())return;pushFromS();clearTimeout(_st);_st=setTimeout(doCloudWrite,600);}
 let _writing=false;
 async function doCloudWrite(){if(_writing){clearTimeout(_st);_st=setTimeout(doCloudWrite,300);return;} /* one write in flight at a time — a conflict-retry never races a second write from this tab */
  _writing=true;_st=null;let failed=false;try{
@@ -2802,7 +2820,15 @@ async function boot(){if(!window.supabase){authScreen('Auth library failed to lo
  const{data:{session}}=await sb.auth.getSession();
  if(!session){authScreen('');return;}
  ME=session.user.email;MEID=session.user.id;S.user=ME;
- await loadAll();renderWho();renderScopebar();currentRender();}
+ await _schemaHandshake();
+ await loadAll();renderWho();renderScopebar();currentRender();
+ if(_schemaLocked)_schemaLockNotice();}
+/* fail-closed: verify the DB schema matches what this client was built for; on mismatch/unreachable RPC,
+   go read-only (mutations blocked by _mutationGuard). */
+async function _schemaHandshake(){try{const{data,error}=await sb.rpc('e10_schema_version');_schemaLocked=(!!error||String(data)!==SCHEMA_VERSION);}catch(e){_schemaLocked=true;}}
+function _schemaLockNotice(){const b=document.createElement('div');b.id='schemaLock';b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:99999;background:#E8332B;color:#fff;text-align:center;padding:7px 12px;font-size:13px;font-weight:600;font-family:inherit';
+ b.textContent='Read-only — this app version doesn’t match the database schema. Reload to update; mutations are disabled.';document.body.appendChild(b);}
+function _mutationGuard(){if(_schemaLocked){try{toast('Read-only: app/schema version mismatch — reload.');}catch(e){}return false;}return true;}
 /* ========== LIVE BREAK SESSION — streamer control panel ========== */
 let LIVE={session:null,slots:[],chan:null,chases:[]};
 async function renderLive(){

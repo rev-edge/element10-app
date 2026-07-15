@@ -11,9 +11,9 @@
 const puppeteer = require('puppeteer');
 const { createClient } = require('@supabase/supabase-js');
 const { serviceCleanup } = require('./cleanup');
-const URL = process.env.E10_URL || 'https://ddhkkumiyidorzmajwde.supabase.co';
-const ANON = process.env.E10_ANON || 'sb_publishable_wRoaFNiqpZJaEJkQvLpnUw_7bpcXllv';
-const APP = process.env.E10_APP_URL || 'https://rev-edge.github.io/element10-app/';
+const { target } = require('./env');
+const { url: URL, anon: ANON } = target(); // LOCAL by default; the browser client (file://) also connects to LOCAL
+const APP = process.env.E10_APP_URL || ('file://' + require('path').resolve(__dirname, '..', 'index.html'));
 const MEMBER = process.env.E10_MEMBER_EMAIL, MEMBER_PW = process.env.E10_MEMBER_PW;
 if (!MEMBER || !MEMBER_PW) { console.error('Set E10_MEMBER_EMAIL / E10_MEMBER_PW.'); process.exit(2); }
 
