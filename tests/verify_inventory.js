@@ -1,5 +1,11 @@
 // Element 10 — inventory GATE. Asserts the production baseline is intact after an inventory pass:
-// 35 items / 223 on-hand / $29,486 capital, ledger 35 openings summing 223/21, reserved-recon drift 0.
+// 35 items / 223 on-hand / $29,486 capital (operational), the LEDGER reconciles to operational state
+// (ledger-derived on-hand/reserved == operational; NOT a fixed sum), and reserved-recon drift 0.
+// Reconciliation baseline (Chain P — P0R, agreed with Trent): the gate no longer expects an opening-only
+// ledger. Legitimate reservation/consumption/reversal traffic adds non-opening movements and is EXPECTED;
+// the gate proves those movements reconcile rather than pinning a fixed ledger sum. If real usage changes
+// the OPERATIONAL baseline (an item consumed and not reversed, an item added), that is legitimate but the
+// 35/223/$29,486 line re-baselines only with Trent's explicit written agreement — never to silence a fail.
 // Reads through REAL member RLS via supabase-js (not a service key). Exit non-zero on any HARD failure.
 //   Credentials come from the environment ONLY (no committed defaults):
 //     E10_GATE_EMAIL / E10_GATE_PW  — the standing gate member (provisioned once, permanent).
@@ -30,13 +36,21 @@ if (!EMAIL || !PW) { console.error('Set E10_GATE_EMAIL and E10_GATE_PW (the stan
   H('on-hand sum = 223', onhand === 223, 'got ' + onhand);
   H('capital = $29,486', capital === 29486, 'got ' + capital);
 
+  // Operational reserved = sum of ACTIVE reservation qty — the reconciliation target for the ledger.
+  const { data: resv } = await c.from('e10_inventory_reservations').select('qty,status');
+  const opReserved = (resv || []).filter(r => r.status === 'active').reduce((s, r) => s + (+r.qty || 0), 0);
+
   const { data: mv } = await c.from('e10_inventory_movements').select('movement_type,on_hand_delta,reserved_delta');
-  const oh = mv.reduce((s, m) => s + (+m.on_hand_delta || 0), 0);
-  const rd = mv.reduce((s, m) => s + (+m.reserved_delta || 0), 0);
+  const ledgerOnHand = mv.reduce((s, m) => s + (+m.on_hand_delta || 0), 0);
+  const ledgerReserved = mv.reduce((s, m) => s + (+m.reserved_delta || 0), 0);
   const openings = mv.filter(m => m.movement_type === 'opening_balance').length;
-  H('ledger on_hand sum = 223', oh === 223, 'got ' + oh);
-  H('ledger reserved sum = 21', rd === 21, 'got ' + rd);
-  H('opening_balance rows = 35', openings === 35, 'got ' + openings);
+  const nonOpening = mv.length - openings;
+  // RECONCILIATION (robust to legitimate operator traffic): ledger-derived totals must EQUAL current
+  // operational state, not a fixed number. Non-opening movements are expected, not a failure.
+  H('ledger on-hand reconciles to operational', ledgerOnHand === onhand, 'ledger ' + ledgerOnHand + ' vs op ' + onhand);
+  H('ledger reserved reconciles to operational', ledgerReserved === opReserved, 'ledger ' + ledgerReserved + ' vs op ' + opReserved);
+  H('opening_balance rows = 35 (one per item)', openings === 35, 'got ' + openings);
+  console.log('  info      non-opening movements = ' + nonOpening + ' (real operator traffic; expected)');
 
   const { data: rec } = await c.from('e10_inventory_reserved_recon').select('drift');
   const drift = rec.filter(r => +r.drift !== 0).length;

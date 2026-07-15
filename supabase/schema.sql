@@ -908,3 +908,26 @@ create policy ws_del on public.e10_workspace for delete to authenticated using (
 --   Verified live (SQL-impersonation + committed node/UI tests under externally-supplied credentials):
 --     unknown-UUID rejected; null/legacy → unreserved; owned session draws; member cannot reverse another's
 --     consumption; owner/admin can. Baseline BYTE-IDENTICAL 35 / 223 / 21 / $29,486, recon drift 0.
+
+-- ═════════════════════════════════════════════════════════════════════════════
+-- APPLIED (Chain P — P0R): production application roles have NO RPC that can delete inventory MOVEMENT
+-- or mutation-RECEIPT history. The append-only ledger has no member/admin-callable delete side door.
+--   * e10_test_cleanup was FIRST admin-gated (migration 20260715000000_e10_test_cleanup_admin_gate.sql,
+--     applied live) and then DROPPED ENTIRELY (migration 20260716000000_e10_drop_test_cleanup.sql). A
+--     production RPC able to DELETE append-only ledger/receipt rows is a standing liability even behind an
+--     admin check, so it is gone. No overload of e10_test_cleanup remains in pg_proc. ONE-WAY: there is no
+--     down migration; do not recreate it.
+--   * Test teardown now runs OFF the RLS surface via the service-role script tests/cleanup.js — manifest-
+--     scoped (exact item ids / idempotency keys / session ids / show ids + workspace), namespace-guarded
+--     (items/keys must be 'zz…'; shows removed only when their name starts 'ZZ '), never a blanket sweep,
+--     and it can never touch Trent's real iS02 movements (which are not in the 'zz' namespace).
+--   * Ledger fact of record: the ledger now legitimately holds NON-OPENING movements (Trent's first live
+--     click-through recorded reservation +1 then reservation_release −1 on iS02, show sh1784074278725).
+--     These are permanent real history. verify_inventory.js was re-baselined (agreed) from an opening-only
+--     expectation to RECONCILIATION: ledger-derived on-hand/reserved must equal operational state, drift 0.
+--   * SAFE RECOVERY (not rollback): supabase/recovery/m322_safe_function_restore.sql reinstalls the LAST-
+--     KNOWN-SECURE bodies of e10_inv_consume + e10_inv_reverse_consumption (unknown-session rejection,
+--     consume/reverse ownership checks, idempotency receipts, append-only ledger — all preserved; no table
+--     dropped). It restores security if those functions are ever accidentally replaced; it never restores
+--     the pre-M3.2.2 defects. Proven by apply→assert-signatures/security→assert unknown-session-rejected→
+--     assert foreign-reversal-rejected→assert movement/receipt counts unchanged→rollback (P0R report).

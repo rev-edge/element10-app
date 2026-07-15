@@ -21,10 +21,13 @@ let pass = 0, fail = 0;
 const T = (n, ok, d) => ok ? (pass++, console.log('  PASS ' + n)) : (fail++, console.log('  FAIL ' + n + (d !== undefined ? '  → ' + JSON.stringify(d) : '')));
 
 (async () => {
+  const { serviceCleanup } = require('./cleanup');
   const A = await signIn(ADMIN, ADMIN_PW), B = await signIn(MEMBER, MEMBER_PW);
   const ID = 'zznode' + Date.now().toString(36), IDx = ID + 'x';
+  const manifest = { itemIds: [ID, IDx] };
   console.log('\nElement 10 — M3.1 hardening (item ' + ID + ')\n');
 
+  try {
   const add = await rpc(A, 'e10_inv_add_item', { p_item: { id: ID, name: 'ZZ node', qty: 10, cost: 2, cat: 'Box' }, p_idempotency_key: 'zznode:add:' + ID });
   T('setup add ok', add && add.ok === true, add);
 
@@ -71,6 +74,7 @@ const T = (n, ok, d) => ok ? (pass++, console.log('  PASS ' + n)) : (fail++, con
 
   // ---- Item 1 (M3.2.1): CONCURRENT same-key ADD → advisory lock serializes; one item, one movement ----
   const AID = 'zzconc' + Date.now().toString(36), AKEY = 'zznode:concadd:' + AID;
+  manifest.itemIds.push(AID);
   const adItem = { p_item: { id: AID, name: 'ZZ conc', qty: 1, cost: 1, cat: 'Box' }, p_idempotency_key: AKEY };
   const [a1, a2] = await Promise.all([rpc(A, 'e10_inv_add_item', adItem), rpc(A, 'e10_inv_add_item', adItem)]);
   T('i1 concurrent add: both callers succeed', a1.ok === true && a2.ok === true, { a1, a2 });
@@ -79,15 +83,14 @@ const T = (n, ok, d) => ok ? (pass++, console.log('  PASS ' + n)) : (fail++, con
   const cMv = (await A.from('e10_inventory_movements').select('id').eq('idempotency_key', AKEY)).data;
   T('i1 concurrent add: exactly one movement (loser replayed)', cMv.length === 1, cMv.length);
 
-  // ---- SELF-CONTAINED teardown: delete items via RPC, then e10_test_cleanup removes the append-only
-  //      ledger rows + receipts this run created (both 'zznode:' and 'zzconc' namespaces). ----
-  await rpc(A, 'e10_inv_delete_item', { p_id: ID, p_idempotency_key: 'zznode:del:' + ID });
-  await rpc(A, 'e10_inv_delete_item', { p_id: IDx, p_idempotency_key: 'zznode:delx:' + ID });
-  await rpc(A, 'e10_inv_delete_item', { p_id: AID, p_idempotency_key: 'zznode:concdel:' + AID });
-  await rpc(A, 'e10_test_cleanup', { p_prefix: 'zznode' });
-  await rpc(A, 'e10_test_cleanup', { p_prefix: 'zzconc' });
-  const _leftMv = (await A.from('e10_inventory_movements').select('id').or('idempotency_key.like.zznode%,idempotency_key.like.zzconc%,item_id.like.zznode%,item_id.like.zzconc%')).data;
-  T('teardown self-contained: 0 residual ledger rows', (_leftMv || []).length === 0, (_leftMv || []).length);
+  } finally {
+    // Service-role teardown (manifest-scoped): removes this run's item rows + their append-only ledger
+    // rows / receipts / reservations. Runs even after an assertion or an exception in the body.
+    let res, cerr;
+    try { res = await serviceCleanup(manifest); } catch (e) { cerr = e; }
+    T('teardown: service cleanup ran', !cerr, cerr && cerr.message);
+    if (res) T('teardown: 0 residue (manifest-scoped)', res.clean, res.residue);
+  }
 
   console.log('\n  ' + pass + ' pass · ' + fail + ' fail\n');
   process.exit(fail ? 1 : 0);

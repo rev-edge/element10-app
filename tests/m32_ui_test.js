@@ -4,11 +4,13 @@
 //   B) a generic launch (no show) → session source_show_ref null.
 //   C) an abandoned show-start (open show → start-live → navigate away → start another way) → null.
 // The prerequisite throwaway show is created through the client's OWN newShow/saveShow (shows are scoped
-// to the signed-in member's workspace). Self-teardown: e10_test_cleanup for sessions (events/slots cascade)
-// + removes the show from the member workspace. Credentials from env ONLY: E10_MEMBER_EMAIL/PW.
+// to the signed-in member's workspace). Teardown runs from finally via the service-role serviceCleanup
+// (tests/cleanup.js): sessions (events/slots cascade) + the throwaway show from the member workspace.
+//   Credentials from env ONLY: E10_MEMBER_EMAIL/PW, plus E10_URL/SUPABASE_SERVICE_KEY/E10_CLEANUP_PROJECT_REF.
 //   Run: (source .env.local) node tests/m32_ui_test.js
 const puppeteer = require('puppeteer');
 const { createClient } = require('@supabase/supabase-js');
+const { serviceCleanup } = require('./cleanup');
 const URL = process.env.E10_URL || 'https://ddhkkumiyidorzmajwde.supabase.co';
 const ANON = process.env.E10_ANON || 'sb_publishable_wRoaFNiqpZJaEJkQvLpnUw_7bpcXllv';
 const APP = process.env.E10_APP_URL || 'https://rev-edge.github.io/element10-app/';
@@ -69,19 +71,15 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     T('B: generic launch (no show) → source_show_ref null', s && s.source_show_ref === null, s);
   } finally {
     await browser.close();
+    // Service-role teardown from finally — runs even if the browser flow threw. Removes the sessions this
+    // run created (their events/slots cascade) and the throwaway 'ZZ …' show from the member workspace.
+    const { data: sess } = await sb.from('e10_break_sessions').select('id').eq('streamer_uid', meUid).gt('created_at', t0);
+    const manifest = { sessionIds: (sess || []).map(x => x.id), showIds: SHOWID ? [SHOWID] : [], workspaceId: uws };
+    let res, cerr;
+    try { res = await serviceCleanup(manifest); } catch (e) { cerr = e; }
+    T('teardown: service cleanup ran', !cerr, cerr && cerr.message);
+    if (res) T('teardown: 0 residue (sessions + show)', res.clean, res.residue);
   }
-
-  // ── self-teardown ──
-  const { data: sess } = await sb.from('e10_break_sessions').select('id').eq('streamer_uid', meUid).gt('created_at', t0);
-  const ids = (sess || []).map(x => x.id);
-  const { error: ce } = await sb.rpc('e10_test_cleanup', { p_prefix: PFX, p_session_ids: ids });
-  T('teardown: cleanup helper ran', !ce, ce && ce.message);
-  if (SHOWID) {
-    const { data: w2 } = await sb.from('e10_workspace').select('data,rev').eq('id', uws).maybeSingle();
-    if (w2 && w2.data && w2.data.shows) { const sh = w2.data.shows; for (const k of Object.keys(sh)) { sh[k] = (sh[k] || []).filter(s => s && s.id !== SHOWID); if (!sh[k].length) delete sh[k]; } await sb.from('e10_workspace').update({ data: w2.data, rev: (w2.rev || 0) + 1 }).eq('id', uws); }
-  }
-  const { data: left } = await sb.from('e10_break_sessions').select('id').in('id', ids.length ? ids : ['00000000-0000-0000-0000-000000000000']);
-  T('teardown: 0 test sessions remain', (left || []).length === 0, (left || []).length);
 
   console.log('\n  ' + pass + ' pass · ' + fail + ' fail\n');
   process.exit(fail ? 1 : 0);

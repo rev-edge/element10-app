@@ -6,6 +6,7 @@
 //   E10_ADMIN_EMAIL/PW (admin), E10_MEMBER_EMAIL/PW (member A / owner), E10_GATE_EMAIL/PW (member B).
 //   Run: (source .env.local) node tests/m32_test.js
 const { createClient } = require('@supabase/supabase-js');
+const { serviceCleanup } = require('./cleanup');
 const URL = process.env.E10_URL || 'https://ddhkkumiyidorzmajwde.supabase.co';
 const ANON = process.env.E10_ANON || 'sb_publishable_wRoaFNiqpZJaEJkQvLpnUw_7bpcXllv';
 const ADMIN = process.env.E10_ADMIN_EMAIL, ADMIN_PW = process.env.E10_ADMIN_PW;
@@ -30,7 +31,9 @@ const T = (n, ok, d) => ok ? (pass++, console.log('  PASS ' + n)) : (fail++, con
   console.log('\nElement 10 — M3.2.2 (prefix ' + PFX + ')\n');
   const sumRes = async () => ((await M.from('e10_inventory_reservations').select('qty').eq('item_id', ID).eq('show_ref', SHOW).eq('status', 'active')).data || []).reduce((s, x) => s + (+x.qty || 0), 0);
   const mkSession = async (cli, uid, ref) => { const { data } = await cli.from('e10_break_sessions').insert({ streamer_uid: uid, name: 'ZZ ' + PFX, source_show_ref: ref }).select().maybeSingle(); if (data) sessIds.push(data.id); return data; };
+  const manifest = { itemIds: [ID], sessionIds: sessIds };   // sessIds mutated in-place as sessions are created
 
+  try {
   const add = await rpc(M, 'e10_inv_add_item', { p_item: { id: ID, name: 'ZZ m32', qty: 10, cost: 2, cat: 'Box' }, p_idempotency_key: PFX + ':add' });
   T('setup: member adds item', add && add.ok === true, add);
   await rpc(M, 'e10_inv_set_reservations', { p_show_ref: SHOW, p_show_label: 'ZZ Show', p_targets: [{ item_id: ID, qty: 5 }], p_idempotency_key: PFX + ':res' });
@@ -75,13 +78,14 @@ const T = (n, ok, d) => ok ? (pass++, console.log('  PASS ' + n)) : (fail++, con
   const adMv = (await M.from('e10_inventory_movements').select('reserved_delta').eq('idempotency_key', PFX + ':adhoc').single()).data;
   T('ad-hoc reserved_delta 0 + reservations untouched', adMv && +adMv.reserved_delta === 0 && (await sumRes()) === before, adMv);
 
-  // ── SELF-CONTAINED teardown (item 4): removes items, reservations, LEDGER rows, RECEIPTS, sessions, blob ──
-  const clean = await rpc(A, 'e10_test_cleanup', { p_prefix: PFX, p_session_ids: sessIds });
-  T('self-contained teardown ran', clean && clean.ok === true, clean);
-  const leftItems = (await M.from('e10_inventory_items').select('id').like('id', PFX + '%')).data;
-  const leftMoves = (await M.from('e10_inventory_movements').select('id').like('idempotency_key', PFX + '%')).data;
-  const leftSess = (await M.from('e10_break_sessions').select('id').in('id', sessIds)).data;
-  T('teardown left 0 items / 0 movements / 0 sessions', leftItems.length === 0 && leftMoves.length === 0 && leftSess.length === 0, { items: leftItems.length, moves: leftMoves.length, sess: leftSess.length });
+  } finally {
+    // Service-role teardown (manifest-scoped): item rows + their movements/receipts/reservations + the
+    // break sessions this run created. Runs even after an assertion or exception in the body.
+    let res, cerr;
+    try { res = await serviceCleanup(manifest); } catch (e) { cerr = e; }
+    T('teardown: service cleanup ran', !cerr, cerr && cerr.message);
+    if (res) T('teardown: 0 residue (items / movements / sessions)', res.clean, res.residue);
+  }
 
   console.log('\n  ' + pass + ' pass · ' + fail + ' fail\n');
   process.exit(fail ? 1 : 0);
