@@ -20,6 +20,14 @@ The live ledger held 50 migrations; the repo had 13 files, and the ~37-migration
 
 All other objects — tables, functions, views, policies, grants, publications, replica identities — match byte-for-byte after comment/blank normalization.
 
+## Staging (pre-deploy verification)
+A hosted staging project on the Rev-Edge (Pro) org — `element10-staging`, ref `csmbjfmoxkexcyssntbg`, us-east-1, **$10/mo** — is the pre-deploy verification target. Its schema is populated from this repo by `supabase db push` and verified to match production (29 tables / 41 functions / 89 policies / 6 views, `security_invoker` recon views, inventory tables in realtime, `e10_schema_version()` = `2026-07-15.fg1`). Free-tier note: n/a (Pro). Its DB password lives in `.env.local` as `SUPABASE_STAGING_DB_PASSWORD` (set via a dashboard reset — `create_project` does not accept one).
+```bash
+# push migrations to staging (no relink needed):
+ENCPW=$(node -e 'console.log(encodeURIComponent(process.env.SUPABASE_STAGING_DB_PASSWORD))')
+supabase db push --db-url "postgresql://postgres.csmbjfmoxkexcyssntbg:${ENCPW}@aws-0-us-east-1.pooler.supabase.com:5432/postgres"
+```
+
 ## Local workflow
 ```bash
 cd ~/dev/element10-app
