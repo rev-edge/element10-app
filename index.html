@@ -1640,6 +1640,62 @@ function invPackage(it){if(!it)return null;
  if(cat==='pack')return /\bbundle\b/.test((it.name||'').toLowerCase())?'bundle':'pack';
  return null;}                                                                              // graded_card / raw_card / unknown
 function invPackageLabel(p){return {case:'Case',box:'Box',pack:'Pack',bundle:'Bundle',tin:'Tin',blister:'Blister',lot:'Lot'}[p]||'—';}
+/* Pass 2.6 (corrected) — invGenName: PURE, deterministic, storage-independent generated name.
+   Null for legacy/unclassified items. Sealed/graded/raw require MINIMUM USEFULNESS (>=2 distinct
+   substantive segments from Year/Brand/Line-set/Subject/Domain-context) — a package or a grade alone
+   never qualifies. Segments are DEDUPED case-insensitively: a shorter segment that appears as a
+   complete word/phrase inside a longer one is dropped (keep the longer); 'Box' never matches inside
+   'Boxing'. Card # is included for BOTH raw and graded, ordered Year·Line·Subject·Card#·Parallel·[GC·Grade].
+   Lots use a separate descriptor rule (first six words of description|product_line, count prefix, 'Lot' once). */
+function _invGenNorm(v){return (v==null)?'':(''+v).replace(/\s+/g,' ').trim();}
+function _invGenContains(hay,needle){ // needle appears in hay as a complete word/phrase (Unicode-aware boundaries)
+  if(!needle) return false;
+  var esc=needle.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  try{return new RegExp('(^|[^\\p{L}\\p{N}])'+esc+'([^\\p{L}\\p{N}]|$)','iu').test(hay);}
+  catch(e){return (' '+hay.toLowerCase()+' ').indexOf(' '+needle.toLowerCase()+' ')>=0;}
+}
+function invGenDedupJoin(segs){
+  var parts=(segs||[]).map(_invGenNorm).filter(function(s){return s!=='';});
+  var kept=[];
+  for(var i=0;i<parts.length;i++){var s=parts[i],drop=false;
+    for(var j=0;j<parts.length;j++){if(i===j)continue;var o=parts[j];
+      if(o.length>s.length&&_invGenContains(o,s)){drop=true;break;}                 // shorter inside a longer → drop shorter
+      if(o.length===s.length&&o.toLowerCase()===s.toLowerCase()&&j<i){drop=true;break;} // exact dup → keep first
+    }
+    if(!drop)kept.push(s);
+  }
+  var out=kept.join(' ').replace(/\s+/g,' ').trim();
+  return out===''?null:out;
+}
+function invGenLotName(cnt,desc,line){
+  var d=_invGenNorm(desc)||_invGenNorm(line);
+  if(!d)return null;
+  var words=d.split(' ').filter(function(w){return w!=='';}).slice(0,6);
+  if(!words.length)return null;
+  var base=words.join(' '),c=_invGenNorm(cnt);
+  var out=(c!==''?(c+'× '):'')+base;
+  if(!/\blot\b/i.test(out))out=out+' Lot';
+  return out;
+}
+function invGenName(it){
+  if(!it)return null;
+  var t=it.inventory_type; if(INV_TYPES.indexOf(t)<0)return null;
+  var g=function(k){return _invGenNorm(it[k]);};
+  var yr=g('product_year')||g('year'), brand=g('manufacturer'), line=g('product_line')||g('set'), dom=g('domain');
+  var ctx=dom==='Sports cards'?g('sport'):dom==='TCG'?g('game'):dom==='Entertainment'?g('franchise'):dom==='Other'?g('category_detail'):'';
+  var subj=g('subject'), config=g('configuration'), par=g('parallel'), gc=g('gradingCompany'), grd=g('grade'), num=g('cardNumber');
+  var pkgCode=g('package_type'), pkg=pkgCode?((invPackageLabel(pkgCode)!=='—')?invPackageLabel(pkgCode):pkgCode):'';
+  if(t==='lot_bundle')return invGenLotName(g('item_count'),g('description'),line);
+  // minimum usefulness: >=2 distinct substantive segments (case-insensitive)
+  var subs=[yr,brand,line,subj,ctx].filter(function(s){return s!=='';});
+  var seen={},distinct=0; subs.forEach(function(s){var k=s.toLowerCase();if(!seen[k]){seen[k]=1;distinct++;}});
+  if(distinct<2)return null;
+  var segs;
+  if(t==='sealed_product')segs=[yr,brand,line,ctx,config,pkg];
+  else if(t==='graded_card')segs=[yr,line,subj,num,par,gc,grd];
+  else segs=[yr,line,subj,num,par]; // raw_card
+  return invGenDedupJoin(segs);
+}
 const INV_COLS=[
  {key:'name',label:'Item',core:true,first:true,type:'text',sortable:true,sortVal:i=>(i.name||'').toLowerCase(),
   cell:(i,admin)=>{const sold=(+i.soldQty||0)>0?`<div class="lab" style="text-transform:none;letter-spacing:0;color:var(--mut2)">sold ${i.soldQty} · ${money(i.soldProceeds||0)}</div>`:'';return `<td class="ive-open" data-invid="${esc(i.id)}" tabindex="0" role="button" aria-label="Open ${esc(i.name)}"><b>${esc(i.name)}</b>${sold}</td>`;}},
@@ -1789,15 +1845,18 @@ function invFormVisMap(type,domain,pkg){type=(type!=null?type:invfV('ivf_type'))
   manufacturer:s,product_year:s||card,product_line:s||card||l,configuration:s,package:s,bpc:s&&pkg==='case',basis:s,
   linkedcard:card,cardnum:card,parallel:card,gc:g,grade:g,cert:g,cond:s||r,itemcount:l,description:l};}
 function invFormSync(){const v=invFormVisMap();document.querySelectorAll('#modal [data-ivf]').forEach(el=>{el.style.display=v[el.getAttribute('data-ivf')]?'':'none';});
- const ql=$('ivf_qtylabel');if(ql)ql.textContent=(invfV('ivf_package')==='case')?'Quantity of cases':'Quantity';invFormBoxHint();}
+ const ql=$('ivf_qtylabel');if(ql)ql.textContent=(invfV('ivf_package')==='case')?'Quantity of cases':'Quantity';invFormBoxHint();invGenApply(true);}
 function invFormBoxHint(){const el=$('ivf_boxhint');if(!el)return;const raw=+invfV('ivf_cost')||0,bpc=Math.max(1,+invfV('ivf_bpc')||1),basis=invfV('ivf_basis')||'perbox';const pbc=(basis==='percase'&&bpc>1)?(raw/bpc):raw;el.textContent=pbc>0?('= '+money(pbc)+'/box'+((basis==='percase'&&bpc>1)?(' · case '+money(raw)):'')):'';}
-function invFormMarkExplicit(){if(INVEDIT)INVEDIT.typeExplicit=true;invFormHideDerivedNote();}
+function invFormMarkExplicit(){if(INVEDIT){INVEDIT.typeExplicit=true;INVEDIT._userTouched=true;}invFormHideDerivedNote();invGenApply(true);}
 function invFormHideDerivedNote(){const n=$('ivf_derivednote');if(n&&INVEDIT&&INVEDIT.typeExplicit)n.style.display='none';}
 function invFormUseClassification(){if(!INVEDIT)return;INVEDIT.typeExplicit=true;INVEDIT.catDirty=false;invFormHideDerivedNote();toast('Classification set — save to store it');}
 function invFormTypeChange(){const sel=$('ivf_type');if(!sel||!INVEDIT)return;const nt=sel.value,prev=INVEDIT._prevType||'';
- if(INVEDIT.mode==='add'&&prev&&prev!==nt){const lost=invFormHiddenWithData(prev,nt);if(lost.length&&!confirm('Switch type? Unsaved '+lost.join(', ')+' will be cleared.')){sel.value=prev;return;}invFormClearHidden(nt);}
+ if(prev&&prev!==nt){const lost=invFormHiddenWithData(prev,nt);
+   if(lost.length&&!confirm('Switch type? '+lost.join(', ')+' will be cleared.')){sel.value=prev;return;}
+   if(INVEDIT.mode==='edit')invFormTypeSwitchRemove(prev,nt);   // shed structured keys via the p_remove_keys whitelist (twins never cleared)
+   invFormClearHidden(nt);}
  if(INVEDIT.mode==='add'&&nt==='sealed_product'&&invfV('ivf_cond')===''){const c=$('ivf_cond');if(c)c.value='Sealed';}
- INVEDIT._prevType=nt;INVEDIT.typeExplicit=true;INVEDIT.catDirty=true;invFormHideDerivedNote();invFormSync();}
+ INVEDIT._prevType=nt;INVEDIT.typeExplicit=true;INVEDIT._userTouched=true;INVEDIT.catDirty=true;invFormHideDerivedNote();invFormSync();}
 const _INVF_TS=[['manufacturer','ivf_brand','Brand'],['configuration','ivf_config','Configuration'],['package','ivf_package','Package type'],['bpc','ivf_bpc','Boxes per case'],['gc','ivf_gc','Grading company'],['grade','ivf_grade','Grade'],['cert','ivf_cert','Cert #'],['cardnum','ivf_cardnum','Card #'],['parallel','ivf_parallel','Parallel'],['itemcount','ivf_itemcount','Item count'],['description','ivf_desc','Description'],['cond','ivf_cond','Condition']];
 function invFormHiddenWithData(prev,nt){const cur=invFormVisMap(prev),next=invFormVisMap(nt);const out=[];_INVF_TS.forEach(([k,id,label])=>{if(cur[k]&&!next[k]&&invfV(id)!=='')out.push(label);});return out;}
 function invFormClearHidden(nt){const next=invFormVisMap(nt);_INVF_TS.forEach(([k,id])=>{if(!next[k]){const el=$(id);if(el)el.value='';}});}
@@ -1806,14 +1865,56 @@ function invfUpload(){pickImage(url=>{const el=$('ivf_img');if(el){el.value=url;
 async function invfCardSearch(q){const box=$('ivf_cardresults');if(!box)return;q=(q||'').trim();if(q.length<2){box.innerHTML='';return;}const list=await dbCardLibrarySearch(q);_invfCards=list;
  box.innerHTML=list.length?`<div style="background:var(--surface);border:1px solid var(--line);border-radius:8px;max-height:180px;overflow:auto;box-shadow:0 8px 24px #0003">${list.map(c=>`<div class="grow" style="padding:6px 8px;cursor:pointer" onclick="invfPickCard('${c.id}')"><b>${esc(c.name||'')}</b> <span class="lab">${esc([c.set_name,c.num,c.parallel].filter(Boolean).join(' · '))}</span></div>`).join('')}</div>`:'';}
 function invfPickCard(id){const c=_invfCards.find(x=>x.id===id);if(!c)return;const set=(k,v)=>{const el=$(k);if(el&&v!=null&&(''+v).trim()!=='')el.value=v;};
- if(invfV('ivf_name')==='')set('ivf_name',c.name);set('ivf_line',c.set_name);set('ivf_cardnum',c.num);set('ivf_parallel',c.parallel);if(c.set&&c.set.year)set('ivf_year',c.set.year);
- if(INVEDIT)INVEDIT.cardLink={cardId:c.id,playerId:c.player_id||null,setId:c.set_id||null};invFormMarkExplicit();const box=$('ivf_cardresults');if(box)box.innerHTML='';const cs=$('ivf_cardsearch');if(cs)cs.value=c.name||'';}
+ /* 2.6: the linked card's NAME is the generator SUBJECT (never written into the Name input). Structured
+    fields (set/card#/parallel/year) still autofill; the Name is produced by invGenName from that state. */
+ set('ivf_line',c.set_name);set('ivf_cardnum',c.num);set('ivf_parallel',c.parallel);if(c.set&&c.set.year)set('ivf_year',c.set.year);
+ if(INVEDIT){INVEDIT.cardLink={cardId:c.id,playerId:c.player_id||null,setId:c.set_id||null};INVEDIT.cardMeta={name:_invGenNorm(c.name)};INVEDIT.cardMetaLoading=false;INVEDIT._userTouched=true;}
+ invFormMarkExplicit();const box=$('ivf_cardresults');if(box)box.innerHTML='';const cs=$('ivf_cardsearch');if(cs)cs.value=c.name||'';invGenApply(true);}
+/* ── 2.6 tri-state generated-name wiring (custom_name_override: absent | false | true) ────────────────
+   absent  = never chose generated → preview only, Name never auto-replaced, flag never written.
+   false   = generated mode → contributing edits regenerate + fill Name; flag+Name saved together.
+   true    = custom → user typed/selected the Name; never auto-replaced.  The linked-card subject loads
+   async and NEVER overwrites the Name with an incomplete/failed result. */
+function invFormClassified(){return !!INVEDIT&&(INVEDIT.mode==='add'||INVEDIT.typeExplicit);}
+function invFormStateItem(){var g=function(id){return invfV(id);};var it={};
+ if(invFormClassified())it.inventory_type=invfV('ivf_type');
+ it.product_year=g('ivf_year');it.year=g('ivf_year');it.manufacturer=g('ivf_brand');
+ it.product_line=g('ivf_line');it.set=g('ivf_line');it.domain=g('ivf_domain');it.sport=g('ivf_sport');it.game=g('ivf_game');
+ it.franchise=g('ivf_franchise');it.category_detail=g('ivf_catdetail');it.configuration=g('ivf_config');it.package_type=g('ivf_package');
+ it.cardNumber=g('ivf_cardnum');it.parallel=g('ivf_parallel');it.gradingCompany=g('ivf_gc');it.grade=g('ivf_grade');
+ it.item_count=g('ivf_itemcount');it.description=g('ivf_desc');
+ it.subject=(INVEDIT&&INVEDIT.cardMeta&&INVEDIT.cardMeta.name)||'';
+ return it;}
+function invGenApply(fromEdit){if(!INVEDIT)return;
+ var gen=invGenName(invFormStateItem());INVEDIT._gen=gen;
+ var cur=invfV('ivf_name');
+ /* generated mode fills the Name on a genuine user edit, once the form is live, never mid-metadata-load */
+ if(fromEdit&&INVEDIT._genLive&&INVEDIT.nameOverride===false&&!INVEDIT.cardMetaLoading&&gen){
+   var nEl=$('ivf_name');if(nEl&&nEl.value!==gen){nEl.value=gen;cur=gen;}}
+ var pv=$('ivf_namepv');if(pv){pv.textContent=gen||'';pv.style.display=(gen&&gen!==cur)?'':'none';}
+ var rst=$('ivf_namereset');if(rst)rst.style.display=(gen&&gen!==cur)?'':'none';}
+function invNameTyped(){if(!INVEDIT)return;INVEDIT.nameOverride=true;INVEDIT._userTouched=true;invGenApply(false);}
+function invNameUseGenerated(){if(!INVEDIT)return;var gen=invGenName(invFormStateItem());if(!gen)return;INVEDIT.nameOverride=false;INVEDIT._userTouched=true;var n=$('ivf_name');if(n)n.value=gen;invGenApply(false);}
+async function invLoadCardMeta(cardId){if(!INVEDIT||!cardId||!sb)return;INVEDIT.cardMetaLoading=true;
+ try{const{data}=await sb.from('e10_cards').select('name').eq('id',cardId).maybeSingle();
+   if(INVEDIT&&data&&data.name)INVEDIT.cardMeta={name:_invGenNorm(data.name)};}catch(e){}
+ finally{if(INVEDIT){INVEDIT.cardMetaLoading=false;
+   var pre=INVEDIT.baseline;invGenApply(true);
+   /* load-completion is part of "opening": if nothing was user-touched, keep the open clean */
+   if(!INVEDIT._userTouched)INVEDIT.baseline=invEditSnapshot();else INVEDIT.baseline=pre;}}}
+const _INVF_REMOVE={manufacturer:['manufacturer'],configuration:['configuration'],package:['package_type'],bpc:['units_per_case'],basis:['cost_basis_mode'],gc:['grading_company'],grade:['grade'],cert:['certification_number'],cardnum:['card_number'],parallel:['parallel'],itemcount:['item_count'],description:['description'],linkedcard:['cardId','playerId']};
+function invFormTypeSwitchRemove(prev,nt){if(!INVEDIT)return;var cur=invFormVisMap(prev),next=invFormVisMap(nt);
+ var rk=(INVEDIT.removeKeys||[]).slice();
+ Object.keys(_INVF_REMOVE).forEach(function(vk){if(cur[vk]&&!next[vk])_INVF_REMOVE[vk].forEach(function(t){if(rk.indexOf(t)<0)rk.push(t);});});
+ var nextToks=[];Object.keys(_INVF_REMOVE).forEach(function(vk){if(next[vk])_INVF_REMOVE[vk].forEach(function(t){nextToks.push(t);});});
+ INVEDIT.removeKeys=rk.filter(function(t){return nextToks.indexOf(t)<0;});   // dual-field: product_line/set/year tokens are never in this map, so a twin is never cleared
+ if(!next.linkedcard){INVEDIT.cardLink={cardId:null,playerId:null,setId:null};INVEDIT.cardMeta=null;}}
 function invFormBodyHTML(mode,it,explicitType,derivedType){const isEdit=mode==='edit';it=it||{};
  const typeVal=isEdit?(explicitType||derivedType||''):'';const legacyDerived=isEdit&&!explicitType&&!!derivedType;
  const pbc=(it.perBoxCost!=null&&it.perBoxCost!=='')?+it.perBoxCost:(+it.cost||0);
  const opt=(arr,cur)=>arr.map(o=>{const v=Array.isArray(o)?o[0]:o,l=Array.isArray(o)?o[1]:o;return `<option value="${esc(v)}" ${cur===v?'selected':''}>${esc(l)}</option>`;}).join('');
  const fld=(key,label,ctrl,note)=>`<div data-ivf="${key}"><label>${label}</label>${ctrl}${note?`<div class="lab" style="text-transform:none;letter-spacing:0;font-size:11px">${note}</div>`:''}</div>`;
- const num=(id,v,ph)=>`<input id="${id}" type="number" min="0" value="${esc(v==null?'':(''+v))}" ${ph?`placeholder="${esc(ph)}"`:''}>`;
+ const num=(id,v,ph,extra)=>`<input id="${id}" type="number" min="0" value="${esc(v==null?'':(''+v))}" ${ph?`placeholder="${esc(ph)}"`:''} ${extra||''}>`;
  const txt=(id,v,ph,extra)=>`<input id="${id}" value="${esc(v==null?'':(''+v))}" ${ph?`placeholder="${esc(ph)}"`:''} ${extra||''}>`;
  const g=k=>it[k]!=null?it[k]:'';
  return `<div class="row" style="justify-content:space-between;align-items:center"><h3 style="font-size:17px">${isEdit?'Edit item':'Add inventory'}</h3><button class="btn x sm" title="Close" aria-label="Close" onclick="invEditCloseRequest()">✕</button></div>
@@ -1827,17 +1928,17 @@ function invFormBodyHTML(mode,it,explicitType,derivedType){const isEdit=mode==='
    ${fld('franchise','Franchise / property',txt('ivf_franchise',g('franchise'),'',`oninput="invFormMarkExplicit()"`))}
    ${fld('catdetail','Category detail',txt('ivf_catdetail',it.category_detail,'',`oninput="invFormMarkExplicit()"`))}
    ${fld('manufacturer','Manufacturer / brand',`${pickInput({id:'ivf_brand',list:INVF_BRANDS,value:it.manufacturer,placeholder:'Topps…',oninput:'invFormMarkExplicit()'})}`)}
-   ${fld('product_year','Year',num('ivf_year',it.product_year!=null&&it.product_year!==''?it.product_year:it.year,'2026'))}
-   ${fld('product_line','Product line / set',`${pickInput({id:'ivf_line',list:'sets',value:(it.product_line!=null&&it.product_line!==''?it.product_line:it.set),placeholder:'search sets…'})}`)}
+   ${fld('product_year','Year',num('ivf_year',it.product_year!=null&&it.product_year!==''?it.product_year:it.year,'2026','oninput="invGenApply(true)"'))}
+   ${fld('product_line','Product line / set',`${pickInput({id:'ivf_line',list:'sets',value:(it.product_line!=null&&it.product_line!==''?it.product_line:it.set),placeholder:'search sets…',oninput:'invGenApply(true)'})}`)}
    ${fld('configuration','Configuration',`${pickInput({id:'ivf_config',list:INVF_CONFIGS,value:it.configuration,placeholder:'Hobby / Booster…',oninput:'invFormMarkExplicit()'})}`)}
    ${fld('package','Package type',`<select id="ivf_package" onchange="invFormMarkExplicit();INVEDIT&&(INVEDIT.catDirty=true);invFormSync()"><option value="">—</option>${opt(INVF_PKGS,it.package_type||invPackage(it)||'')}</select>`)}
    ${fld('bpc','Boxes per case',`<input id="ivf_bpc" type="number" min="1" value="${esc(''+Math.max(1,+(it.units_per_case||it.boxesPerCase)||1))}" oninput="invFormMarkExplicit();invFormBoxHint()">`)}
    ${fld('basis','Cost basis',`<select id="ivf_basis" onchange="invFormMarkExplicit();invFormBoxHint()"><option value="perbox" ${((it.cost_basis_mode||'perbox')==='perbox')?'selected':''}>per box / unit</option><option value="percase" ${(it.cost_basis_mode==='percase')?'selected':''}>per case</option></select>`)}
    ${fld('linkedcard','Linked card (optional)',`<input id="ivf_cardsearch" placeholder="search card library…" autocomplete="off" oninput="invfCardSearch(this.value)"><div id="ivf_cardresults" style="position:relative;z-index:5"></div>`)}
-   ${fld('cardnum','Card #',txt('ivf_cardnum',it.cardNumber,'199/191'))}
-   ${fld('parallel','Parallel / rarity',txt('ivf_parallel',it.parallel,'SIR…'))}
-   ${fld('gc','Grading company',`${pickInput({id:'ivf_gc',list:'grading',value:it.gradingCompany,placeholder:'PSA…'})}`)}
-   ${fld('grade','Grade',txt('ivf_grade',it.grade,'10 / 9.5'))}
+   ${fld('cardnum','Card #',txt('ivf_cardnum',it.cardNumber,'199/191','oninput="invGenApply(true)"'))}
+   ${fld('parallel','Parallel / rarity',txt('ivf_parallel',it.parallel,'SIR…','oninput="invGenApply(true)"'))}
+   ${fld('gc','Grading company',`${pickInput({id:'ivf_gc',list:'grading',value:it.gradingCompany,placeholder:'PSA…',oninput:'invGenApply(true)'})}`)}
+   ${fld('grade','Grade',txt('ivf_grade',it.grade,'10 / 9.5','oninput="invGenApply(true)"'))}
    ${fld('cert','Certification #',txt('ivf_cert',it.certification_number,'',`oninput="invFormMarkExplicit()"`))}
    ${fld('cond','Condition',`${pickInput({id:'ivf_cond',list:'conditions',value:it.cond,placeholder:'NM / Sealed'})}`)}
    ${fld('itemcount','Item count (approx contents)',`<input id="ivf_itemcount" type="number" min="0" value="${esc(it.item_count!=null?(''+it.item_count):'')}" placeholder="e.g. 60" oninput="invFormMarkExplicit()">`)}
@@ -1847,9 +1948,9 @@ function invFormBodyHTML(mode,it,explicitType,derivedType){const isEdit=mode==='
    ${fld('value','Market $',`<input id="ivf_value" type="number" min="0" value="${esc(it.value!=null?(''+it.value):(isEdit?'0':''))}" placeholder="0">`)}
    ${fld('owner','Owner',`<select id="ivf_owner">${ownerOpts(isEdit?it.owner:ME)}</select>`)}
    ${fld('img','Image',`<div class="row" style="gap:6px"><input id="ivf_img" value="${esc(it.img||'')}" placeholder="URL or upload" style="min-width:0" onchange="invfImgPv()"><button class="btn sm" onclick="invfUpload()">⬆</button></div><img id="ivf_imgpv" src="${esc(it.img||'')}" style="height:40px;border-radius:5px;margin-top:4px;border:1px solid var(--line);${it.img?'':'display:none'}">`)}
-   ${fld('name','Name'+(isEdit?'':' *'),txt('ivf_name',it.name,'item name'))}
+   ${fld('name','Name'+(isEdit?'':' *'),txt('ivf_name',it.name,'item name','oninput="invNameTyped()"')+`<div id="ivf_namepv" class="lab" style="text-transform:none;letter-spacing:0;font-size:11px;display:none"></div><a id="ivf_namereset" onclick="invNameUseGenerated()" style="cursor:pointer;color:#2563eb;font-size:11px;display:none">Use generated name</a>`)}
    </div>
-   <div class="row" style="margin-top:14px;gap:8px"><button class="btn v" onclick="invFormSave('${mode}','${isEdit?it.id:''}')">${isEdit?'Save changes':'Add item'}</button><button class="btn sm" onclick="invEditCloseRequest()">Cancel</button></div>`;}
+   <div class="row" style="margin-top:14px;gap:8px"><button id="ivf_savebtn" class="btn v" onclick="invFormSave('${mode}','${isEdit?it.id:''}')">${isEdit?'Save changes':'Add item'}</button><button class="btn sm" onclick="invEditCloseRequest()">Cancel</button></div>`;}
 function invFormOpen(mode,id){if(!hasCap('act.inventory_edit')){toast('Editing inventory is restricted for your role');return;}
  const it=mode==='edit'?(S.inventory||[]).find(x=>x.id===id):null;if(mode==='edit'&&!it)return;const item=it||{};
  const explicitType=(mode==='edit'&&INV_TYPES.includes(item.inventory_type))?item.inventory_type:'';
@@ -1858,7 +1959,14 @@ function invFormOpen(mode,id){if(!hasCap('act.inventory_edit')){toast('Editing i
  $('ov').style.display='flex';invEditOpen(id||null);
  INVEDIT.mode=mode;INVEDIT.typeExplicit=(mode==='edit'&&!!explicitType);INVEDIT.catDirty=false;
  INVEDIT.cardLink={cardId:item.cardId||null,playerId:item.playerId||null,setId:item.setId||null};INVEDIT._prevType=explicitType||derivedType||'';
- invFormSync();setTimeout(()=>{const el=$(mode==='add'?'ivf_type':'ivf_name');if(el){el.focus();if(el.select)el.select();}},50);}
+ /* tri-state naming: EXACT value on edit (absent stays undefined); ADD defaults to generated mode (false). */
+ INVEDIT.nameOverride=(mode==='add')?false:(item.custom_name_override===true?true:(item.custom_name_override===false?false:undefined));
+ INVEDIT.cardMeta=null;INVEDIT.cardMetaLoading=false;INVEDIT.removeKeys=[];INVEDIT._userTouched=false;INVEDIT._genLive=false;
+ invFormSync();                        // visibility + preview only (no auto-fill while _genLive is false)
+ INVEDIT.baseline=invEditSnapshot();   // recapture AFTER sync + cardLink/nameOverride set → linked records open clean
+ INVEDIT._genLive=true;
+ if(mode==='edit'&&item.cardId)invLoadCardMeta(item.cardId);   // subject loads async; never overwrites Name mid-load
+ setTimeout(()=>{const el=$(mode==='add'?'ivf_type':'ivf_name');if(el){el.focus();if(el.select)el.select();}},50);}
 function invFormValidate(mode){const type=invfV('ivf_type'),name=invfV('ivf_name'),domain=invfV('ivf_domain');
  const q=invfV('ivf_qty'),c=invfV('ivf_cost'),v=invfV('ivf_value');
  if(!name)return 'Name is required.';
@@ -1894,18 +2002,28 @@ async function invFormSave(mode,id){if(!hasCap('act.inventory_edit')){toast('Edi
    if(invfV('ivf_itemcount')!=='')patch.item_count=Math.max(0,+invfV('ivf_itemcount')||0);
    if(INVEDIT&&INVEDIT.cardLink&&INVEDIT.cardLink.cardId){patch.cardId=INVEDIT.cardLink.cardId;patch.playerId=INVEDIT.cardLink.playerId||null;}}
  if(mode==='add'||(INVEDIT&&INVEDIT.catDirty))patch.cat=invFormLegacyCat(type,invfV('ivf_package'));
+ /* tri-state naming flag rides the item shape / extra passthrough; absent stays absent (never written). */
+ if(INVEDIT&&(INVEDIT.nameOverride===true||INVEDIT.nameOverride===false))patch.custom_name_override=INVEDIT.nameOverride;
  /* Authoritative via the server RPCs (Chain M): add -> e10_inv_add_item, edit -> e10_inv_edit_item.
-    The client no longer mutates the inventory blob; the RPC commits rows + blob + ledger and returns
-    the committed item, which invRpc applies to the read model. */
+    CAPTURE everything the RPC needs BEFORE any teardown, and tear the form down ONLY on success — a failed
+    save keeps the form open with every entered value + naming mode intact and re-enables the button. */
  const addSetId=(INVEDIT&&INVEDIT.cardLink&&INVEDIT.cardLink.setId)||null;
- invEditTeardown();closeM();
+ const removeKeys=(INVEDIT&&Array.isArray(INVEDIT.removeKeys))?INVEDIT.removeKeys.slice():[];
+ const btn=$('ivf_savebtn');if(btn){btn.disabled=true;btn.textContent=(mode==='add'?'Adding…':'Saving…');}
  let res;
  if(mode==='add'){const rec=Object.assign({id:'i'+Date.now(),reservations:[],addedAt:Date.now(),setId:addSetId},patch);
    res=await invRpc('e10_inv_add_item',{p_item:rec,p_idempotency_key:invIdemKey('intake',rec.id,rec.id)});}
  else{patch.setId=(line===(it.set||'')?it.setId:null);
-   res=await invRpc('e10_inv_edit_item',{p_id:id,p_patch:patch,p_remove_keys:((INVEDIT&&Array.isArray(INVEDIT.removeKeys))?INVEDIT.removeKeys:[]),p_idempotency_key:invIdemKey('adjust',id,id,_invEventTok())});}
- const sy=window.scrollY;dInventory();window.scrollTo(0,sy);invFocusRow(mode==='edit'?id:null);
- toast((res&&res.ok)?(mode==='add'?('Added “'+patch.name+'”'):('Updated “'+patch.name+'”')):((mode==='add'?'Add':'Update')+' failed: '+((res&&res.msg)||'')));}
+   res=await invRpc('e10_inv_edit_item',{p_id:id,p_patch:patch,p_remove_keys:removeKeys,p_idempotency_key:invIdemKey('adjust',id,id,_invEventTok())});}
+ if(res&&res.ok){
+   invEditTeardown();closeM();
+   const sy=window.scrollY;dInventory();window.scrollTo(0,sy);invFocusRow(mode==='edit'?id:null);
+   toast(mode==='add'?('Added “'+patch.name+'”'):('Updated “'+patch.name+'”'));
+ }else{
+   if(btn){btn.disabled=false;btn.textContent=(mode==='add'?'Add item':'Save changes');}
+   err((mode==='add'?'Add':'Update')+' failed: '+((res&&res.msg)||'unknown error'));
+   toast((mode==='add'?'Add':'Update')+' failed');
+ }}
 async function invEditSave(id){if(!hasCap('act.inventory_edit')){toast('Editing is restricted for your role');return;}
  const it=(S.inventory||[]).find(x=>x.id===id);if(!it)return;
  const err=m=>{const e=$('iveErr');if(e){e.textContent=m;e.style.display='block';}};
@@ -1935,7 +2053,7 @@ function cssq(s){return (window.CSS&&CSS.escape)?CSS.escape(String(s)):String(s)
 /* dirty baseline over the unified form fields (normalized so "1"/1 don't false-trigger; rendering a
    derived legacy type keeps it in the baseline, so opening a legacy record without edits stays clean). */
 function invEditSnapshot(){if(!document.getElementById('ivf_type'))return '__noform__';const g=k=>{const el=$(k);return el?(''+el.value).trim():'';},n=k=>{const el=$(k);return el?(+el.value||0):0;};
- return JSON.stringify({type:g('ivf_type'),domain:g('ivf_domain'),sport:g('ivf_sport'),game:g('ivf_game'),franchise:g('ivf_franchise'),catdetail:g('ivf_catdetail'),brand:g('ivf_brand'),year:g('ivf_year'),line:g('ivf_line'),config:g('ivf_config'),pkg:g('ivf_package'),bpc:n('ivf_bpc'),basis:g('ivf_basis'),cardnum:g('ivf_cardnum'),parallel:g('ivf_parallel'),gc:g('ivf_gc'),grade:g('ivf_grade'),cert:g('ivf_cert'),cond:g('ivf_cond'),itemcount:g('ivf_itemcount'),desc:g('ivf_desc'),qty:n('ivf_qty'),cost:n('ivf_cost'),value:n('ivf_value'),owner:g('ivf_owner'),img:g('ivf_img'),name:g('ivf_name'),card:(INVEDIT&&INVEDIT.cardLink&&INVEDIT.cardLink.cardId)||''});}
+ return JSON.stringify({type:g('ivf_type'),domain:g('ivf_domain'),sport:g('ivf_sport'),game:g('ivf_game'),franchise:g('ivf_franchise'),catdetail:g('ivf_catdetail'),brand:g('ivf_brand'),year:g('ivf_year'),line:g('ivf_line'),config:g('ivf_config'),pkg:g('ivf_package'),bpc:n('ivf_bpc'),basis:g('ivf_basis'),cardnum:g('ivf_cardnum'),parallel:g('ivf_parallel'),gc:g('ivf_gc'),grade:g('ivf_grade'),cert:g('ivf_cert'),cond:g('ivf_cond'),itemcount:g('ivf_itemcount'),desc:g('ivf_desc'),qty:n('ivf_qty'),cost:n('ivf_cost'),value:n('ivf_value'),owner:g('ivf_owner'),img:g('ivf_img'),name:g('ivf_name'),card:(INVEDIT&&INVEDIT.cardLink&&INVEDIT.cardLink.cardId)||'',nameov:(INVEDIT?(INVEDIT.nameOverride===true?'t':(INVEDIT.nameOverride===false?'f':'a')):'a')});}
 function invEditDirty(){return !!INVEDIT&&INVEDIT.baseline!==invEditSnapshot();}
 function invEditOpen(id){
  invEditTeardown(); // never stack listeners if opened while already open
