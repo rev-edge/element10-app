@@ -99,7 +99,11 @@ async function serviceCleanup(manifest) {
     const { data: w } = await svc.from('e10_workspace').select('data').eq('id', 'shared').maybeSingle();
     residue.blob_items = ((w && w.data && w.data.inventory) || []).filter(it => it && itemIds.includes(it.id)).length;
   }
-  if (keys.length) residue.movements_by_key = ((await svc.from('e10_inventory_movements').select('id').in('idempotency_key', keys)).data || []).length;
+  if (keys.length) {
+    residue.movements_by_key = ((await svc.from('e10_inventory_movements').select('id').in('idempotency_key', keys)).data || []).length;
+    // set_reservations writes a receipt with item_id = null, catchable ONLY by key — verify it too.
+    residue.receipts_by_key = ((await svc.from('e10_mutation_receipts').select('idempotency_key').in('idempotency_key', keys)).data || []).length;
+  }
   if (sessionIds.length) residue.sessions = ((await svc.from('e10_break_sessions').select('id').in('id', sessionIds)).data || []).length;
   if (showIds.length && workspaceId) {
     const { data: w } = await svc.from('e10_workspace').select('data').eq('id', workspaceId).maybeSingle();

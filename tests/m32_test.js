@@ -31,7 +31,9 @@ const T = (n, ok, d) => ok ? (pass++, console.log('  PASS ' + n)) : (fail++, con
   console.log('\nElement 10 — M3.2.2 (prefix ' + PFX + ')\n');
   const sumRes = async () => ((await M.from('e10_inventory_reservations').select('qty').eq('item_id', ID).eq('show_ref', SHOW).eq('status', 'active')).data || []).reduce((s, x) => s + (+x.qty || 0), 0);
   const mkSession = async (cli, uid, ref) => { const { data } = await cli.from('e10_break_sessions').insert({ streamer_uid: uid, name: 'ZZ ' + PFX, source_show_ref: ref }).select().maybeSingle(); if (data) sessIds.push(data.id); return data; };
-  const manifest = { itemIds: [ID], sessionIds: sessIds };   // sessIds mutated in-place as sessions are created
+  // set_reservations writes a receipt with item_id = null (a batch op) — item-scoped cleanup can't catch it,
+  // so the manifest must carry that key explicitly.
+  const manifest = { itemIds: [ID], sessionIds: sessIds, idempotencyKeys: [PFX + ':res'] };   // sessIds mutated in-place
 
   try {
   const add = await rpc(M, 'e10_inv_add_item', { p_item: { id: ID, name: 'ZZ m32', qty: 10, cost: 2, cat: 'Box' }, p_idempotency_key: PFX + ':add' });
