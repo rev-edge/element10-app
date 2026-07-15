@@ -1,5 +1,6 @@
 // Element 10 — P1R persistence: the tri-state custom_name_override round-trips through the REAL RPC save
-// path (e10_inv_add_item / e10_inv_edit_item), relational row `extra` and the shared blob AGREE, an
+// path (e10_inv_add_item / e10_inv_edit_item), relational row `extra` and the canonical projection
+// (e10_inv_get — post-M4 the blob no longer holds inventory) AGREE, an
 // unrelated edit that omits the flag PRESERVES it (absent-in-patch ≠ cleared), and a type-switch
 // p_remove_keys list reaches the RPC and sheds the structured key WITHOUT clearing its dual-field twin.
 // Real supabase-js + JWT. Service-role teardown from finally. Credentials from env ONLY:
@@ -25,9 +26,9 @@ const T = (n, ok, d) => ok ? (pass++, console.log('  PASS ' + n)) : (fail++, con
   const manifest = { itemIds: [ID] };
   console.log('\nElement 10 — P1R persistence (item ' + ID + ')\n');
 
-  // read helpers: relational row extra + the shared blob item
+  // read helpers: relational row extra + the canonical projection (e10_inv_get — post-M4 the blob is gone)
   const rowExtra = async () => ((await M.from('e10_inventory_items').select('extra,card_set').eq('id', ID).maybeSingle()).data) || {};
-  const blobItem = async () => { const { data } = await M.from('e10_workspace').select('data').eq('id', 'shared').maybeSingle(); return ((data && data.data && data.data.inventory) || []).find(i => i && i.id === ID) || {}; };
+  const getItem = async () => (await M.rpc('e10_inv_get', { p_id: ID })).data || {};
 
   try {
     // ── ADD in generated mode (custom_name_override:false) ──
@@ -35,12 +36,12 @@ const T = (n, ok, d) => ok ? (pass++, console.log('  PASS ' + n)) : (fail++, con
     T('add ok', add && add.ok === true, add);
     T('add: returned flag === false', add && add.item && add.item.custom_name_override === false, add && add.item);
     T('add: relational row extra flag === false', (await rowExtra()).extra && (await rowExtra()).extra.custom_name_override === false, await rowExtra());
-    T('add: blob item flag === false', (await blobItem()).custom_name_override === false, await blobItem());
+    T('add: projection flag === false', (await getItem()).custom_name_override === false, await getItem());
 
     // ── EDIT → custom (true) round-trips ──
     const e1 = await rpc(M, 'e10_inv_edit_item', { p_id: ID, p_patch: { name: 'My custom name', custom_name_override: true }, p_remove_keys: [], p_idempotency_key: PFX + ':toTrue' });
     T('edit→true ok + returned true', e1 && e1.ok === true && e1.item && e1.item.custom_name_override === true, e1 && e1.item);
-    T('edit→true: row + blob agree (true)', (await rowExtra()).extra.custom_name_override === true && (await blobItem()).custom_name_override === true);
+    T('edit→true: row + projection agree (true)', (await rowExtra()).extra.custom_name_override === true && (await getItem()).custom_name_override === true);
 
     // ── UNRELATED edit that OMITS the flag PRESERVES it (absent-in-patch ≠ cleared) ──
     const e2 = await rpc(M, 'e10_inv_edit_item', { p_id: ID, p_patch: { value: 9 }, p_remove_keys: [], p_idempotency_key: PFX + ':unrel' });
@@ -50,7 +51,7 @@ const T = (n, ok, d) => ok ? (pass++, console.log('  PASS ' + n)) : (fail++, con
 
     // ── EDIT → generated (false) round-trips the other way ──
     const e3 = await rpc(M, 'e10_inv_edit_item', { p_id: ID, p_patch: { custom_name_override: false }, p_remove_keys: [], p_idempotency_key: PFX + ':toFalse' });
-    T('edit→false: round-trips back to false', e3 && e3.ok === true && e3.item.custom_name_override === false && (await blobItem()).custom_name_override === false, e3 && e3.item);
+    T('edit→false: round-trips back to false', e3 && e3.ok === true && e3.item.custom_name_override === false && (await getItem()).custom_name_override === false, e3 && e3.item);
 
     // ── TYPE-SWITCH removal: p_remove_keys sheds structured keys; the dual-field twin (set) survives ──
     const e4 = await rpc(M, 'e10_inv_edit_item', { p_id: ID, p_patch: {}, p_remove_keys: ['manufacturer', 'product_line'], p_idempotency_key: PFX + ':switch' });
