@@ -5,6 +5,18 @@
 Regenerate the raw findings with MCP `get_advisors` (security + performance) on `ddhkkumiyidorzmajwde`,
 or the dashboard's Advisors tab. Re-run before/after every schema change (OPERATIONS.md).
 
+## Standing rule — functions are born non-executable (A5.1a)
+The default-function-privileges **factory is closed** (migration `20260716110000`): PostgreSQL's built-in
+database-level `EXECUTE TO PUBLIC` default **and** Supabase's schema-level anon/authenticated grants are both
+revoked for the `postgres` grantor (the migration role), so **every new public function is born executable only
+by `service_role` (and its owner) — not anon, not authenticated.** Therefore, from A6 on, **any RPC that
+signed-in users must call has to `GRANT EXECUTE … TO authenticated` explicitly** in its own migration; forgetting
+to grant fails safe (the function is simply not callable) instead of leaking. (Schema-scoped revokes do **not**
+reach the built-in PUBLIC default — it must be revoked at the database level; see the migration header. The
+second grantor, `supabase_admin`, is Supabase-managed, unalterable by `postgres`, and governs only
+supabase_admin-created objects we never author.) Verify with the probe in the migration / `tests` (create fn as
+postgres → anon denied, authenticated denied, service_role allowed → explicit grant works).
+
 ## What A4 fixed (advisor before → after, prod)
 | Advisor | Level | Before | After | Fix |
 |---|---|---|---|---|
@@ -96,7 +108,8 @@ policy only enabled anon enumeration. Card images continue to load by URL; listi
 | `rls_enabled_no_policy` (0008) | INFO | 3 | `e10_mutation_receipts` (append-only idempotency ledger, written only by the Group-A definer chain), `e10_seed_backup`, `e10_bigimport_backup` (cold backups). RLS-enabled + no policy = deny-all to anon/authenticated; only `service_role`/definer reach them. Intended lockdown, not a gap. |
 | `unused_index` (0005) | INFO | ~24 | The 8 new FK indexes read "unused" only because they are new / prod has low FK-join traffic; they exist to prevent seq-scans on FK cascades + `organization_id` joins at scale (A6). The pre-existing ~16 are drop candidates, but dropping indexes is a behavior/perf change **out of A4 scope** — deferred to a dedicated perf pass. |
 | `auth_db_connections_absolute` (perf) | INFO | 1 | Auth uses a fixed 10-connection allocation. Fine at the current (single small) instance size and low Auth concurrency. Switch to percentage-based **only** when the instance is resized — revisit then. No change now. |
-| `auth_leaked_password_protection` (security) | WARN | 1 | **Dashboard-only** (GoTrue), not settable via Management API/CLI. Manual enable required — see the click-path in `docs/OPERATIONS.md`. Pending Trent. |
+
+`auth_leaked_password_protection` is **RESOLVED** (enabled on prod 2026-07-16 — HaveIBeenPwned checking on; a GoTrue dashboard toggle, see `docs/OPERATIONS.md`), so it no longer appears in the advisor output.
 
 ## Auth pooler / connections decision
 Auth connection strategy left at absolute (10) — see the disposition above. Pooler configuration unchanged

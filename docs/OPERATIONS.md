@@ -32,13 +32,12 @@ The two external scripts are pinned to exact versions with Subresource Integrity
 - **GitHub Actions:** a failed CI/deploy run notifies via GitHub's default Actions notifications (the repo owner's email/GitHub notifications). Watchable at the repo's Actions tab.
 - **Supabase advisors:** security + performance advisors are checked via the Supabase dashboard / MCP `get_advisors` (the P0 recon-view issue was an advisor 0010 finding). Run before/after schema changes. The A4 sweep drove prod to **zero errors, zero undispositioned warnings** — every residual finding is justified in `docs/SECURITY.md` (the register). Re-check that register stays true after any schema change.
 
-## Auth hardening (A4)
-- **⚠ Leaked-password protection — MANUAL, pending.** Not settable via the Management API/CLI (it is a GoTrue
-  dashboard toggle), so A4 could not automate it. **Trent, enable it here (one-time):**
-  Supabase Dashboard → project `element10` → **Authentication** → **Providers** → **Email** →
-  turn on **"Check against HaveIBeenPwned"** (a.k.a. leaked-password protection) → Save.
-  This clears advisor `auth_leaked_password_protection`. (Do the same on `element10-staging` if desired.)
-  - [ ] prod enabled   - [ ] staging enabled
+## Auth hardening
+- **Leaked-password protection — ENABLED (prod, 2026-07-16).** Supabase Auth now checks passwords against
+  HaveIBeenPwned; advisor `auth_leaked_password_protection` is cleared on prod. It is a GoTrue **dashboard**
+  toggle (not settable via Management API/CLI). To re-enable/verify elsewhere: Dashboard → project →
+  **Authentication → Providers → Email → "Check against HaveIBeenPwned" → Save.** (Enable on
+  `element10-staging` too if desired.)
 - **Auth DB connection strategy:** left at absolute (10 connections). Fine at the current small instance size;
   switch to percentage-based allocation only when the instance is resized (advisor `auth_db_connections_absolute`,
   INFO — dispositioned in `docs/SECURITY.md`). Pooler config unchanged.

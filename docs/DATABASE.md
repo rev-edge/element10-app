@@ -11,7 +11,9 @@
 - `supabase/seed.sql` — minimal LOCAL/STAGING data fixtures (never schema). The 57k-card catalog + 176 rosters + test users load separately (documented in the seed header).
 
 ### Why squashed
-The live ledger held 50 migrations; the repo had 13 files, and the ~37-migration gap is **interleaved** (obs/P0 hotfixes are newer than some repo files), so no clean partial prefix exists. Full squash is the only faithful option. The production ledger (`supabase_migrations.schema_migrations`) is left untouched — this is a repo-side reorganization; nothing was re-applied to prod.
+The live ledger held 50 migrations; the repo had 13 files, and the ~37-migration gap is **interleaved** (obs/P0 hotfixes are newer than some repo files), so no clean partial prefix exists. Full squash is the only faithful option. **At A1 the squash was repo-side only** — the production `supabase_migrations.schema_migrations` ledger was left untouched and nothing was re-applied to prod (A1 changed zero prod state).
+
+**At A4 (first pipeline pass) the production ledger WAS reconciled** to adopt the squashed baseline, so `supabase db push` became the prod mechanism. Reconciliation is metadata-only (no schema/data change): the 50 real pre-squash versions were marked `reverted` (`supabase migration repair --status reverted …`) and the squashed baseline set (`00000000000000`, `…01`, `…02`, `20260715160000`) marked `applied`, leaving the ledger = {baseline set + P0 hotfix} so `db push` applies only genuinely new migrations. The real historical migration files are preserved in `supabase/migrations_archive/`. From A4 on, the prod ledger tracks the repo (see `docs/OPERATIONS.md` → Release runbook).
 
 ## Reproducibility proof (A1 acceptance)
 `supabase db reset` on an empty local stack applies all four migrations cleanly, and a normalized `pg_dump --schema-only` diff of **local vs production** is empty except for one dispositioned line:
