@@ -16,7 +16,7 @@ The live ledger held 50 migrations; the repo had 13 files, and the ~37-migration
 **At A4 (first pipeline pass) the production ledger WAS reconciled** to adopt the squashed baseline, so `supabase db push` became the prod mechanism. Reconciliation is metadata-only (no schema/data change): the 50 real pre-squash versions were marked `reverted` (`supabase migration repair --status reverted …`) and the squashed baseline set (`00000000000000`, `…01`, `…02`, `20260715160000`) marked `applied`, leaving the ledger = {baseline set + P0 hotfix} so `db push` applies only genuinely new migrations. The real historical migration files are preserved in `supabase/migrations_archive/`. From A4 on, the prod ledger tracks the repo (see `docs/OPERATIONS.md` → Release runbook).
 
 ## Reproducibility proof (A1 acceptance)
-`supabase db reset` on an empty local stack applies all four migrations cleanly, and a normalized `pg_dump --schema-only` diff of **local vs production** is empty except for one dispositioned line:
+`supabase db reset` on an empty local stack applies all repo migrations cleanly (the squashed baseline set + the A4/A5.1 layers — twelve as of 2026-07-16), and a normalized `pg_dump --schema-only` diff of **local vs production** is empty except for one dispositioned line:
 
 **Dispositioned difference — `pg_net`:** the Supabase local stack installs the `pg_net` extension by default; this production project does not enable it. It is unused by the app and has zero impact on the application schema. Not added to prod (that would be an out-of-scope prod change); not dropped from local (it is Supabase-managed). Accepted.
 

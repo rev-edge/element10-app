@@ -2,7 +2,7 @@
 
 ## CI/CD
 `.github/workflows/ci.yml` — on every push to `main` and every PR:
-- **test job:** `npm install` (tests/), `supabase start` (ephemeral local stack — **proves A1 reproducibility on a clean stack continuously**), provision local users, then the pure-helper suites, local integration + RLS-adversarial suites (incl. `rls_test` — the roles/permissions engine, wired in A4 via `tests/provision_rls_users.js`, so the admin/member/viewer isolation surface is exercised on every push), browser suites, and a final `supabase db reset` (re-apply migrations cleanly). No production access.
+- **test job:** `npm ci` (tests/, lockfile-exact), `supabase start` (ephemeral local stack — **proves A1 reproducibility on a clean stack continuously**), provision local users, then the pure-helper suites (incl. the `schema_gate_test` comparator), local integration + RLS-adversarial suites (incl. `rls_test` — the roles/permissions engine, wired in A4 via `tests/provision_rls_users.js`), browser suites, a final `supabase db reset` (re-apply migrations cleanly), and the **default-privileges regression probe** (`tests/probe_defpriv.sql` — new functions born locked + zero anon-executable functions). No production access.
 - **deploy job:** runs ONLY on `main` and ONLY after `test` passes. Publishes **web assets only** (`index.html`, `open/overlay/companion.html`, `.nojekyll`) to GitHub Pages — never `tests/`, `supabase/`, `docs/`, or `.github/`. (The prior `static.yml` published the entire repo; removed.)
 
 **Branch protection:** `main` requires the `test` check to pass before merge. Workflow: branch → PR → CI green → merge → auto-deploy.
@@ -36,11 +36,19 @@ The two external scripts are pinned to exact versions with Subresource Integrity
 - **Leaked-password protection — ENABLED (prod, 2026-07-16).** Supabase Auth now checks passwords against
   HaveIBeenPwned; advisor `auth_leaked_password_protection` is cleared on prod. It is a GoTrue **dashboard**
   toggle (not settable via Management API/CLI). To re-enable/verify elsewhere: Dashboard → project →
-  **Authentication → Providers → Email → "Check against HaveIBeenPwned" → Save.** (Enable on
-  `element10-staging` too if desired.)
+  **Authentication → Attack Protection → "Leaked password protection" (checks against HaveIBeenPwned) → Save.**
+  (Enable on `element10-staging` too if desired.)
 - **Auth DB connection strategy:** left at absolute (10 connections). Fine at the current small instance size;
   switch to percentage-based allocation only when the instance is resized (advisor `auth_db_connections_absolute`,
   INFO — dispositioned in `docs/SECURITY.md`). Pooler config unchanged.
+
+## CI flakes / infrastructure protocol
+- **Edge-runtime `Bus error (core dumped)` during `supabase start`.** Seen intermittently on the CI runner while
+  the `supabase_edge_runtime` container boots (unrelated to app code — migrations apply fine). **Protocol:** a
+  re-run is a *workaround, not a fix*. On any recurrence, **capture the failed job's container logs** (the run's
+  `Start local Supabase` step already prints them) and **open an infrastructure issue** tracking the frequency /
+  runner image / CLI version, rather than silently re-running. (We don't use edge functions; disabling the
+  edge-runtime container in CI's `config.toml` is the candidate fix if it recurs often.)
 
 ## The M4-incident guardrails (see docs/incidents/2026-07-15-m4-blob-clobber.md)
 - Tests never default to production (`tests/env.js`; prod requires `E10_ALLOW_PROD=1`, read-only gate only).

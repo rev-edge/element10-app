@@ -68,6 +68,9 @@ jobs:
           node tests/m4_realtime_test.js
       - name: Schema reproducibility (re-apply migrations cleanly)
         run: supabase db reset
+      - name: Default-privileges regression probe (born-locked; zero anon-executable functions)
+        # Guards the A5.1a invariant against regression on every push (psql ships on ubuntu-latest runners).
+        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/probe_defpriv.sql
 
   # Live PRODUCTION contract gate — runs on main ONLY, before deploy, and GATES it. Proves the to-be-deployed
   # client's SCHEMA_VERSION matches live e10_schema_version(). Uses the protected `production` environment's

@@ -14,8 +14,10 @@ signed-in users must call has to `GRANT EXECUTE … TO authenticated` explicitly
 to grant fails safe (the function is simply not callable) instead of leaking. (Schema-scoped revokes do **not**
 reach the built-in PUBLIC default — it must be revoked at the database level; see the migration header. The
 second grantor, `supabase_admin`, is Supabase-managed, unalterable by `postgres`, and governs only
-supabase_admin-created objects we never author.) Verify with the probe in the migration / `tests` (create fn as
-postgres → anon denied, authenticated denied, service_role allowed → explicit grant works).
+supabase_admin-created objects we never author.) **CI enforces this every push** via `tests/probe_defpriv.sql`
+(create fn as postgres → anon denied, authenticated denied, service_role allowed → explicit grant works → plus a
+whole-surface scan that fails if any public function is anon/PUBLIC-executable — the safeguard against the
+unalterable `supabase_admin` grantor path).
 
 ## What A4 fixed (advisor before → after, prod)
 | Advisor | Level | Before | After | Fix |
