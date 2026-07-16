@@ -1,0 +1,104 @@
+# Element 10 — Security register (Foundation Gate A4)
+
+**Acceptance artifact for the A4 security & performance sweep.** After A4, production advisors show
+**zero ERRORs and zero UNDISPOSITIONED warnings** — every remaining WARN/INFO is justified below.
+Regenerate the raw findings with MCP `get_advisors` (security + performance) on `ddhkkumiyidorzmajwde`,
+or the dashboard's Advisors tab. Re-run before/after every schema change (OPERATIONS.md).
+
+## What A4 fixed (advisor before → after, prod)
+| Advisor | Level | Before | After | Fix |
+|---|---|---|---|---|
+| `auth_rls_initplan` (0003) | WARN | 14 | **0** | `20260716100000` wrap bare `auth.uid()`/no-arg helpers in `(select …)` |
+| `unindexed_foreign_keys` (0001) | INFO | 8 | **0** | `20260716100100` covering index per FK |
+| `security_definer_view` (0010) | **ERROR** | 4 | **0** | `20260716100200` `security_invoker=true` + revoke anon on the 4 `e10_obs_*` views |
+| `function_search_path_mutable` (0011) | WARN | 1 | **0** | `20260716100300` pin `search_path=public` on `e10_obs_apply_repack_cost` |
+| `public_bucket_allows_listing` (0025) | WARN | 1 | **0** | `20260716100400`+`100500` drop the `cards` list policy (public bucket serves URLs; app never lists) |
+| `anon_security_definer_function_executable` (0029) | WARN | 0¹ | **0** | `20260716100500` revoke anon/PUBLIC EXECUTE (parity — see note) |
+
+¹ Prod already had anon revoked; the gap was on reproduced environments (staging/local/CI), which the A1
+baseline left anon-executable. `20260716100500` is a **no-op on prod** and closes the parity gap everywhere
+else. Staging confirmed 33 `anon_security_definer` findings → 0 after the fixup.
+
+### The obs-view leak (context)
+The 4 `e10_obs_*` analytics views (`slot_economics`, `break_economics`, `product_premium`,
+`format_product_perf`) were `SECURITY DEFINER` **and** granted `anon:SELECT` — an active unauthenticated
+internet read of competitive-intel data via the public anon key. Identical class to the P0 recon-view
+incident (`docs/incidents/2026-07-15-m4-blob-clobber.md`, migration `20260715130126`). Now invoker-scoped:
+the underlying `e10_obs_*` tables are `is_org`-gated on SELECT, so org members read normally and anon reads
+nothing. This was the only ERROR-level finding and is **not** one of the prompt's six items — acceptance
+("zero errors") forced it; it is a behavior change for anon only (leak closed).
+
+---
+
+## Privileged-function register (SECURITY DEFINER)
+Every `SECURITY DEFINER` function in `public`. All confirmed `search_path=public` (pinned). Grant posture after
+A4 matches production. "authenticated?" = whether signed-in users may call it via `/rest/v1/rpc/…`.
+Advisor 0029 (`authenticated_security_definer_function_executable`) fires for every row marked authenticated=✓ —
+**all such rows are intentional and dispositioned here** (26 on prod).
+
+### Group A — inventory API gateway (authenticated ✓, anon ✗)
+`e10_inv_add_item`, `e10_inv_edit_item`, `e10_inv_delete_item`, `e10_inv_get`, `e10_inv_list`,
+`e10_inv_reserve`, `e10_inv_release`, `e10_inv_set_reservations`, `e10_inv_consume`,
+`e10_inv_reverse_consumption`, `e10_inv_mark_sold`, `e10_emit_inventory_movement`.
+- **Why definer:** they write the append-only movement ledger + idempotency receipts and mutate
+  `e10_inventory_items`/`_reservations` atomically, which requires bypassing the callers' per-row RLS on those
+  tables. This is the *only* sanctioned write path (M4: the relational store is the system of record).
+- **Internal guard re-checked:** `_e10_inv_guard()` (membership/role), `e10_has_cap('act.inventory_edit')` where
+  applicable, and per-key idempotency via `_e10_inv_receipt_check`/`_write`. Direct-RPC abuse is rejected —
+  proven by `tests/m31_test.js`, `m32_test.js`, `rls_test.js`.
+- **Grant:** `authenticated` (the app's signed-in operators) + `service_role`; anon/PUBLIC revoked.
+
+### Group B — onboarding / roles (authenticated ✓, anon ✗)
+`e10_add_member`, `e10_add_viewer`, `e10_assign_role`, `e10_set_role`, `e10_redeem_code`, `e10_buyer_suggest`.
+- **Why definer:** manage `e10_members`/`e10_viewers`/`e10_role_permissions`, which are admin-gated tables.
+- **Internal guard:** `e10_is_admin()` re-check inside the body — a non-admin caller is rejected even though
+  `authenticated` can invoke the function (proven: `rls_test.js` "non-admin call … REJECTED",
+  "viewer call to e10_set_role REJECTED"). `e10_redeem_code`/`e10_buyer_suggest` self-scope to the caller.
+- **Grant:** `authenticated` + `service_role`; anon/PUBLIC revoked.
+
+### Group C — RLS predicate helpers (authenticated ✓ — REQUIRED, anon ✗)
+`e10_is_admin`, `e10_is_member`, `e10_is_org`, `e10_has_cap`, `e10_can_read_session`, `e10_owns_session`,
+`e10_my_handle`.
+- **Why definer + why authenticated cannot be revoked:** these are called *inside RLS policy expressions*
+  (e.g. `card_sel USING ((select e10_is_org()))`). PostgreSQL checks EXECUTE against the **invoking** role, so
+  revoking `authenticated` would break RLS for every signed-in user. They are `STABLE`, read only membership/
+  ownership, and return a boolean/handle **about the caller** — no data disclosure. The 0029 WARN on these is
+  therefore *inherent and intended*.
+- **Grant:** `authenticated` + `service_role`; anon/PUBLIC revoked. `e10_schema_version` (constant; used by the
+  client load-time handshake) has the same posture.
+
+### Group D — internal helpers (authenticated ✗, anon ✗ — definer chain only)
+`_e10_inv_blob_write`, `_e10_inv_clamp_res`, `_e10_inv_guard`, `_e10_inv_item_json`, `_e10_inv_receipt`,
+`_e10_inv_receipt_check`, `_e10_inv_receipt_write`, `_e10_inv_replay`, `_e10_inv_replay_json`.
+- Called only from Group A within the definer chain. Grant: `postgres` + `service_role` only (no anon,
+  authenticated, or PUBLIC). Not on the REST surface; not flagged by 0029.
+
+### Non-definer helpers (SECURITY INVOKER — RLS applies to the caller)
+`e10_slot_pred`, `e10_slot_cards`, `e10_slot_partition`, `e10_checklist_facet`, `e10_obs_apply_repack_cost`,
+`_e10_inv_bad_num`. Invoker semantics mean the caller's own RLS governs any data touched. A4 pinned
+`e10_obs_apply_repack_cost`'s `search_path` and revoked anon/PUBLIC EXECUTE on the three that read org data
+(`e10_slot_pred`, `e10_checklist_facet`, `e10_obs_apply_repack_cost`).
+
+---
+
+## Storage — `cards` bucket
+`public=true`. Policies on `storage.objects`: `cards authed upload/update/delete` (authenticated, `bucket_id='cards'`).
+The `cards public read` SELECT policy was **dropped** — a public bucket serves object URLs (`getPublicUrl`)
+without any SELECT policy, and the app never lists the bucket (only `.upload()` + `.getPublicUrl()`), so the
+policy only enabled anon enumeration. Card images continue to load by URL; listing is fully closed.
+
+---
+
+## Dispositioned residual findings (no code fix)
+| Finding | Level | Count (prod) | Disposition |
+|---|---|---|---|
+| `authenticated_security_definer_function_executable` (0029) | WARN | 26 | Intended — the inventory API (A), onboarding/roles (B), and RLS predicate helpers (C) above. Each self-guards or discloses nothing; anon revoked; authenticated required (revoking C breaks RLS). |
+| `rls_enabled_no_policy` (0008) | INFO | 3 | `e10_mutation_receipts` (append-only idempotency ledger, written only by the Group-A definer chain), `e10_seed_backup`, `e10_bigimport_backup` (cold backups). RLS-enabled + no policy = deny-all to anon/authenticated; only `service_role`/definer reach them. Intended lockdown, not a gap. |
+| `unused_index` (0005) | INFO | ~24 | The 8 new FK indexes read "unused" only because they are new / prod has low FK-join traffic; they exist to prevent seq-scans on FK cascades + `organization_id` joins at scale (A6). The pre-existing ~16 are drop candidates, but dropping indexes is a behavior/perf change **out of A4 scope** — deferred to a dedicated perf pass. |
+| `auth_db_connections_absolute` (perf) | INFO | 1 | Auth uses a fixed 10-connection allocation. Fine at the current (single small) instance size and low Auth concurrency. Switch to percentage-based **only** when the instance is resized — revisit then. No change now. |
+| `auth_leaked_password_protection` (security) | WARN | 1 | **Dashboard-only** (GoTrue), not settable via Management API/CLI. Manual enable required — see the click-path in `docs/OPERATIONS.md`. Pending Trent. |
+
+## Auth pooler / connections decision
+Auth connection strategy left at absolute (10) — see the disposition above. Pooler configuration unchanged
+(the tests reach prod read-only via the IPv4 session pooler `aws-0-us-east-1.pooler.supabase.com`). No change
+warranted at current scale; both are instance-size-dependent and revisited on resize.

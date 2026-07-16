@@ -51,9 +51,12 @@ jobs:
           node tests/m31_test.js
           node tests/m32_test.js
           node tests/genname_persist_test.js
-        # rls_test (roles/permissions engine) needs the e10_role_permissions seed + its own 3 users
-        # (e10rls_a/b/c) passed as argv — a follow-up to wire into CI. RLS/adversarial is covered here by
-        # m31 (direct-RPC rejections, foreign-release, ownership) and m32 (member/admin/foreign-session).
+          # rls_test = the roles/permissions engine (admin/member/viewer isolation, INSERT...RETURNING,
+          # onboarding-RPC gating). Its 3 fixtures + argv ids come from provision_rls_users.js (stdout = the
+          # ids; logs go to stderr). No e10_role_permissions seed needed — the empty table is a deny-list
+          # (all caps allowed), matching production exactly.
+          RLS_IDS=$(node tests/provision_rls_users.js)
+          node tests/rls_test.js $RLS_IDS
       - name: Browser suites (headless)
         run: |
           node tests/picker_test.js
