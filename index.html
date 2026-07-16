@@ -2825,7 +2825,11 @@ async function boot(){if(!window.supabase){authScreen('Auth library failed to lo
  if(_schemaLocked)_schemaLockNotice();}
 /* fail-closed: verify the DB schema matches what this client was built for; on mismatch/unreachable RPC,
    go read-only (mutations blocked by _mutationGuard). */
-async function _schemaHandshake(){try{const{data,error}=await sb.rpc('e10_schema_version');_schemaLocked=(!!error||String(data)!==SCHEMA_VERSION);}catch(e){_schemaLocked=true;}}
+/* Pure contract comparator (fail-closed): the client is locked to read-only unless the live schema version
+   the DB returns exactly equals the version this client was built for. Any error, or any mismatch (incl. a
+   null/empty DB value), locks. Extracted as a pure fn so tests/schema_gate_test.js can prove it fails closed. */
+function _schemaContract(clientVersion,data,error){return (!!error||String(data)!==String(clientVersion));}
+async function _schemaHandshake(){try{const{data,error}=await sb.rpc('e10_schema_version');_schemaLocked=_schemaContract(SCHEMA_VERSION,data,error);}catch(e){_schemaLocked=true;}}
 function _schemaLockNotice(){const b=document.createElement('div');b.id='schemaLock';b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:99999;background:#E8332B;color:#fff;text-align:center;padding:7px 12px;font-size:13px;font-weight:600;font-family:inherit';
  b.textContent='Read-only — this app version doesn’t match the database schema. Reload to update; mutations are disabled.';document.body.appendChild(b);}
 function _mutationGuard(){if(_schemaLocked){try{toast('Read-only: app/schema version mismatch — reload.');}catch(e){}return false;}return true;}

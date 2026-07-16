@@ -12,6 +12,8 @@ Element 10 will eventually be **productized (multi-tenant SaaS) and verticalized
 
 4. **THE FOUNDATION GATE — REVISED ORDER (2026-07-15 second revision; supersedes the FG1–FG9 numbering below and INF1).** Adopted corrections: safety rails moved EARLY (CI/monitoring/backups are prerequisites for tenant migration and meaningful stress testing — detecting failure without evidence to explain it is not testing); an explicit scale-target definition step added; cross-track dependencies made explicit.
 
+   **Status (2026-07-16):** Track A **steps 1–5 COMPLETE and on production** — A1 blueprint + reproducibility, A2 local+staging+demotion+schema handshake, A3 CI/deploy-packaging/backups/branch-protection, A4 security+performance sweep (advisors: zero errors, zero undispositioned warnings), A5 scale target (ADR 0004), plus the **A5.1 correction pass** (default-function-privileges factory closed; live schema gate + CI hygiene; A4 recovery artifact; docs reconciled). Everything flows local → CI → staging → verify → prod via `supabase db push`. **A6 (org/tenancy contract) is NEXT and starts with its own design gate** — build to ADR 0004's two-principal identity model + two-tier viewer authorization contract. Feature roadmap remains PAUSED at the gate; 2.10/2.11 build later in the new shell, not `index.html`.
+
    **Track A order (authoritative):**
    1. **Save the canonical database blueprint** — capture all 46 live migrations (repo has 13); prove an empty database rebuilds via `supabase db reset`.
    2. **Create local + staging environments** — production stops being the default integration-test target.
