@@ -1,8 +1,15 @@
 # 0005 — The tenant spine (Foundation Gate, Track A step 6 — design)
 
-**Status:** PROPOSED — **revision 2** (2026-07-17), incorporating the reviewers' eight required revisions + the four
-ruling refinements. Awaiting the A6-0 human gate ("A6 design approved") from BOTH reviewers. No build checkpoint
-(A6a–d) runs until approved. **The largest schema change in the project's history.**
+**Status:** PROPOSED — **revision 3** (2026-07-17). rev2 = the reviewers' 8 revisions + 4 rulings; **rev3 adds:** a
+zero-downtime write bridge + corrected backfill/cutover order (§12); RPC scope derivation classified by
+member/entity/invitation/viewer context (§4); an explicit grants/RLS/index matrix per org-core table (§1.2); exact
+module-capability + entitlement semantics with no undefined wildcard (§1.1); verified-only + expiring handle-claim
+uniqueness (§6); removal of the ambiguous `can_read_session` (§5); and the buyback/repack future invariants (§13).
+Awaiting the A6-0 human gate ("A6 design approved") from BOTH reviewers. No build checkpoint (A6a–d) runs until
+approved. **The largest schema change in the project's history.**
+**⚠ `docs/DOMAIN_MAP.md` reconciliation is PENDING** the current (non-stale) content Trent is supplying — it is
+deliberately NOT edited here to avoid dropping any decided item; the checklist ruling + the §13 invariants get
+folded in when that content lands.
 **Hard constraint:** ZERO production changes in all of A6. Designed, built, backfilled, tested in LOCAL + STAGING
 only. Tenant-zero migrates to prod at A10, after A7's isolation proof. (Read-only prod gate under
 `E10_ALLOW_PROD=1` stays fine.)
@@ -132,12 +139,44 @@ create table public.e10_platform_admins (
 - **Clone RPC** `e10_org_role_clone(p_org, p_src_role, p_dst_role)` copies the source role's permission-set rows
   (the allow grants) as a starting point; admin-cap gated.
 
+### 1.1 Module-capability + entitlement semantics — NO undefined wildcard (rev3)
+Two orthogonal, both-required gates; there is **no stored or honored `mod.*` wildcard** — every capability is a
+concrete string.
+- **Entitlement** (`e10_organization_modules.module_key`) = the coarse bundle an **org HAS** (billing/provisioning
+  level). Enumerated set: **`core`, `cards`** (future verticals add siblings). Written by platform admin.
+- **Module capability** (`role_permissions.capability = 'mod.<key>'`) = whether a **role** may use a nav module.
+  The `<key>` set is **exactly enumerated** from the client's nav groups: `mod.home, mod.schedule, mod.inventory,
+  mod.checklists, mod.modeler, mod.teams, mod.live, mod.fulfill, mod.reports, mod.team, mod.lists` (+ the literals
+  `mod.settings, mod.toolkit`). A6a pins this list from the code; new modules add concrete keys, never a wildcard.
+- **Action capabilities** (`act.*`) are the six enumerated in §1 (`inventory_edit, lists_edit, live_run,
+  permissions_config, reporting_export, team_manage`).
+- **Effective access to a nav module** = (org entitled: `e10_organization_modules` has `module_key` of the owning
+  bundle, enabled) **AND** (role granted: `e10.has_org_cap(org, 'mod.<key>')`). Bundle ownership: `checklists,
+  modeler, teams` → `cards`; the rest → `core`. `e10.has_org_cap` matches a concrete row only — a missing
+  `mod.<key>` row is a deny (allow-list), and a disabled entitlement denies regardless of the role grant.
+
+### 1.2 Grants / RLS / index matrix — org-core tables (rev3)
+All writes flow through `SECURITY DEFINER` RPCs in `public` that call `e10.*` predicates; `authenticated` gets only
+the SELECT reach below via RLS (no direct table INSERT/UPDATE/DELETE grants). `anon` gets nothing new.
+
+| Table | SELECT (RLS `using`) | Writes | Key indexes |
+|---|---|---|---|
+| `e10_organizations` | `e10.is_org_member(id)` OR platform-admin | platform-admin (self-serve create later) | PK`(id)`, `unique(slug)` |
+| `e10_organization_roles` | `e10.is_org_member(organization_id)` | `e10.is_org_admin(org)` ∧ `has_org_cap(org,'act.permissions_config')`; system roles undeletable | PK`(org,id)`, `unique(org,key)` |
+| `e10_organization_role_permissions` | `e10.is_org_member(org)` | admin ∧ `act.permissions_config` | PK`(org,role_id,capability)`, `(org,capability)` |
+| `e10_organization_memberships` | `e10.is_org_member(org)` OR `user_id=(select auth.uid())` | admin ∧ `act.team_manage` | PK`(org,user_id)`, **`(user_id)`** (the `current_org()` reverse lookup — load-bearing) |
+| `e10_organization_invitations` | `e10.is_org_admin(org)` (invitee redeems by token, never reads the table) | admin ∧ `act.team_manage` | PK`(id)`, `unique(org,token_hash)`, `(token_hash)`, `(org,email)` |
+| `e10_organization_modules` | `e10.is_org_member(org)` | **platform-admin** (entitlement = billing) | PK`(org,module_key)` |
+| `e10_platform_admins` | **DENY-ALL** (RLS on, no policy → service-role/definer only) | service-role/definer | PK`(user_id)` |
+| `e10_viewer_handle_claims` | `user_id=(select auth.uid())` OR platform-admin | INSERT own; verify = platform-admin | PK`(id)`, `(user_id)`, verified-unique `(lower(handle))` (§6) |
+| `e10_live_sessions` | `e10.is_org_member(org)` (public surface via projection only) | member ∧ `act.live_run` | PK`(org,id)`, `(org,source_show_ref)`, `(org,status)` |
+
 **Internal predicate helpers (schema `e10`, fully qualified, InitPlan-safe):** `e10.is_platform_admin()`,
 `e10.is_org_member(org)`, `e10.is_org_admin(org)`, `e10.has_org_cap(org, cap)`, `e10.current_org()` (single-
-membership fast path → the sole active membership, else null), `e10.can_read_session(sess)`,
-`e10.can_spectate_session(sess)`, `e10.owns_slot(slot)`. The existing `public.e10_is_admin/is_member/is_org/
-has_cap/owns_session/…` are **superseded by** the `e10.*` versions during A6c and dropped at the contract migration
-(expand/contract, §12).
+membership fast path → the sole active membership, else null), `e10.can_spectate_session(sess)`,
+`e10.owns_slot(slot)`. **`can_read_session` is REMOVED (rev3, §5)** — it conflated the three tiers; nothing
+generic replaces it. The existing `public.e10_is_admin/is_member/is_org/has_cap/owns_session/can_read_session` are
+**superseded by** the `e10.*` predicates during A6c and dropped at the contract migration (§12).
 
 ---
 
@@ -200,6 +239,21 @@ mark_sold), `e10_emit_inventory_movement`, and onboarding/role RPCs (`e10_add_me
 `e10_assign_role/set_role → org roles`, `e10_buyer_suggest`, `e10_redeem_code`) — each old name a wrapper over an
 `e10_org_*` counterpart. All are `public` client RPCs; predicates they call live in `e10` (revision 8).
 
+### 4.1 Scope derivation classified by context (rev3)
+How `org` is resolved + validated depends on the RPC's context. **Every class validates capability AND, where an
+org is both supplied and derivable, asserts they MATCH** (an explicit `p_organization_id` may never override the
+entity's/invitation's true org — that is the cross-org attack surface).
+
+| Class | Which RPCs | Org source | Validation |
+|---|---|---|---|
+| **Member** (creates within the caller's org) | `e10_org_inv_add_item`, `e10_org_inv_list`, `e10_org_role_clone`, role/permission edits | `coalesce(p_organization_id, e10.current_org())` | `e10.is_org_member(org)` ∧ `has_org_cap(org, <cap>)`; if both `p_org` and a single membership exist they must match |
+| **Entity** (operates on an existing row) | `e10_org_inv_edit_item/delete/get/reserve/release/consume/mark_sold/reverse_consumption`, `e10_emit_inventory_movement` | the **entity's** `organization_id` (looked up by `(?, id)`) | caller `is_org_member(entity.org)` ∧ cap; **`p_org`, if supplied, must equal `entity.org`** (else `cross_org_denied`) — the item/session's org is authoritative, not the caller's claim |
+| **Invitation** (caller is NOT yet a member) | `e10_redeem_code` / accept-invitation | the **invitation's** `organization_id` (looked up by `token_hash`) | token exists, `status='pending'`, `expires_at > now()`; then create the membership. No membership precondition |
+| **Viewer** (no org membership; session-scoped) | `e10_buyer_suggest(session)`, `e10_session_public(session)`, own-purchase reads | the **session's** `organization_id` (the authorization boundary) | authorize as **viewer** — `e10.can_spectate_session` / `e10.owns_slot` / session-participant — **never** as member; no org-membership check |
+
+The wrappers (old names) are all **Member** or **Entity** class and resolve org via `e10.current_org()`
+(single-membership). The `e10_org_*` names take the org explicitly and follow the class above.
+
 ---
 
 ## 5. Viewer authorization — three FULLY SEPARATED tiers (revision 4)
@@ -218,6 +272,13 @@ Add an explicit **session visibility field**: `e10_break_sessions.visibility tex
 never touch the raw table. Broadcast (A9 hook): the public topic authorizes via `can_spectate_session`;
 participant-private payloads via `owns_slot`; never mixed (§9).
 
+**Replacing `can_read_session` (rev3).** The existing session-read policies that call `public.e10_can_read_session`
+(`e10_break_sessions.bs_sel`, `e10_break_slots.sl_sel`, `e10_break_events.ev_sel`, `e10_session_viewers.sv_sel`) are
+rewritten in A6c to the explicit tiers — **member:** `e10.is_org_member(organization_id)`; **spectator:** the
+public projection RPC only (gated `e10.can_spectate_session`), not direct table SELECT; **owning buyer:**
+`e10.owns_slot(...)` / `buyer_uid=(select auth.uid())` for the participant rows. No single predicate spans tiers.
+The old `e10_can_read_session` is dropped at the contract migration.
+
 ---
 
 ## 6. Handle-to-account verification — one canonical source (revision 5)
@@ -228,14 +289,20 @@ create table public.e10_viewer_handle_claims (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null, whatnot_handle text not null,
   status text not null default 'pending',            -- pending | verified | rejected
-  evidence jsonb, verified_at timestamptz, created_at timestamptz not null default now()
+  evidence jsonb, verified_at timestamptz,
+  expires_at timestamptz not null,                   -- PENDING claims expire (rev3)
+  created_at timestamptz not null default now()
 );
--- uniqueness scoped to LIVE claims only, so a rejected claim never blocks a re-claim (revision 5):
-create unique index e10_vhc_live_handle on public.e10_viewer_handle_claims (lower(whatnot_handle))
-  where status in ('pending','verified');
+-- canonical uniqueness = at most ONE VERIFIED owner per handle (verified-only, rev3). A partial index cannot
+-- reference now(), so pending claims are deliberately NOT index-unique: they carry expires_at and are cleaned up,
+-- and the verify RPC re-checks "no live verified claim + no unexpired pending by another user" at verification
+-- time. This refines revision 5's `status in ('pending','verified')` index (which could wedge on a stale pending).
+create unique index e10_vhc_verified_handle on public.e10_viewer_handle_claims (lower(whatnot_handle))
+  where status = 'verified';
 ```
-A **verified** claim is what lets a slot's `buyer_handle` attribute to a global `buyer_uid` across streamers; the
-participant predicate trusts verified matches only. Verification UX ships post-A6.
+A **verified** claim is the single canonical fact that lets a slot's `buyer_handle` attribute to a global
+`buyer_uid` across streamers; the participant predicate trusts verified matches only. Pending claims expire so a
+handle is never permanently blocked by an abandoned claim. Verification UX ships post-A6.
 
 ---
 
@@ -302,23 +369,56 @@ first external org, not in A6.
 
 ---
 
-## 12. EXPAND → BACKFILL → DEPLOY → OBSERVE → CONTRACT (input 9)
-1. **EXPAND (A6a–c, staging):** additive only — new `e10` schema + predicates; new org tables; `organization_id`
-   added **nullable**; `UNIQUE(organization_id, id)` + composite FKs added ALONGSIDE the existing `id` PK; the
-   `e10_org_*` RPCs added; the old RPCs converted to **wrappers**; policies switched to `e10.*` predicates while
-   the old `public.e10_*` helpers still exist. Supports client N (old, single-org) AND N+1 (org-aware).
-2. **BACKFILL (A6b, staging):** `org0` on all rows; allow-list parity seed; verify.
-3. **PROMOTE (staging):** `organization_id NOT NULL`; swap PK to composite. Old client still works (wrappers derive
-   org).
-4. **A7 isolation proof → A10 PROD cutover:** same expand migration to prod → backfill prod → deploy the org-aware
-   new-shell client → **observe** old-client traffic drain (the deployed single-org client keeps working via the
-   wrappers throughout).
-5. **CONTRACT (separate later migration, after drain):** drop the compatibility wrappers; drop the superseded
-   `public.e10_is_admin/has_cap/…` helpers; remove the `e10.current_org()` single-membership *requirement*; retire
-   any singular-`'shared'` assumptions. Only here does anything get removed/renamed/contracted.
+## 12. Zero-downtime rollout — WRITE BRIDGE + corrected order (rev3)
+**The write bridge (the correction rev2 lacked).** With no maintenance window (ADR 0004), a company-owned table is
+written throughout the migration, so `organization_id` must be stamped on EVERY new row from the instant the column
+exists — **before** the backfill — or a row inserted mid-backfill stays null and the later `NOT NULL` fails. The
+bridge = a `BEFORE INSERT` trigger `e10.stamp_org()` installed in the **same** migration that adds the column:
+`NEW.organization_id := coalesce(NEW.organization_id, e10.current_org())` (→ org0 while single-org). The `e10_org_*`
+RPCs pass org explicitly; the wrappers + trigger cover the old client. The bridge is dropped at contract.
+
+**Corrected per-table online order (each step non-blocking to writes):**
+1. `ADD COLUMN organization_id uuid` (nullable, metadata-only, instant) **+ install `e10.stamp_org()` BEFORE INSERT
+   trigger in the same migration** — new rows are owned from t0.
+2. `CREATE UNIQUE INDEX CONCURRENTLY (organization_id, id)` (online, no write lock).
+3. Composite FKs `NOT VALID` (instant) → `VALIDATE CONSTRAINT` (online; does not block writes).
+4. **Backfill** existing NULL rows → `org0` in batches (the bridge already owns anything inserted meanwhile).
+5. `CHECK (organization_id IS NOT NULL) NOT VALID` → `VALIDATE` → `SET NOT NULL` (uses the validated check —
+   avoids a long full-table lock).
+6. **Promote PK** via `ADD PRIMARY KEY USING INDEX` on the pre-built unique index (fast). Old `id` PK + old
+   single-column FKs are dropped **at contract**, not here.
+
+**Sequence (staging → prod):**
+- **EXPAND (A6a–c, staging):** `e10` schema + predicates; new org tables; per-table steps 1–3; `e10_org_*` RPCs;
+  old RPCs → wrappers; policies switched to `e10.*`. Supports client N (single-org) AND N+1 (org-aware).
+- **BACKFILL (A6b, staging):** step 4 + allow-list parity seed + strict-1:1 live_sessions; verify (§11).
+- **PROMOTE (staging):** steps 5–6.
+- **A10 PROD cutover (after A7):** same EXPAND → bridge → BACKFILL → PROMOTE on prod → deploy the org-aware
+  new-shell client → **observe** old-client drain (the deployed single-org client keeps working via wrappers +
+  bridge throughout — zero downtime).
+- **CONTRACT (separate later migration, after drain):** drop the wrappers, the `e10.stamp_org()` bridge, the old
+  `id` PKs + single-column FKs, and the superseded `public.e10_is_admin/has_cap/can_read_session/…` helpers; remove
+  the `e10.current_org()` single-membership *requirement*; retire singular-`'shared'`. Only here is anything
+  removed/renamed/contracted.
 
 The **standing release rule** (no rename/removal/policy-contraction/incompatible-RPC-change in the same release as
 its replacement) lands in `docs/OPERATIONS.md`.
+
+---
+
+## 13. Future company-owned operations — recorded invariants (NOT built in A6)
+Buyback and repack (pack-opener) are later cards-vertical operations; their invariants are fixed now so the spine
+never has to be reopened for them (per Trent — record, don't build):
+- **Org-scoped like all company-owned data:** `organization_id NOT NULL`, composite `(organization_id, id)` PK,
+  org derived by the Entity/Member class (§4.1), never cross-org.
+- **Ledger-integrated, no out-of-band inventory:** a **repack** consumes source inventory and produces new sellable
+  items ONLY through the append-only movement ledger (consumption on the source, acquisition on the outputs), and
+  **cost basis is conserved** — output cost derives from the consumed source via ledger movements, never hand-set.
+  A **buyback** acquires product as new items + an acquisition movement (cost = buyback price), same discipline.
+- **Reconcilable + idempotent:** transactional RPCs writing receipts scoped `(organization_id, idempotency_key)`;
+  their effects reconcile in the recon views (drift 0) exactly like reserve/consume.
+- **Deferred:** no `e10_repacks`/`e10_buybacks` schema in A6; this fixes the rules those tables must obey. Folds
+  into the `docs/DOMAIN_MAP.md` reconciliation (pending Trent's current content).
 
 ---
 
