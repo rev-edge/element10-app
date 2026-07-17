@@ -7,9 +7,9 @@ module-capability + entitlement semantics with no undefined wildcard (§1.1); ve
 uniqueness (§6); removal of the ambiguous `can_read_session` (§5); and the buyback/repack future invariants (§13).
 Awaiting the A6-0 human gate ("A6 design approved") from BOTH reviewers. No build checkpoint (A6a–d) runs until
 approved. **The largest schema change in the project's history.**
-**⚠ `docs/DOMAIN_MAP.md` reconciliation is PENDING** the current (non-stale) content Trent is supplying — it is
-deliberately NOT edited here to avoid dropping any decided item; the checklist ruling + the §13 invariants get
-folded in when that content lands.
+**`docs/DOMAIN_MAP.md` reconciled (v1.2, 2026-07-17)** with Trent's current content — the checklist/role
+corrections, the A–D rulings, the prototype ①–⑥ concepts, and the repack/store-credit invariants are folded in; no
+decided item dropped.
 **Hard constraint:** ZERO production changes in all of A6. Designed, built, backfilled, tested in LOCAL + STAGING
 only. Tenant-zero migrates to prod at A10, after A7's isolation proof. (Read-only prod gate under
 `E10_ALLOW_PROD=1` stays fine.)
@@ -417,8 +417,18 @@ never has to be reopened for them (per Trent — record, don't build):
   A **buyback** acquires product as new items + an acquisition movement (cost = buyback price), same discipline.
 - **Reconcilable + idempotent:** transactional RPCs writing receipts scoped `(organization_id, idempotency_key)`;
   their effects reconcile in the recon views (drift 0) exactly like reserve/consume.
-- **Deferred:** no `e10_repacks`/`e10_buybacks` schema in A6; this fixes the rules those tables must obey. Folds
-  into the `docs/DOMAIN_MAP.md` reconciliation (pending Trent's current content).
+- **Repack = a TRANSFORMATION, not a transfer:** linked `transformation_consume` (sources leave) +
+  `transformation_output` (the pack appears) movements; output cost basis conserved from the consumed components.
+  **"Provably fair" needs MORE than the ledger** — a frozen versioned batch manifest (component ids, quantities,
+  assigned-value + cost-basis snapshots, bucket definitions, exact integer hit counts) + an immutable allocation
+  method / algorithm version / pack numbering (possibly commit-reveal). Recorded as the standard; not built.
+- **Store credit is a SEPARATE ledger, not inventory:** its own append-only ledger (issue/redeem/adjust) keyed
+  `(organization, viewer, currency)`, **never cross-org spendable**; outstanding credit is a customer **LIABILITY
+  tracked separately from inventory cost basis** (different accounting number). A bought-back card re-enters
+  inventory as an intake movement (cost = credit paid). Depends on verified handles (§6). Tax/legal (closed-loop /
+  escheatment) review before any external org carries balances.
+- **Deferred:** no `e10_repacks`/`e10_buybacks`/store-credit schema in A6; this fixes the rules those tables must
+  obey. See `docs/DOMAIN_MAP.md` (reconciled 2026-07-17) for the full product detail (concepts ①–⑥, repack RP1).
 
 ---
 
