@@ -196,7 +196,9 @@ is **no pattern/wildcard capability** anywhere (no `mod.` prefix-match, none sto
   Toolkit contains Ship/fulfillment which is `core` in DOMAIN_MAP, and a `cards` mapping would strip fulfillment
   from future non-cards orgs; a future vertical supplies its own concrete keys mapping to `cards`. A missing
   permission row is a **deny** (allow-list); a disabled entitlement denies regardless of the role grant.
-  `e10.has_org_cap` only ever matches an exact capability string from the twelve above.
+  `e10.has_org_cap` only ever matches an exact capability string from the twelve above. A6a.2 encodes the combined
+  rule as `e10.has_module_access(org, key)`: the mapped entitlement must exist and be enabled, and
+  `e10.has_org_cap(org, 'mod.' || key)` must grant the exact module capability.
 
 ### 1.2 Grants / RLS / index matrix — org-core tables (rev3)
 All writes flow through `SECURITY DEFINER` RPCs in `public` that call `e10.*` predicates; `authenticated` gets only

@@ -70,6 +70,8 @@ jobs:
         # Runs while the provisioned members still exist (before the db reset below), so the verify-race cases
         # (which need a platform-admin identity) execute rather than skip.
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6a1_verify_bundle_test.sql
+      - name: A6a.2 effective module-access tests
+        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6a2_module_access_test.sql
       - name: Schema reproducibility (re-apply migrations cleanly)
         run: supabase db reset
       - name: Default-privileges regression probe (born-locked; zero anon-executable functions)
