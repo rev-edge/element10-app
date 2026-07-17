@@ -1,6 +1,6 @@
 # 0005 — The tenant spine (Foundation Gate, Track A step 6 — design)
 
-**Status:** PROPOSED — **revision 3** (2026-07-17). rev2 = the reviewers' 8 revisions + 4 rulings; **rev3 adds:** a
+**Status:** PROPOSED — **revision 3.2.1** (2026-07-17). rev2 = the reviewers' 8 revisions + 4 rulings; **rev3 adds:** a
 zero-downtime write bridge + corrected backfill/cutover order (§12); RPC scope derivation classified by
 member/entity/invitation/viewer context (§4); an explicit grants/RLS/index matrix per org-core table (§1.2); exact
 module-capability + entitlement semantics with no undefined wildcard (§1.1); verified-only + expiring handle-claim
@@ -19,6 +19,9 @@ hold multiple verified handles, one owner per normalized handle, no `user_id` un
 path resolved to an RPC (`e10_claim_handle`) consistent with the preamble; §12 step 2 notes `CREATE INDEX
 CONCURRENTLY` is non-transactional + the INVALID-index recovery rule; `docs/DOMAIN_MAP.md` company-owned section
 points to §0.2 and drops the non-table items from the A6 org_id claim.
+**rev3.2.1 (2026-07-17) micro-edit:** §12 CONTRACT now uses a second standalone composite unique index for legal
+PK promotion, recreates child composite FKs against the new PK before removing the candidate UNIQUE constraint,
+and permanently preserves the §4.1 global session `UNIQUE(id)` / `UNIQUE(share_code)` lookup keys.
 Awaiting the A6-0 human gate ("A6 design approved") from BOTH reviewers. No build checkpoint (A6a–d) runs until
 approved. **The largest schema change in the project's history.**
 **`docs/DOMAIN_MAP.md` reconciled (v1.2, 2026-07-17)** with Trent's current content — the checklist/role
@@ -493,14 +496,21 @@ RPCs pass org explicitly; the wrappers + trigger cover the old client. The bridg
 - **A10 PROD cutover (after A7):** same EXPAND → bridge → BACKFILL → PROMOTE on prod → deploy the org-aware
   new-shell client → **observe** old-client drain (the deployed single-org client keeps working via wrappers +
   bridge throughout — zero downtime).
-- **CONTRACT (separate later migration, after drain):** drop the compatibility wrappers, the `e10.stamp_org()`
+- **CONTRACT (separate later migration, post-drain):** drop the compatibility wrappers, the `e10.stamp_org()`
   bridge, and the superseded `public.e10_is_admin/has_cap/can_read_session/…` helpers; remove the
-  `e10.current_org()` single-membership *requirement*; retire singular-`'shared'`. **Then — and only then — promote
-  the primary key:** `DROP` each retrofitted table's old `id` PRIMARY KEY **and its inbound single-column FKs
-  first**, then `ALTER TABLE … ADD PRIMARY KEY USING INDEX` the composite `(organization_id, id)` (the child
-  composite FKs already point at the UNIQUE constraint from step 6, so they carry over). This is the ONLY place the
-  key swap is legal — the old PK is gone before the new one is added, so there is never a second PK. Only here is
-  anything removed/renamed/contracted.
+  `e10.current_org()` single-membership *requirement*; retire singular-`'shared'`. Then promote each retrofitted
+  table's composite candidate key to its literal primary key in this exact order: **(1)** `CREATE UNIQUE INDEX
+  CONCURRENTLY` a SECOND standalone index on `(organization_id, id)`, not attached to any constraint; the step-2
+  rules apply, so each build is its own non-transactional migration step and a failed build's INVALID index is
+  detected, dropped, and retried; **(2)** drop the old `id` PK's inbound single-column FKs, then drop the old `id`
+  PRIMARY KEY, while permanently preserving the §4.1 global `UNIQUE(id)` and `UNIQUE(share_code)` indexes on
+  `e10_break_sessions` / `e10_live_sessions`; **(3)** `ALTER TABLE … ADD PRIMARY KEY USING INDEX` the step-1
+  standalone index, which is legal because that index is unowned and the old PK is gone; **(4)** recreate each
+  child composite FK against the new PK via `ADD CONSTRAINT … NOT VALID` → `VALIDATE CONSTRAINT`, and only after
+  each replacement validates drop its corresponding old composite FK; **(5)** drop the superseded step-6
+  candidate UNIQUE constraint after nothing references it. This runs only at CONTRACT, post-drain, and the
+  contract migration receives its own runbook and review before execution. Only here is anything removed,
+  renamed, or contracted.
 
 The **standing release rule** (no rename/removal/policy-contraction/incompatible-RPC-change in the same release as
 its replacement) lands in `docs/OPERATIONS.md`.
