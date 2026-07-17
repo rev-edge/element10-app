@@ -11,6 +11,14 @@ policies (blocker 1); composite key ships as a UNIQUE candidate until contract �
 unambiguous (blocker 3); the six concrete `mod` keys incl. `mod.reporting`, no wildcard (blocker 4); plus role-FK
 indexes, `auth.users` FKs, CHECK constraints, handle normalization + verify-concurrency rule, and the exact A6
 table list (§0.2).
+**rev3.2 (2026-07-17) residuals:** §12 step 6 no longer promotes the PK — it formalizes the composite as a UNIQUE
+constraint (`ADD CONSTRAINT … UNIQUE USING INDEX`); `ADD PRIMARY KEY USING INDEX` moved to CONTRACT, after the old
+`id` PK is dropped (blocker-2 residual); §4.1 wrapper closing corrected — `e10_redeem_code` = Invitation-class,
+`e10_buyer_suggest` = Viewer-class, neither may call `current_org()` (blocker-3 residual); §6 states one account may
+hold multiple verified handles, one owner per normalized handle, no `user_id` uniqueness; §1.2 handle-claims write
+path resolved to an RPC (`e10_claim_handle`) consistent with the preamble; §12 step 2 notes `CREATE INDEX
+CONCURRENTLY` is non-transactional + the INVALID-index recovery rule; `docs/DOMAIN_MAP.md` company-owned section
+points to §0.2 and drops the non-table items from the A6 org_id claim.
 Awaiting the A6-0 human gate ("A6 design approved") from BOTH reviewers. No build checkpoint (A6a–d) runs until
 approved. **The largest schema change in the project's history.**
 **`docs/DOMAIN_MAP.md` reconciled (v1.2, 2026-07-17)** with Trent's current content — the checklist/role
@@ -198,7 +206,7 @@ the SELECT reach below via RLS (no direct table INSERT/UPDATE/DELETE grants). `a
 | `e10_organization_invitations` | `e10.is_org_admin(org)` (invitee redeems by token, never reads the table) | admin ∧ `act.team_manage` | PK`(id)`, **`unique(token_hash)` global** (blocker 3), `(org,role_id)` (role FK), `(org,lower(email))` |
 | `e10_organization_modules` | `e10.is_org_member(org)` | **platform-admin** (entitlement = billing) | PK`(org,module_key)` |
 | `e10_platform_admins` | **DENY-ALL** (RLS on, no policy → service-role/definer only) | service-role/definer | PK`(user_id)` |
-| `e10_viewer_handle_claims` | `user_id=(select auth.uid())` OR platform-admin | INSERT own; verify = platform-admin | PK`(id)`, `(user_id)`, verified-unique `(lower(handle))` (§6) |
+| `e10_viewer_handle_claims` | `user_id=(select auth.uid())` OR platform-admin | **via RPC** (consistent with the preamble): `e10_claim_handle` (self — sets `user_id = auth.uid()`); verify/reject via a platform-admin RPC. No direct table grant. | PK`(id)`, `(user_id)`, verified-unique `(handle_norm)` (§6) |
 | `e10_live_sessions` | `e10.is_org_member(org)` (public surface via projection only) | member ∧ `act.live_run` | PK`(org,id)`, `(org,source_show_ref)`, `(org,status)` |
 
 **Internal predicate helpers (schema `e10`, fully qualified, InitPlan-safe):** `e10.is_platform_admin()`,
@@ -288,8 +296,13 @@ entity's/invitation's true org — that is the cross-org attack surface).
 | **Invitation** (caller is NOT yet a member) | `e10_redeem_code` / accept-invitation | the **invitation's** `organization_id` (looked up by `token_hash`) | token exists, `status='pending'`, `expires_at > now()`; then create the membership. No membership precondition |
 | **Viewer** (no org membership; session-scoped) | `e10_buyer_suggest(session)`, `e10_session_public(session)`, own-purchase reads | the **session's** `organization_id` (the authorization boundary) | authorize as **viewer** — `e10.can_spectate_session` / `e10.owns_slot` / session-participant — **never** as member; no org-membership check |
 
-The wrappers (old names) are all **Member** or **Entity** class and resolve org via `e10.current_org()`
-(single-membership). The `e10_org_*` names take the org explicitly and follow the class above.
+**Wrappers keep their old name's class — they are NOT all Member/Entity (blocker 3):** most `e10_inv_*` wrappers are
+Member/Entity and resolve org via `e10.current_org()` (single-membership), but **`e10_redeem_code` wraps as
+Invitation-class** (org derived from the globally-unique `token_hash`; **no `current_org()`, no membership
+precondition**) and **`e10_buyer_suggest` wraps as Viewer-class** (org derived from the session's global `id`;
+authorize as viewer). **No Invitation- or Viewer-class wrapper may call `e10.current_org()`** — the caller has no
+membership to derive from; org comes from the token or the session. The `e10_org_*` names take org explicitly and
+follow the same class.
 
 **Globally-unambiguous identities the Invitation + Viewer classes depend on (blocker 3):** these classes resolve
 `org` from a token or a session that the caller references *without already knowing the org*, so those identifiers
@@ -357,10 +370,14 @@ advisory lock `pg_advisory_xact_lock(hashtext(handle_norm))`, re-checks "no exis
 them and the verified-only unique index is the backstop — the loser gets a clean `handle_already_verified`
 rejection, never a partial state.
 
+**Cardinality (Trent's ruling, 2026-07-17):** one `auth.users` account MAY hold **multiple** verified handles (a
+person legitimately buys under more than one Whatnot handle); each **normalized** handle has **at most one** verified
+owner (the `e10_vhc_verified_handle` index enforces exactly that). There is deliberately **NO uniqueness on
+`user_id`** — the constraint is one-owner-per-handle, not one-handle-per-user.
+
 A **verified** claim is the single canonical fact that lets a slot's `buyer_handle` attribute to a global
 `buyer_uid` across streamers; the participant predicate trusts verified matches only (comparing on `handle_norm`).
-Pending claims expire so a
-handle is never permanently blocked by an abandoned claim. Verification UX ships post-A6.
+Pending claims expire so a handle is never permanently blocked by an abandoned claim. Verification UX ships post-A6.
 
 ---
 
@@ -442,13 +459,20 @@ RPCs pass org explicitly; the wrappers + trigger cover the old client. The bridg
 **Corrected per-table online order (each step non-blocking to writes):**
 1. `ADD COLUMN organization_id uuid` (nullable, metadata-only, instant) **+ install `e10.stamp_org()` BEFORE INSERT
    trigger in the same migration** — new rows are owned from t0.
-2. `CREATE UNIQUE INDEX CONCURRENTLY (organization_id, id)` (online, no write lock).
+2. `CREATE UNIQUE INDEX CONCURRENTLY (organization_id, id)` (online, no write lock). **`CONCURRENTLY` cannot run
+   inside a transaction block** — it ships as its **own non-transactional migration step** (one such index per
+   step, not wrapped in `begin/commit`). **Recovery rule:** a failed `CONCURRENTLY` leaves an **INVALID** index
+   behind; the step is idempotent-guarded — detect a leftover (`pg_index.indisvalid = false`), `DROP INDEX` it, and
+   re-run the step. (Same applies to any other `CONCURRENTLY` index in the migration set.)
 3. Composite FKs `NOT VALID` (instant) → `VALIDATE CONSTRAINT` (online; does not block writes).
 4. **Backfill** existing NULL rows → `org0` in batches (the bridge already owns anything inserted meanwhile).
 5. `CHECK (organization_id IS NOT NULL) NOT VALID` → `VALIDATE` → `SET NOT NULL` (uses the validated check —
    avoids a long full-table lock).
-6. **Promote PK** via `ADD PRIMARY KEY USING INDEX` on the pre-built unique index (fast). Old `id` PK + old
-   single-column FKs are dropped **at contract**, not here.
+6. **Formalize the candidate key — NOT a PK change (blocker 2).** `ALTER TABLE … ADD CONSTRAINT
+   <t>_org_id_key UNIQUE USING INDEX <the step-2 index>`, so `(organization_id, id)` is a **named UNIQUE
+   constraint** that the child composite FKs reference. **The old `id` PRIMARY KEY stays** — PostgreSQL forbids a
+   second PK, and the old client still keys on `id`. **No `ADD PRIMARY KEY` here.** PK promotion happens only at
+   CONTRACT (below), after the old `id` PK is dropped.
 
 **Sequence (staging → prod):**
 - **BOOTSTRAP FIRST (A6a, blocker 1):** create the `e10` schema, the predicates, and the org-core tables, then
@@ -464,14 +488,19 @@ RPCs pass org explicitly; the wrappers + trigger cover the old client. The bridg
   client N (single-org) AND N+1 (org-aware).
 - **BACKFILL (A6b, staging):** step 4 (backfill existing company rows → org0) + strict-1:1 live_sessions; verify
   incl. allow-list parity per user (§11).
-- **PROMOTE (staging):** steps 5–6.
+- **PROMOTE (staging):** steps 5–6 — enforce `NOT NULL` and formalize the `(organization_id, id)` **UNIQUE
+  constraint**. Still **no PK change**; the old `id` PK remains and both clients keep working.
 - **A10 PROD cutover (after A7):** same EXPAND → bridge → BACKFILL → PROMOTE on prod → deploy the org-aware
   new-shell client → **observe** old-client drain (the deployed single-org client keeps working via wrappers +
   bridge throughout — zero downtime).
-- **CONTRACT (separate later migration, after drain):** drop the wrappers, the `e10.stamp_org()` bridge, the old
-  `id` PKs + single-column FKs, and the superseded `public.e10_is_admin/has_cap/can_read_session/…` helpers; remove
-  the `e10.current_org()` single-membership *requirement*; retire singular-`'shared'`. Only here is anything
-  removed/renamed/contracted.
+- **CONTRACT (separate later migration, after drain):** drop the compatibility wrappers, the `e10.stamp_org()`
+  bridge, and the superseded `public.e10_is_admin/has_cap/can_read_session/…` helpers; remove the
+  `e10.current_org()` single-membership *requirement*; retire singular-`'shared'`. **Then — and only then — promote
+  the primary key:** `DROP` each retrofitted table's old `id` PRIMARY KEY **and its inbound single-column FKs
+  first**, then `ALTER TABLE … ADD PRIMARY KEY USING INDEX` the composite `(organization_id, id)` (the child
+  composite FKs already point at the UNIQUE constraint from step 6, so they carry over). This is the ONLY place the
+  key swap is legal — the old PK is gone before the new one is added, so there is never a second PK. Only here is
+  anything removed/renamed/contracted.
 
 The **standing release rule** (no rename/removal/policy-contraction/incompatible-RPC-change in the same release as
 its replacement) lands in `docs/OPERATIONS.md`.

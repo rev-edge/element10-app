@@ -39,7 +39,9 @@ Plus a fifth minor layer: **PERSONAL** — per-user preferences inside an organi
 
 ## Company-owned (tenant) — the isolation list for Track A6
 
-**A6's migration list is the currently-existing company-owned tables ONLY:** inventory items, reservations, movements, receipts, shows/workspaces, sessions/slots/events, break models, cost-model config, notes/todos/attachments, saved org-level views, and the `e10_obs_*` competitive-intel subsystem. **Every one of these gets `organization_id NOT NULL` + composite `(organization_id, id)` PK** and org-scoped RLS/RPCs/idempotency in A6 (ADR 0005).
+**A6's migration list is the currently-existing company-owned TABLES only — the authoritative, exact list is [ADR 0005 §0.2](decisions/0005-tenant-spine.md) (19 existing tables + the new `e10_live_sessions`).** In short: the inventory tables (`items`/`movements`/`reservations`), `mutation_receipts`, `workspace`, the break tables (`sessions`/`slots`/`events`), `session_viewers`, and the ten `e10_obs_*` competitive-intel tables. **Each gets `organization_id NOT NULL` + composite `(organization_id, id)`** and org-scoped RLS/RPCs/idempotency in A6 (ADR 0005).
+
+**Not separate tables — do NOT get their own `organization_id` in A6:** break models, cost-model config, notes/todos/attachments, and saved org-level views **live inside `e10_workspace` JSONB** (they inherit the workspace row's org), or **do not exist yet** — they become org-scoped only when/if promoted to their own tables. (The conceptual "company-owned" list here describes DATA ownership; the table migration scope is §0.2.)
 
 Corrections (supersede the old flat list):
 - **Checklists are PLATFORM-LEVEL, read-only to tenants (ADR 0005 Ruling A)** — they do NOT get `organization_id`. A tenant's "uploaded checklist" is a private submission that lands in an **org-scoped staging/overlay hook (not built in A6)**, promoted to the shared catalog by **platform curation only**. Companies may modify their own *view* of catalog records and **add their own custom fields** (overlay `patch jsonb`), but never write the platform catalog tables directly.
