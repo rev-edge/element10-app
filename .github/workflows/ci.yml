@@ -72,6 +72,10 @@ jobs:
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6a1_verify_bundle_test.sql
       - name: A6a.2 effective module-access tests
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6a2_module_access_test.sql
+      - name: A6a.3 concurrent verify-vs-reject (two connections)
+        # Genuine two-connection race: A holds the handle advisory lock, B's verify blocks on it, A commits a
+        # lockless reject, B unblocks and must fail. Needs the provisioned members (runs before the db reset below).
+        run: node tests/a6a3_verify_concurrent_test.js
       - name: Schema reproducibility (re-apply migrations cleanly)
         run: supabase db reset
       - name: Default-privileges regression probe (born-locked; zero anon-executable functions)

@@ -371,11 +371,14 @@ create table public.e10_viewer_handle_claims (
 create unique index e10_vhc_verified_handle on public.e10_viewer_handle_claims (handle_norm) where status = 'verified';
 create index e10_vhc_user_idx on public.e10_viewer_handle_claims (user_id);
 ```
-**Concurrency rule (rev3.1):** verification is serialized per handle — the verify RPC takes a transaction-scoped
-advisory lock `pg_advisory_xact_lock(hashtext(handle_norm))`, re-checks "no existing verified claim on this
-`handle_norm`", then flips exactly one claim to `verified`. Two racers cannot both win: the advisory lock serializes
-them and the verified-only unique index is the backstop — the loser gets a clean `handle_already_verified`
-rejection, never a partial state.
+**Concurrency rule (rev3.1; hardened A6a.3):** verification is serialized per handle — the verify RPC takes a
+transaction-scoped advisory lock `pg_advisory_xact_lock(hashtext(handle_norm))`, then (A6a.3) **rereads the claim
+under the lock and requires `status='pending'` + not expired**, re-checks "no existing verified claim on this
+`handle_norm`", and flips exactly one claim to `verified` via an `UPDATE … WHERE status='pending'` (0 rows → clean
+error). Two racers cannot both win: the advisory lock serializes two verifiers and the verified-only unique index is
+the backstop, so the loser gets a clean `handle_already_verified`. A reject takes **no** lock, so it can commit while
+a verify is blocked — the post-lock reread and the conditional update both prevent a rejected/expired claim from
+being verified, never a partial state. Proven by a two-connection concurrent test (`tests/a6a3_verify_concurrent_test.js`).
 
 **Cardinality (Trent's ruling, 2026-07-17):** one `auth.users` account MAY hold **multiple** verified handles (a
 person legitimately buys under more than one Whatnot handle); each **normalized** handle has **at most one** verified
