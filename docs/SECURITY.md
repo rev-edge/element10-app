@@ -117,3 +117,14 @@ policy only enabled anon enumeration. Card images continue to load by URL; listi
 Auth connection strategy left at absolute (10) — see the disposition above. Pooler configuration unchanged
 (the tests reach prod read-only via the IPv4 session pooler `aws-0-us-east-1.pooler.supabase.com`). No change
 warranted at current scale; both are instance-size-dependent and revisited on resize.
+
+---
+
+## A6a — org-core security surface (STAGING/LOCAL only; not on prod until A10)
+The tenant spine's org-core (ADR 0005; migration `20260717120000`). Advisors on staging: **zero errors** (security + performance). New surface + dispositions:
+
+- **Authorization predicates live in the non-REST-exposed `e10` schema** (`e10.is_platform_admin / is_org_member / is_org_admin / has_org_cap / current_org / owns_slot / can_spectate_session`). Because `e10` is not in PostgREST's exposed schemas, these are **not reachable via `/rest/v1/rpc`** and do **not** appear in advisor 0029 — the structural fix for the predicate-helper exposure. `authenticated` holds `USAGE` on `e10` + `EXECUTE` on the predicates (needed for RLS evaluation) only.
+- **Four new client RPCs** in `public` are `SECURITY DEFINER`, born private, granted `authenticated` only, and self-guard internally: `e10_org_role_clone` (admin ∧ `act.permissions_config`), `e10_claim_handle` (self), `e10_verify_handle_claim` / `e10_reject_handle_claim` (platform-admin, advisory-lock serialized). They appear in advisor 0029 (`authenticated_security_definer_function_executable`) — **intended**, same disposition as the inventory RPCs (the exposed API surface, anon revoked, capability-gated).
+- **`e10_platform_admins` = RLS on + zero policies (deny-all)** → advisor `rls_enabled_no_policy` INFO. **Intended** (only `service_role`/definer reach it), same class as the receipts/backups.
+- **Unindexed FKs (INFO, 4):** the audit columns `organizations.created_by`, `platform_admins.created_by`, `invitations.invited_by`, `role_permissions.updated_by` reference `auth.users` without a covering index. **Dispositioned** — audit/attribution columns, never a query predicate on the FK column; low-value to index. The hot-path FKs (role FKs, `memberships(user_id)`) are indexed. Add later only if an audit query needs it.
+- **Module→bundle mapping (pinned in A6a; awaiting Trent's explicit confirmation):** entitlement bundles `core` | `cards`; the six module capabilities map `mod.toolkit → cards` (the break/cards vertical surface), `mod.home / mod.inventory / mod.reporting / mod.schedule / mod.settings → core`. Effective module access = org entitled to the owning bundle AND role granted the concrete `mod.<key>`.
