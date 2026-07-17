@@ -5,6 +5,12 @@ zero-downtime write bridge + corrected backfill/cutover order (§12); RPC scope 
 member/entity/invitation/viewer context (§4); an explicit grants/RLS/index matrix per org-core table (§1.2); exact
 module-capability + entitlement semantics with no undefined wildcard (§1.1); verified-only + expiring handle-claim
 uniqueness (§6); removal of the ambiguous `can_read_session` (§5); and the buyback/repack future invariants (§13).
+**rev3.1 closure edit:** bootstrap org0 memberships + parity grants BEFORE the current_org-based bridge/wrappers/
+policies (blocker 1); composite key ships as a UNIQUE candidate until contract — PostgreSQL forbids a second PK
+(blocker 2); globally-unique invitation token + session id/share_code so token/viewer/session org-derivation is
+unambiguous (blocker 3); the six concrete `mod` keys incl. `mod.reporting`, no wildcard (blocker 4); plus role-FK
+indexes, `auth.users` FKs, CHECK constraints, handle normalization + verify-concurrency rule, and the exact A6
+table list (§0.2).
 Awaiting the A6-0 human gate ("A6 design approved") from BOTH reviewers. No build checkpoint (A6a–d) runs until
 approved. **The largest schema change in the project's history.**
 **`docs/DOMAIN_MAP.md` reconciled (v1.2, 2026-07-17)** with Trent's current content — the checklist/role
@@ -43,6 +49,19 @@ who buys spots in a competitor's break is both — a member of org A and a viewe
 - **PARTICIPATION:** `e10_session_viewers` gains `organization_id` (from its session) but authorizes viewers.
 - **OPS/BACKUP unchanged** (RLS deny-all, service-role only).
 
+### 0.2 Exact A6 table list (the migration scope — currently-existing tables only)
+**Gets `organization_id` in A6 (19 existing + 1 new):** `e10_inventory_items`, `e10_inventory_movements`,
+`e10_inventory_reservations`, `e10_mutation_receipts`, `e10_workspace`, `e10_break_sessions`, `e10_break_slots`,
+`e10_break_events`, `e10_session_viewers`, and the ten obs tables — `e10_obs_breaks`, `e10_obs_captures`,
+`e10_obs_channels`, `e10_obs_config`, `e10_obs_products`, `e10_obs_product_prices`, `e10_obs_slots`,
+`e10_obs_streams`, `e10_obs_upcoming_shows`, `e10_obs_viewer_snapshots`; plus the **new** `e10_live_sessions`
+(org-scoped from birth, §7).
+**Does NOT get `organization_id`:** `e10_cards`, `e10_players`, `e10_sets`, `e10_teams`, `e10_checklists` (platform
+catalog); `e10_members` → memberships, `e10_viewers` (global), `e10_role_permissions` → org role permissions;
+`e10_bigimport_backup`, `e10_seed_backup` (ops/backup). *(Not tables today, so out of A6's migration: orders,
+fulfillment, customers [Phase 8/9]; repacks, buybacks, store credit [§13]; break-models/cost-model/notes, which
+live in `e10_workspace` JSONB.)*
+
 ---
 
 ## 1. Org-core schema (new — A6a)
@@ -57,12 +76,15 @@ create schema if not exists e10;   -- internal; NOT in PostgREST's exposed schem
 
 create table public.e10_organizations (
   id uuid primary key default gen_random_uuid(),
-  slug text unique not null, name text not null,
-  status text not null default 'active', settings jsonb not null default '{}'::jsonb,
-  created_by uuid, created_at timestamptz not null default now()
+  slug text unique not null check (slug ~ '^[a-z0-9-]{2,40}$'),   -- normalized handle
+  name text not null,
+  status text not null default 'active' check (status in ('active','suspended')),
+  settings jsonb not null default '{}'::jsonb,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
 );
 
--- org-DEFINED roles: composite PK so all references are (organization_id, role_id) (revision 1)
+-- org-DEFINED roles: composite PK so all references are (organization_id, role_id) (rev1)
 create table public.e10_organization_roles (
   organization_id uuid not null references public.e10_organizations(id) on delete cascade,
   id uuid not null default gen_random_uuid(),
@@ -73,52 +95,59 @@ create table public.e10_organization_roles (
   unique (organization_id, key)
 );
 
--- permission SETS — ALLOW-LIST: a row PRESENT-and-allowed grants; ABSENT = DENY (revision 2, inverts the old deny-list)
+-- permission SETS — ALLOW-LIST: a row PRESENT-and-allowed grants; ABSENT = DENY (rev2, inverts the old deny-list)
 create table public.e10_organization_role_permissions (
   organization_id uuid not null,
   role_id uuid not null,
-  capability text not null,          -- act.inventory_edit | act.lists_edit | act.live_run |
-                                     -- act.permissions_config | act.reporting_export | act.team_manage | mod.<key>
+  capability text not null,          -- one of the enumerated act.* / mod keys in §1.1 (concrete strings only)
   allowed boolean not null default true,
-  updated_by uuid, updated_at timestamptz not null default now(),
+  updated_by uuid references auth.users(id) on delete set null,
+  updated_at timestamptz not null default now(),
   primary key (organization_id, role_id, capability),
   foreign key (organization_id, role_id) references public.e10_organization_roles(organization_id, id) on delete cascade
 );
 
 create table public.e10_organization_memberships (
   organization_id uuid not null references public.e10_organizations(id) on delete cascade,
-  user_id uuid not null,
+  user_id uuid not null references auth.users(id) on delete cascade,
   role_id uuid not null,
-  display_name text, status text not null default 'active',
+  display_name text,
+  status text not null default 'active' check (status in ('active','invited','suspended')),
   created_at timestamptz not null default now(),
   primary key (organization_id, user_id),
   foreign key (organization_id, role_id) references public.e10_organization_roles(organization_id, id)
 );
+create index e10_memberships_user_idx on public.e10_organization_memberships (user_id);            -- current_org() reverse lookup
+create index e10_memberships_role_idx on public.e10_organization_memberships (organization_id, role_id); -- role FK
 
 create table public.e10_organization_invitations (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references public.e10_organizations(id) on delete cascade,
   email text not null,
   role_id uuid not null,
-  token_hash text not null,          -- HASH of the token, never the token (revision 5)
-  invited_by uuid,
-  status text not null default 'pending',
-  expires_at timestamptz not null,   -- expiry REQUIRED (revision 5)
+  token_hash text not null unique,   -- HASH of the token, GLOBALLY unique so redeem-by-token is unambiguous (blocker 3)
+  invited_by uuid references auth.users(id) on delete set null,
+  status text not null default 'pending' check (status in ('pending','accepted','revoked','expired')),
+  expires_at timestamptz not null check (expires_at > created_at),   -- expiry REQUIRED (rev5)
   created_at timestamptz not null default now(),
-  foreign key (organization_id, role_id) references public.e10_organization_roles(organization_id, id),
-  unique (organization_id, token_hash)
+  foreign key (organization_id, role_id) references public.e10_organization_roles(organization_id, id)
 );
+create index e10_invitations_role_idx on public.e10_organization_invitations (organization_id, role_id); -- role FK
+create index e10_invitations_org_email_idx on public.e10_organization_invitations (organization_id, lower(email));
 
 create table public.e10_organization_modules (   -- entitlements
   organization_id uuid not null references public.e10_organizations(id) on delete cascade,
-  module_key text not null, enabled boolean not null default true,
+  module_key text not null check (module_key in ('core','cards')),   -- enumerated bundle set (§1.1)
+  enabled boolean not null default true,
   settings jsonb not null default '{}'::jsonb,
   primary key (organization_id, module_key)
 );
 
 -- PLATFORM ADMIN — above orgs, never org membership; RLS DENY-ALL (service-role/definer only)
 create table public.e10_platform_admins (
-  user_id uuid primary key, created_by uuid, created_at timestamptz not null default now()
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
 );
 -- alter table … enable row level security;  -- and NO policy → deny-all to anon/authenticated
 ```
@@ -127,33 +156,34 @@ create table public.e10_platform_admins (
 - `e10.has_org_cap(org, cap)` := platform-admin **OR** (active member of `org` **AND EXISTS** a
   `role_permissions` row for their role+cap with `allowed=true`). **Empty ⇒ denied** (opposite of the current
   deny-list `e10_has_cap`).
-- A6a seeds explicit grants for the four **system** roles (sensible defaults): e.g. Admin = all six `act.*` +
-  `mod.*`; Manager = inventory/lists/reporting/live; Streamer = live_run + lists; Ops = fulfillment/reporting.
+- A6a seeds explicit grants for the four **system** roles (sensible defaults): e.g. Admin = all six `act.*` + all
+  six module keys; Manager = inventory/lists/reporting/live + the matching modules; Streamer = live_run + lists;
+  Ops = fulfillment/reporting (`mod.toolkit` + `mod.reporting`). All grants are concrete capability strings.
 - **Tenant-zero parity seed (A6b acceptance):** because today's model is deny-list (every member has EVERY cap),
   the tenant-zero backfill MUST grant, to the roles its current members map to, **every currently-exercised
-  capability** — the enumerated set `act.inventory_edit, act.lists_edit, act.live_run, act.permissions_config,
-  act.reporting_export, act.team_manage` + the active `mod.*` — so the deny-list→allow-list flip is **behaviorally
-  invisible at cutover.** A6b **proves parity per user:** for every current member, every `hasCap(x)` that returns
-  true today returns true after the flip. (A6a enumerates the full cap set by grepping `has_cap`/`hasCap` call
-  sites; this list is the floor.)
+  capability** — the six `act.*` (§1.1) + the six module keys (`mod.home, mod.inventory, mod.reporting,
+  mod.schedule, mod.settings, mod.toolkit`) that the org currently uses — so the deny-list→allow-list flip is
+  **behaviorally invisible at cutover.** A6b **proves parity per user:** for every current member, every `hasCap(x)`
+  that returns true today returns true after the flip. (A6a pins the full concrete cap set from the `has_cap`/
+  `hasCap` call sites; this list is the floor — no wildcard.)
 - **Clone RPC** `e10_org_role_clone(p_org, p_src_role, p_dst_role)` copies the source role's permission-set rows
   (the allow grants) as a starting point; admin-cap gated.
 
-### 1.1 Module-capability + entitlement semantics — NO undefined wildcard (rev3)
-Two orthogonal, both-required gates; there is **no stored or honored `mod.*` wildcard** — every capability is a
-concrete string.
-- **Entitlement** (`e10_organization_modules.module_key`) = the coarse bundle an **org HAS** (billing/provisioning
-  level). Enumerated set: **`core`, `cards`** (future verticals add siblings). Written by platform admin.
-- **Module capability** (`role_permissions.capability = 'mod.<key>'`) = whether a **role** may use a nav module.
-  The `<key>` set is **exactly enumerated** from the client's nav groups: `mod.home, mod.schedule, mod.inventory,
-  mod.checklists, mod.modeler, mod.teams, mod.live, mod.fulfill, mod.reports, mod.team, mod.lists` (+ the literals
-  `mod.settings, mod.toolkit`). A6a pins this list from the code; new modules add concrete keys, never a wildcard.
-- **Action capabilities** (`act.*`) are the six enumerated in §1 (`inventory_edit, lists_edit, live_run,
-  permissions_config, reporting_export, team_manage`).
-- **Effective access to a nav module** = (org entitled: `e10_organization_modules` has `module_key` of the owning
-  bundle, enabled) **AND** (role granted: `e10.has_org_cap(org, 'mod.<key>')`). Bundle ownership: `checklists,
-  modeler, teams` → `cards`; the rest → `core`. `e10.has_org_cap` matches a concrete row only — a missing
-  `mod.<key>` row is a deny (allow-list), and a disabled entitlement denies regardless of the role grant.
+### 1.1 Module-capability + entitlement semantics — concrete enumerated keys, NO wildcard (rev3.1)
+Two orthogonal, both-required gates. Every capability is one of a fixed enumerated set of concrete strings — there
+is **no pattern/wildcard capability** anywhere (no `mod.` prefix-match, none stored, none honored).
+- **Entitlement** (`e10_organization_modules.module_key`) = the coarse bundle an **org HAS** (billing/provisioning).
+  Enumerated: **`core`, `cards`** (a future vertical adds a concrete sibling key). Written by platform admin.
+- **Module capabilities** = the **SIX** concrete keys the current client actually checks (pinned from the code):
+  **`mod.home`, `mod.inventory`, `mod.reporting`, `mod.schedule`, `mod.settings`, `mod.toolkit`.** These are the
+  exact strings stored in `role_permissions.capability`. A new module adds one new concrete key — never a pattern.
+- **Action capabilities** = the **SIX**: `act.inventory_edit`, `act.lists_edit`, `act.live_run`,
+  `act.permissions_config`, `act.reporting_export`, `act.team_manage`.
+- **Effective access to a module** = (org entitled to the module's owning bundle, `enabled=true`) **AND**
+  (`e10.has_org_cap(org, '<that concrete key>')` finds an `allowed=true` row). Bundle ownership is pinned in A6a
+  from the code (the cards-vertical surface → `cards`; the operational modules → `core`). A missing permission row
+  is a **deny** (allow-list); a disabled entitlement denies regardless of the role grant. `e10.has_org_cap` only
+  ever matches an exact capability string from the twelve above.
 
 ### 1.2 Grants / RLS / index matrix — org-core tables (rev3)
 All writes flow through `SECURITY DEFINER` RPCs in `public` that call `e10.*` predicates; `authenticated` gets only
@@ -164,8 +194,8 @@ the SELECT reach below via RLS (no direct table INSERT/UPDATE/DELETE grants). `a
 | `e10_organizations` | `e10.is_org_member(id)` OR platform-admin | platform-admin (self-serve create later) | PK`(id)`, `unique(slug)` |
 | `e10_organization_roles` | `e10.is_org_member(organization_id)` | `e10.is_org_admin(org)` ∧ `has_org_cap(org,'act.permissions_config')`; system roles undeletable | PK`(org,id)`, `unique(org,key)` |
 | `e10_organization_role_permissions` | `e10.is_org_member(org)` | admin ∧ `act.permissions_config` | PK`(org,role_id,capability)`, `(org,capability)` |
-| `e10_organization_memberships` | `e10.is_org_member(org)` OR `user_id=(select auth.uid())` | admin ∧ `act.team_manage` | PK`(org,user_id)`, **`(user_id)`** (the `current_org()` reverse lookup — load-bearing) |
-| `e10_organization_invitations` | `e10.is_org_admin(org)` (invitee redeems by token, never reads the table) | admin ∧ `act.team_manage` | PK`(id)`, `unique(org,token_hash)`, `(token_hash)`, `(org,email)` |
+| `e10_organization_memberships` | `e10.is_org_member(org)` OR `user_id=(select auth.uid())` | admin ∧ `act.team_manage` | PK`(org,user_id)`, **`(user_id)`** (`current_org()` reverse lookup — load-bearing), `(org,role_id)` (role FK), `user_id→auth.users` |
+| `e10_organization_invitations` | `e10.is_org_admin(org)` (invitee redeems by token, never reads the table) | admin ∧ `act.team_manage` | PK`(id)`, **`unique(token_hash)` global** (blocker 3), `(org,role_id)` (role FK), `(org,lower(email))` |
 | `e10_organization_modules` | `e10.is_org_member(org)` | **platform-admin** (entitlement = billing) | PK`(org,module_key)` |
 | `e10_platform_admins` | **DENY-ALL** (RLS on, no policy → service-role/definer only) | service-role/definer | PK`(user_id)` |
 | `e10_viewer_handle_claims` | `user_id=(select auth.uid())` OR platform-admin | INSERT own; verify = platform-admin | PK`(id)`, `(user_id)`, verified-unique `(lower(handle))` (§6) |
@@ -195,6 +225,13 @@ structurally impossible, at every level.
 - **Tenant-zero is semantically a no-op** (one org ⇒ `(org0, id)` behaves as `id`).
 - **Cost/mitigation:** composite joins are verbose; mitigated because RPCs derive org server-side and write the
   joins (§4), not the client.
+- **Staged as a UNIQUE candidate, not a second PK (blocker 2):** PostgreSQL allows only ONE primary key per table,
+  and the existing `id` PK must stay live through EXPAND (the old client still keys on it). So on the retrofitted
+  existing tables the composite ships as a **`UNIQUE (organization_id, id)` constraint/candidate key**; the child
+  composite FKs reference that UNIQUE (a FK may target any unique constraint, not only a PK). The composite becomes
+  the actual PRIMARY KEY **only at the CONTRACT migration**, once the old `id` PK + its single-column FKs are
+  dropped. (New org-core tables in §1 are created fresh with their composite PK directly — no staging needed.) The
+  "New PK" column below is the **end-state** key; read it as "UNIQUE until contract, PK after."
 
 | Table | New PK | Composite FK(s) |
 |---|---|---|
@@ -254,6 +291,17 @@ entity's/invitation's true org — that is the cross-org attack surface).
 The wrappers (old names) are all **Member** or **Entity** class and resolve org via `e10.current_org()`
 (single-membership). The `e10_org_*` names take the org explicitly and follow the class above.
 
+**Globally-unambiguous identities the Invitation + Viewer classes depend on (blocker 3):** these classes resolve
+`org` from a token or a session that the caller references *without already knowing the org*, so those identifiers
+must be **globally unique**, not per-org:
+- **Invitation:** `e10_organization_invitations.token_hash` is `UNIQUE` **globally** (not `(org, token_hash)`) — the
+  invitee redeems by token alone.
+- **Session/viewer:** `e10_break_sessions.id` (uuid) keeps a **global `UNIQUE (id)`** and `share_code` a global
+  `UNIQUE (share_code)` **in addition to** the composite `(organization_id, id)` — so the spectator/participant path
+  can look up a session by its global id / share code and derive `org` from it. `e10_live_sessions.id` likewise
+  keeps a global `UNIQUE (id)`. (Uuids are already collision-free; the explicit global unique is what makes the
+  org-derivation lookup a single-column key that survives the composite-PK swap at contract.)
+
 ---
 
 ## 5. Viewer authorization — three FULLY SEPARATED tiers (revision 4)
@@ -287,21 +335,31 @@ derived read of this table).
 ```sql
 create table public.e10_viewer_handle_claims (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null, whatnot_handle text not null,
-  status text not null default 'pending',            -- pending | verified | rejected
+  user_id uuid not null references auth.users(id) on delete cascade,
+  whatnot_handle text not null,                      -- as entered
+  -- CANONICAL normalization (rev3.1): lowercase + trim + strip a leading '@'. Stored/generated so EVERY compare +
+  -- the uniqueness use the same form. buyer_handle attribution (§5) matches on this normalized value.
+  handle_norm text generated always as (lower(btrim(regexp_replace(whatnot_handle, '^@', '')))) stored,
+  status text not null default 'pending' check (status in ('pending','verified','rejected')),
   evidence jsonb, verified_at timestamptz,
-  expires_at timestamptz not null,                   -- PENDING claims expire (rev3)
+  expires_at timestamptz not null check (expires_at > created_at),   -- PENDING claims expire (rev3)
   created_at timestamptz not null default now()
 );
--- canonical uniqueness = at most ONE VERIFIED owner per handle (verified-only, rev3). A partial index cannot
--- reference now(), so pending claims are deliberately NOT index-unique: they carry expires_at and are cleaned up,
--- and the verify RPC re-checks "no live verified claim + no unexpired pending by another user" at verification
--- time. This refines revision 5's `status in ('pending','verified')` index (which could wedge on a stale pending).
-create unique index e10_vhc_verified_handle on public.e10_viewer_handle_claims (lower(whatnot_handle))
-  where status = 'verified';
+-- canonical uniqueness = at most ONE VERIFIED owner per NORMALIZED handle (verified-only, rev3). A partial index
+-- cannot reference now(), so pending claims are deliberately NOT index-unique: they carry expires_at + are cleaned
+-- up. Refines rev5's `status in ('pending','verified')` index (which could wedge on a stale pending).
+create unique index e10_vhc_verified_handle on public.e10_viewer_handle_claims (handle_norm) where status = 'verified';
+create index e10_vhc_user_idx on public.e10_viewer_handle_claims (user_id);
 ```
+**Concurrency rule (rev3.1):** verification is serialized per handle — the verify RPC takes a transaction-scoped
+advisory lock `pg_advisory_xact_lock(hashtext(handle_norm))`, re-checks "no existing verified claim on this
+`handle_norm`", then flips exactly one claim to `verified`. Two racers cannot both win: the advisory lock serializes
+them and the verified-only unique index is the backstop — the loser gets a clean `handle_already_verified`
+rejection, never a partial state.
+
 A **verified** claim is the single canonical fact that lets a slot's `buyer_handle` attribute to a global
-`buyer_uid` across streamers; the participant predicate trusts verified matches only. Pending claims expire so a
+`buyer_uid` across streamers; the participant predicate trusts verified matches only (comparing on `handle_norm`).
+Pending claims expire so a
 handle is never permanently blocked by an abandoned claim. Verification UX ships post-A6.
 
 ---
@@ -359,13 +417,17 @@ first external org, not in A6.
 
 ## 11. Tenant-zero backfill (A6b — STAGING only)
 1. **Restore** a production snapshot into a **staging copy** (never touch prod).
-2. Create `org0` + four system roles + **seeded allow-grants** + `core`/`cards` modules; map current `e10_members`
-   → `(org0, user, role_id)`; seed `e10_platform_admins` for Trent's platform identity (separate from membership).
-3. **Backfill** `organization_id = org0` on every company-owned row; then `NOT NULL` + swap composite PKs/FKs;
-   `e10_workspace` → `(org0, …)`; receipts idempotency → `(org0, key)`; strict-1:1 `live_sessions` (§7).
+2. **(Done in A6a bootstrap — blocker 1, listed here for the full picture)** `org0` + four system roles + **parity
+   allow-grants** + `core`/`cards` modules exist; current `e10_members` are mapped to `(org0, user, role_id)`;
+   `e10_platform_admins` seeded for Trent's platform identity (separate from membership). This precedes any
+   `current_org`-based bridge/wrapper/policy.
+3. **Backfill** `organization_id = org0` on every company-owned row; `e10_workspace` → `(org0, …)`; receipts
+   idempotency → `(org0, key)`; strict-1:1 `live_sessions` (§7). Then `NOT NULL`; the composite ships as **`UNIQUE
+   (organization_id, id)`** (the `id` PK stays — blocker 2; composite becomes PK only at contract).
 4. **Verify (A6b acceptance):** every row owned (no null org); counts reconcile (35 items / 41 movements / 6
    receipts / …); recon views drift 0; ledger content byte-intact (checksum before/after); **allow-list PARITY
-   proven per user** (§1); the read-only gate passes against the backfilled **staging** DB. Paste every query.
+   proven per user** (§1 — every `hasCap` true today is true after); the read-only gate passes against the
+   backfilled **staging** DB. Paste every query.
 
 ---
 
@@ -389,9 +451,19 @@ RPCs pass org explicitly; the wrappers + trigger cover the old client. The bridg
    single-column FKs are dropped **at contract**, not here.
 
 **Sequence (staging → prod):**
-- **EXPAND (A6a–c, staging):** `e10` schema + predicates; new org tables; per-table steps 1–3; `e10_org_*` RPCs;
-  old RPCs → wrappers; policies switched to `e10.*`. Supports client N (single-org) AND N+1 (org-aware).
-- **BACKFILL (A6b, staging):** step 4 + allow-list parity seed + strict-1:1 live_sessions; verify (§11).
+- **BOOTSTRAP FIRST (A6a, blocker 1):** create the `e10` schema, the predicates, and the org-core tables, then
+  **seed org0 + its system roles + map current `e10_members` → org0 memberships + the parity allow-grants +
+  modules — BEFORE installing anything that calls `e10.current_org()`/`is_org_member`/`has_org_cap`.** Rationale:
+  the write bridge, the wrappers, and the switched policies all resolve the caller's org through membership; if any
+  were installed against an empty membership table, `current_org()` returns null and every write would stamp-null
+  and every read would deny. With org0's memberships + grants in place first, every current user resolves to org0
+  the instant the bridge/wrappers/policies go live (each has exactly one membership → the single-membership fast
+  path is deterministic).
+- **EXPAND (A6a–c, staging — AFTER bootstrap):** per-table steps 1–3 incl. the `e10.stamp_org()` bridge (now safe —
+  memberships exist); add the `e10_org_*` RPCs; convert old RPCs → wrappers; switch policies to `e10.*`. Supports
+  client N (single-org) AND N+1 (org-aware).
+- **BACKFILL (A6b, staging):** step 4 (backfill existing company rows → org0) + strict-1:1 live_sessions; verify
+  incl. allow-list parity per user (§11).
 - **PROMOTE (staging):** steps 5–6.
 - **A10 PROD cutover (after A7):** same EXPAND → bridge → BACKFILL → PROMOTE on prod → deploy the org-aware
   new-shell client → **observe** old-client drain (the deployed single-org client keeps working via wrappers +
