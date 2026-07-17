@@ -66,6 +66,10 @@ jobs:
           node tests/m32_ui_test.js
           node tests/live_flow_test.js
           node tests/m4_realtime_test.js
+      - name: A6a.1 org-core tests (handle-verify race + module_bundle)
+        # Runs while the provisioned members still exist (before the db reset below), so the verify-race cases
+        # (which need a platform-admin identity) execute rather than skip.
+        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6a1_verify_bundle_test.sql
       - name: Schema reproducibility (re-apply migrations cleanly)
         run: supabase db reset
       - name: Default-privileges regression probe (born-locked; zero anon-executable functions)

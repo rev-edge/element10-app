@@ -191,10 +191,12 @@ is **no pattern/wildcard capability** anywhere (no `mod.` prefix-match, none sto
 - **Action capabilities** = the **SIX**: `act.inventory_edit`, `act.lists_edit`, `act.live_run`,
   `act.permissions_config`, `act.reporting_export`, `act.team_manage`.
 - **Effective access to a module** = (org entitled to the module's owning bundle, `enabled=true`) **AND**
-  (`e10.has_org_cap(org, '<that concrete key>')` finds an `allowed=true` row). Bundle ownership is pinned in A6a
-  from the code (the cards-vertical surface → `cards`; the operational modules → `core`). A missing permission row
-  is a **deny** (allow-list); a disabled entitlement denies regardless of the role grant. `e10.has_org_cap` only
-  ever matches an exact capability string from the twelve above.
+  (`e10.has_org_cap(org, '<that concrete key>')` finds an `allowed=true` row). **Bundle ownership (confirmed ruling
+  2026-07-17, encoded in A6a.1 `e10.module_bundle(text)` IMMUTABLE): ALL SIX legacy keys → `core`** — the Live
+  Toolkit contains Ship/fulfillment which is `core` in DOMAIN_MAP, and a `cards` mapping would strip fulfillment
+  from future non-cards orgs; a future vertical supplies its own concrete keys mapping to `cards`. A missing
+  permission row is a **deny** (allow-list); a disabled entitlement denies regardless of the role grant.
+  `e10.has_org_cap` only ever matches an exact capability string from the twelve above.
 
 ### 1.2 Grants / RLS / index matrix — org-core tables (rev3)
 All writes flow through `SECURITY DEFINER` RPCs in `public` that call `e10.*` predicates; `authenticated` gets only
