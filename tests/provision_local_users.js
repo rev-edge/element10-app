@@ -36,6 +36,13 @@ for (const s of specs) if (!s.email || !s.pw) { console.error('missing email/pw 
     }
     const { error: me } = await svc.from('e10_members').upsert({ user_id: uid, email: s.email, role: s.role }, { onConflict: 'user_id' });
     if (me) { console.error('member upsert ' + s.email + ':', me.message); process.exit(3); }
+    // org0 membership so e10.current_org() resolves org0 → the e10.stamp_org() bridge stamps org0 on RPC inserts
+    // (A6b Step 5 made organization_id NOT NULL). Mirrors the A6a bootstrap mapping: admin→admin role, else→manager.
+    const roleId = s.role === 'admin' ? 'e1000000-0000-4000-8000-000000000001' : 'e1000000-0000-4000-8000-000000000002';
+    const { error: mm } = await svc.from('e10_organization_memberships').upsert(
+      { organization_id: 'e1000000-0000-4000-8000-0000000000a6', user_id: uid, role_id: roleId, status: 'active' },
+      { onConflict: 'organization_id,user_id' });
+    if (mm) { console.error('membership upsert ' + s.email + ':', mm.message); process.exit(3); }
   }
   console.log('local provisioning ok');
 })().catch(e => { console.error(e); process.exit(3); });

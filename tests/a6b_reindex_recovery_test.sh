@@ -18,7 +18,10 @@ echo "[a6b reindex recovery proof]"
 # Every composite index includes the table's own unique key, so no genuine (org,key) duplicate is possible; instead we
 # make a real failed CONCURRENTLY build under the allowlisted name over a duplicable column (num_value) — recovery
 # matches on index NAME + indisvalid, not columns. Distinct PK keys, same num_value => the unique build fails.
-Q -c "drop index concurrently if exists public.e10_obs_config_org_uq;" >/dev/null
+# After A6b Step 5 the index is attached to a UNIQUE constraint, so drop the constraint (drops its index); also drop a
+# bare index if one exists (pre-promotion defensive). We rebuild the index AND re-attach the constraint in Part C.
+Q -c "alter table public.e10_obs_config drop constraint if exists e10_obs_config_org_uq;" >/dev/null
+Q -c "drop index if exists public.e10_obs_config_org_uq;" >/dev/null
 Q -c "delete from public.e10_obs_config where key in ('__reidx_a','__reidx_b');" >/dev/null
 Q -c "insert into public.e10_obs_config(key, num_value, updated_at, organization_id) values ('__reidx_a', 42, now(), '$ORG0'), ('__reidx_b', 42, now(), '$ORG0');" >/dev/null
 # concurrent unique build MUST fail on the duplicate num_value=42 and leave an invalid index named e10_obs_config_org_uq
@@ -55,6 +58,11 @@ Q -c "create unique index concurrently if not exists e10_obs_config_org_uq on pu
 REBUILT=$(Q -c "select indisvalid from pg_index where indexrelid='e10_obs_config_org_uq'::regclass;")
 echo "  rebuilt e10_obs_config_org_uq: indisvalid=$REBUILT (expect t)"
 [ "$REBUILT" = "t" ] || { echo "  FAIL(C): rebuild did not produce a valid index"; FAIL=1; }
+# re-attach the Step-5 UNIQUE constraint to restore the promoted state (leaves the schema as db reset produced it)
+Q -c "alter table public.e10_obs_config add constraint e10_obs_config_org_uq unique using index e10_obs_config_org_uq;" >/dev/null
+RECON=$(Q -c "select count(*) from pg_constraint where conname='e10_obs_config_org_uq' and contype='u' and conrelid='public.e10_obs_config'::regclass;")
+echo "  re-attached UNIQUE constraint e10_obs_config_org_uq: present=$RECON (expect 1)"
+[ "$RECON" = "1" ] || { echo "  FAIL(C): did not restore the UNIQUE constraint"; FAIL=1; }
 
 # cleanup fixture
 Q -c "drop table if exists _reidx_unknown;" >/dev/null
