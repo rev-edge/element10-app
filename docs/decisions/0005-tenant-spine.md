@@ -22,6 +22,11 @@ points to §0.2 and drops the non-table items from the A6 org_id claim.
 **rev3.2.1 (2026-07-17) micro-edit:** §12 CONTRACT now uses a second standalone composite unique index for legal
 PK promotion, recreates child composite FKs against the new PK before removing the candidate UNIQUE constraint,
 and permanently preserves the §4.1 global session `UNIQUE(id)` / `UNIQUE(share_code)` lookup keys.
+
+**rev3.2.2 (2026-07-18) A6b build correction:** §2 — the `movements→items` / `receipts→items` composite FKs are
+DROPPED (append-only ledger references hard-deleted items); the boundary is preserved by RPC authorization + an
+org-scoped ledger-insert trigger, NOT `stamp_org()` alone. Every retained composite FK mirrors its legacy FK's ON
+DELETE (11 CASCADE + `break_events→slots` SET NULL(slot_id)). See §2's rev3.2.2 bullet.
 Awaiting the A6-0 human gate ("A6 design approved") from BOTH reviewers. No build checkpoint (A6a–d) runs until
 approved. **The largest schema change in the project's history.**
 **`docs/DOMAIN_MAP.md` reconciled (v1.2, 2026-07-17)** with Trent's current content — the checklist/role
@@ -254,6 +259,21 @@ structurally impossible, at every level.
 - **`item_id text` linkage stays load-bearing + un-regenerated:** movements/receipts/reservations reference items
   by `(organization_id, item_id) → items(organization_id, id)`. The append-only ledger's *content* (deltas, times,
   actors) is untouched; the FK re-point is a constraint change, not a data change.
+  - **rev3.2.2 correction (Trent, 2026-07-18) — ledger FK exception + ON DELETE parity.** Two rulings from the A6b
+    build. **(a) Only `reservations` keeps the composite FK to items** (`ON DELETE CASCADE`, matching the legacy
+    `reservations_item_id_fkey`). **The `movements→items` and `receipts→items` composite FKs are DROPPED** — the
+    append-only ledger INTENTIONALLY references hard-deleted items (`e10_inv_delete_item` records a `correction`
+    movement *then* deletes the item; the legacy schema had no such FKs, by design). `NO ACTION` would break the
+    delete RPC; `CASCADE` would destroy correction history. The org/item boundary is therefore NOT proven by
+    `e10.stamp_org()` alone: it is preserved by (i) the inventory RPC authorization (`_e10_inv_guard`) and (ii) an
+    **org-scoped ledger-insert check** — a `BEFORE INSERT` trigger `e10.assert_ledger_item_org()` on
+    movements+receipts that rejects (42501) any row whose `organization_id` disagrees with the referenced item's
+    org (regression-proven: delete succeeds; correction movement+receipt survive with org+item_id; cross-org
+    insert rejected). **(b) Every retained composite FK mirrors its legacy FK's ON DELETE** — 11 `CASCADE`, and
+    `break_events→break_slots` `ON DELETE SET NULL (slot_id)` (column-specific, PG15+, so the NOT-NULL
+    `organization_id` is untouched); `obs_breaks→products` and `break_sessions→live_sessions` stay `NO ACTION`.
+    (The Step 1 migration's blanket-`NO ACTION` composite FKs were the defect; a new additive corrective migration
+    recreates them.)
 - **Org-leading member index family is free** (the PK btree leads with `organization_id`).
 - **Tenant-zero is semantically a no-op** (one org ⇒ `(org0, id)` behaves as `id`).
 - **Cost/mitigation:** composite joins are verbose; mitigated because RPCs derive org server-side and write the

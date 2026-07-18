@@ -80,6 +80,10 @@ jobs:
         # Fabricates a real INVALID allowlisted index + a non-allowlisted invalid index, runs the actual recovery
         # script, and asserts: allowlisted invalid dropped, unknown refused, rebuild valid (indisvalid=true).
         run: bash tests/a6b_reindex_recovery_test.sh
+      - name: A6b composite-FK ON DELETE corrective proof (delete survives ledger; cross-org rejected)
+        # Drives the real inventory RPCs: e10_inv_delete_item succeeds; its correction movement+receipt survive the
+        # item deletion (org+item_id retained); the reservation cascades; a cross-org ledger insert is rejected.
+        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6b_fk_corrective_test.sql
       - name: Schema reproducibility (re-apply migrations cleanly)
         run: supabase db reset
       - name: Default-privileges regression probe (born-locked; zero anon-executable functions)
