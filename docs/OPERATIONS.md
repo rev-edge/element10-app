@@ -20,18 +20,25 @@ Every DB change flows through the pipeline; the client never ships against an in
 **Gate account:** `e10schemagate@example.com` — authenticated, **no `e10_members` row** (may call `e10_schema_version()`, reads nothing else). Its password + the prod anon key + `E10_ALLOW_PROD` live as secrets in the protected `production` GitHub environment (never in logs). Rotate via the same admin-API provisioning + `gh secret set --env production`.
 
 ## Staging apply-path guard (A6/A6b — the linked-project hazard)
-The Supabase CLI is linked to **production** (`supabase/.temp/project-ref` = `ddhkkumiyidorzmajwde`), so a bare
-`supabase db push` / `supabase db reset` targets **prod** (the A6a.3 near-miss). While Foundation Gate A6 is
-**staging-only** (zero prod changes until A10), every staging DB write MUST go through an **explicit target**, never
-the linked project:
+The Supabase CLI is linked to **production** (`supabase/.temp/project-ref` = `ddhkkumiyidorzmajwde`). Which CLI
+command hits what:
+- **`supabase db push` (bare)** → pushes migrations to the **linked project = production**. **PROHIBITED** while the
+  link points at prod (the A6a.3 near-miss).
+- **`supabase db reset` (bare)** → resets the **LOCAL** dev stack only (safe; it does not touch any remote).
+- **`supabase db reset --linked`** → destructively **resets the linked REMOTE project** (= production, right now).
+  **NEVER** run this while linked to prod — it would wipe the live database.
+
+While Foundation Gate A6 is **staging-only** (zero prod changes until A10), every **remote** DB write MUST go through
+an **explicit target**, never the linked project:
 - **MCP** `apply_migration` / `execute_sql` with explicit `project_id: csmbjfmoxkexcyssntbg`; after `apply_migration`, reconcile the recorded `schema_migrations.version` to the repo filename (it stamps its own wall-clock version), or
 - `supabase db push --db-url "postgresql://postgres.csmbjfmoxkexcyssntbg:<SUPABASE_STAGING_DB_PASSWORD>@aws-0-us-east-1.pooler.supabase.com:5432/postgres"` (session pooler, port 5432 — session mode so advisory locks/`SET`s work; the transaction pooler on 6543 does **not**), or
 - direct `psql` / `\copy` against that same staging session-pooler URL.
 
-**Rules:** never run a bare `supabase db push`/`db reset` while the link points at prod; prove the target before each
-apply with a harmless read (`select current_database()` + a staging-only marker such as the presence of the
-`e10` schema / `e10_organizations`); take staging secrets from `.env.local` (`SUPABASE_STAGING_DB_PASSWORD`) and stop
-if missing; production contact stays **read-only** under `E10_ALLOW_PROD` until A10.
+**Rules:** never run a bare `supabase db push` (or `db reset --linked`) while the link points at prod; a bare
+`db reset` is fine (LOCAL only). Prove the target before each remote apply with a harmless read
+(`select current_database()` + a staging-only marker such as the presence of the `e10` schema / `e10_organizations`);
+take staging secrets from `.env.local` (`SUPABASE_STAGING_DB_PASSWORD`) and stop if missing; production contact stays
+**read-only** under `E10_ALLOW_PROD` until A10.
 
 ## Supply-chain
 The two external scripts are pinned to exact versions with Subresource Integrity + `crossorigin`:
