@@ -200,6 +200,24 @@ is **no pattern/wildcard capability** anywhere (no `mod.` prefix-match, none sto
   rule as `e10.has_module_access(org, key)`: the mapped entitlement must exist and be enabled, and
   `e10.has_org_cap(org, 'mod.' || key)` must grant the exact module capability.
 
+**A6b v1 finer capability catalog (Trent's ruling 2026-07-18; installed A6b Step 3, migration `20260718160000`).**
+This is the approved **`v1`** catalog and **supersedes** the earlier "twelve concrete keys" enumeration as the fixed
+action set (the six legacy `act.*` remain valid and unchanged; these are additive). The catalog is **exactly 15 new
+`act.*` capabilities** — 11 WRITE + 4 READ (read and mutation are separate grants). It is NOT the alternate 11-leaf
+`session.read`/`session.write`/… vocabulary (that naming is not authoritative and is not persisted).
+- **WRITE (11):** `act.create_session`, `act.scheduling`, `act.assign_operators`, `act.configure_breaks`,
+  `act.reserve_inventory`, `act.submit_checklist_sources`, `act.approve_checklists`, `act.approve_preparation`,
+  `act.create_receiving`, `act.resolve_recovery`, `act.reopen_preparation`.
+- **READ (4):** `act.view_schedule`, `act.view_inventory`, `act.view_prepared_handoff`, `act.view_financial_estimates`.
+- **Role mapping (new-cap counts):** **admin** = all **15**; **manager** = **13** (all except `act.approve_checklists`
+  and `act.approve_preparation`); **streamer** = **2** (`act.view_schedule`, `act.view_prepared_handoff`); **ops** = **1**
+  (`act.view_inventory`). Seeded into org0's system roles by role key; legacy cap/module rows unchanged.
+- **`act.live_run` remains the existing legacy Start-Live gate** and is **not** one of these 15 (org administration
+  likewise stays on `act.permissions_config` / `act.team_manage`).
+- **Future renames are row/data edits** (`e10_organization_role_permissions.capability`), never a schema change.
+- **Future organizations inherit this mapping** when the organization-creation workflow is built (deferred — NOT built
+  in A6b; A6b installs it for tenant-zero/org0 only).
+
 ### 1.2 Grants / RLS / index matrix — org-core tables (rev3)
 All writes flow through `SECURITY DEFINER` RPCs in `public` that call `e10.*` predicates; `authenticated` gets only
 the SELECT reach below via RLS (no direct table INSERT/UPDATE/DELETE grants). `anon` gets nothing new.
