@@ -5,11 +5,14 @@
 // real Postgres connections:
 //   A) begins a txn and holds the handle's advisory lock (simulating a verify mid-flight, before its post-lock reread)
 //   B) calls verify() asynchronously -> BLOCKS on A's lock
-//   we prove B is lock-waiting (bounded poll of pg_locks) BEFORE continuing, so the interleaving is real, not serial
+//   we prove *B's exact backend* is the ungranted advisory-lock waiter (pg_locks filtered on B's pg_backend_pid())
+//     BEFORE continuing, so the interleaving is real and not attributed to some unrelated waiter
 //   A) rejects() (no lock needed) and COMMITs, releasing the advisory lock
 //   B) unblocks -> its verify MUST fail with claim_not_pending_or_expired; the claim MUST end 'rejected', never 'verified'
-// The test fails if verify succeeds, if the claim becomes verified, if the blocking interleaving was not established,
-// or if the bounded poll times out. Fixture-free: it removes the claim (and the platform_admins row IF it inserted one).
+// B's completion after the lock release is bounded by a short timeout so a hang fails (and cleans up) instead of stalling.
+// The test fails if verify succeeds, if the claim becomes verified, if the blocking interleaving was not established on
+// B's own backend, or if the bounded wait times out. Fixture-free: it removes the claim (and the platform_admins row IF
+// it inserted one) and closes every connection, on success and failure.
 //
 // Local (CI): uses a provisioned e10_members user. Run: node tests/a6a3_verify_concurrent_test.js
 // Staging/other: set E10_DB_URL (connection string) and E10_ADMIN_UID (a pre-provisioned auth.users id to act as
@@ -20,6 +23,7 @@ const { Client } = require('pg');
 const CONN = process.env.E10_DB_URL || process.env.E10_LOCAL_DB_URL || 'postgresql://postgres:postgres@127.0.0.1:54322/postgres';
 const ADMIN_UID = process.env.E10_ADMIN_UID || null;
 const LABEL = CONN.replace(/:\/\/[^@/]*@/, '://***@'); // never print credentials
+const B_TIMEOUT_MS = 8000; // bounded wait for B after lock release (CI-safe)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const jwt = (uid) => JSON.stringify({ sub: uid, role: 'authenticated' });
 
@@ -49,6 +53,8 @@ async function main() {
   const B = new Client({ connectionString: CONN });
   await A.connect();
   await B.connect();
+  // B's dedicated backend PID — the poll below requires the ungranted advisory lock to be held by THIS backend.
+  const bpid = (await B.query('select pg_backend_pid() as pid')).rows[0].pid;
 
   try {
     // A) hold the advisory lock for the handle
@@ -64,23 +70,34 @@ async function main() {
       .then(() => { bDone = true; })
       .catch((e) => { bError = e; });
 
-    // Prove B is lock-waiting BEFORE continuing (bounded — the test cannot hang).
+    // Prove B's OWN backend is the ungranted advisory-lock waiter (bounded — the test cannot hang).
     let waiting = 0;
     for (let i = 0; i < 500; i++) {
-      waiting = (await setup.query("select count(*)::int n from pg_locks where locktype='advisory' and not granted")).rows[0].n;
+      waiting = (await setup.query(
+        "select count(*)::int n from pg_locks where locktype='advisory' and granted = false and pid = $1",
+        [bpid],
+      )).rows[0].n;
       if (waiting >= 1) break;
       await sleep(10);
     }
-    if (waiting < 1) throw new Error('TIMEOUT: B never blocked on the advisory lock — interleaving not established');
+    if (waiting < 1) throw new Error(`TIMEOUT: B (pid ${bpid}) never became the ungranted advisory-lock waiter — interleaving not established`);
     if (bDone || bError) throw new Error('B resolved before the reject committed — not a real race');
-    console.log(`  [proof] real lock wait established: ${waiting} ungranted advisory lock; B still pending (not resolved)`);
+    console.log(`  [proof] real lock wait established: B backend pid=${bpid} holds ${waiting} ungranted advisory lock; B still pending (not resolved)`);
 
     // A) reject (no advisory lock) + COMMIT -> releases the lock, unblocking B
     await A.query('select public.e10_reject_handle_claim($1)', [claim.id]);
     await A.query('commit');
 
-    // B) unblocks; verify must have failed
-    await bVerify;
+    // B) must resolve promptly now; bound it so a hang fails (and cleans up) instead of stalling CI.
+    let timer;
+    try {
+      await Promise.race([
+        bVerify,
+        new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`TIMEOUT: B (pid ${bpid}) did not resolve within ${B_TIMEOUT_MS}ms of lock release`)), B_TIMEOUT_MS); }),
+      ]);
+    } finally {
+      clearTimeout(timer); // no dangling timer on success
+    }
     await B.query('rollback').catch(() => {});
 
     const finalStatus = (await setup.query('select status from public.e10_viewer_handle_claims where id=$1', [claim.id])).rows[0].status;
@@ -95,7 +112,7 @@ async function main() {
 
     if (failures.length) throw new Error('A6a.3 concurrent verify-vs-reject FAILED:\n  - ' + failures.join('\n  - '));
     console.log(`  [proof] final claim status = ${finalStatus}; verify error = ${bError.message}`);
-    console.log(`A6a.3 concurrent verify-vs-reject: PASS (B blocked on lock; reject committed; verify raised claim_not_pending_or_expired; claim stayed rejected) [${LABEL}]`);
+    console.log(`A6a.3 concurrent verify-vs-reject: PASS (B pid=${bpid} blocked on lock; reject committed; verify raised claim_not_pending_or_expired; claim stayed rejected) [${LABEL}]`);
   } finally {
     await A.query('rollback').catch(() => {});
     await B.query('rollback').catch(() => {});
