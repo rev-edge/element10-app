@@ -40,6 +40,21 @@ an **explicit target**, never the linked project:
 take staging secrets from `.env.local` (`SUPABASE_STAGING_DB_PASSWORD`) and stop if missing; production contact stays
 **read-only** under `E10_ALLOW_PROD` until A10.
 
+### A6b Step 1 — INVALID concurrent-index recovery (ADR §12 step 2)
+The 19 Step-1 index migrations (`20260718140001..140019`) each build a `(org, key)` index with `CREATE UNIQUE INDEX
+CONCURRENTLY IF NOT EXISTS`. A failed concurrent build (uniqueness violation, deadlock, cancel) leaves a **named but
+INVALID** index (`pg_index.indisvalid = false`); re-running the migration would then skip it via `IF NOT EXISTS` and
+falsely advance history. **Recovery** (the executable rule those migrations only described):
+1. Run `supabase/recovery/a6b_s1_reindex_recovery.sql` through the **guarded staging path** (`psql` against the
+   staging session pooler, autocommit — never wrapped in a transaction, since `DROP INDEX CONCURRENTLY` forbids it).
+   It drops **only** the 19 allowlisted `*_org_uq` indexes that are `indisvalid = false`, via `DROP INDEX
+   CONCURRENTLY`; anything outside the allowlist is never selected (refuses unknown by construction); valid indexes
+   are untouched; if nothing is invalid it is a no-op.
+2. Then re-run the corresponding unapplied index migration through `supabase db push --db-url <staging pooler>`.
+Proven by `tests/a6b_reindex_recovery_test.sh` (fabricates a real invalid allowlisted index + a non-allowlisted
+invalid index, runs the recovery script, asserts the allowlisted one is dropped, the unknown one survives, and the
+rebuild is `indisvalid = true`). CI runs this proof on every push.
+
 ## Supply-chain
 The two external scripts are pinned to exact versions with Subresource Integrity + `crossorigin`:
 `@supabase/supabase-js@2.110.5` and `xlsx@0.18.5` (index/overlay/companion.html). Bump the version AND recompute the `sha384-…` hash together (`curl -sL <url> | openssl dgst -sha384 -binary | openssl base64 -A`).

@@ -76,6 +76,10 @@ jobs:
         # Genuine two-connection race: A holds the handle advisory lock, B's verify blocks on it, A commits a
         # lockless reject, B unblocks and must fail. Needs the provisioned members (runs before the db reset below).
         run: node tests/a6a3_verify_concurrent_test.js
+      - name: A6b Step 1 invalid concurrent-index recovery proof
+        # Fabricates a real INVALID allowlisted index + a non-allowlisted invalid index, runs the actual recovery
+        # script, and asserts: allowlisted invalid dropped, unknown refused, rebuild valid (indisvalid=true).
+        run: bash tests/a6b_reindex_recovery_test.sh
       - name: Schema reproducibility (re-apply migrations cleanly)
         run: supabase db reset
       - name: Default-privileges regression probe (born-locked; zero anon-executable functions)
