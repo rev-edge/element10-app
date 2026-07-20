@@ -84,6 +84,10 @@ jobs:
         # Drives the real inventory RPCs: e10_inv_delete_item succeeds; its correction movement+receipt survive the
         # item deletion (org+item_id retained); the reservation cascades; a cross-org ledger insert is rejected.
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6b_fk_corrective_test.sql
+      - name: A6c.0 prerequisites gate (delegate ACL allowlist, spectate, per-delegate positive+adversarial authz)
+        # Proves the exact authenticated allowlist (13 client delegates; internals service_role-only; zero anon/PUBLIC),
+        # the published spectator predicate, and per-delegate authorization (cross-org / missing-cap / non-owner / invalid-code denied).
+        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6c0_gate_test.sql
       - name: Schema reproducibility (re-apply migrations cleanly)
         run: supabase db reset
       - name: Default-privileges regression probe (born-locked; zero anon-executable functions)
