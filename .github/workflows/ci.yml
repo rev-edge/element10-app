@@ -66,8 +66,33 @@ jobs:
           node tests/m32_ui_test.js
           node tests/live_flow_test.js
           node tests/m4_realtime_test.js
+      - name: A6a.1 org-core tests (handle-verify race + module_bundle)
+        # Runs while the provisioned members still exist (before the db reset below), so the verify-race cases
+        # (which need a platform-admin identity) execute rather than skip.
+        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6a1_verify_bundle_test.sql
+      - name: A6a.2 effective module-access tests
+        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6a2_module_access_test.sql
+      - name: A6a.3 concurrent verify-vs-reject (two connections)
+        # Genuine two-connection race: A holds the handle advisory lock, B's verify blocks on it, A commits a
+        # lockless reject, B unblocks and must fail. Needs the provisioned members (runs before the db reset below).
+        run: node tests/a6a3_verify_concurrent_test.js
+      - name: A6b Step 1 invalid concurrent-index recovery proof
+        # Fabricates a real INVALID allowlisted index + a non-allowlisted invalid index, runs the actual recovery
+        # script, and asserts: allowlisted invalid dropped, unknown refused, rebuild valid (indisvalid=true).
+        run: bash tests/a6b_reindex_recovery_test.sh
+      - name: A6b composite-FK ON DELETE corrective proof (delete survives ledger; cross-org rejected)
+        # Drives the real inventory RPCs: e10_inv_delete_item succeeds; its correction movement+receipt survive the
+        # item deletion (org+item_id retained); the reservation cascades; a cross-org ledger insert is rejected.
+        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6b_fk_corrective_test.sql
+      - name: A6c.0 prerequisites gate (delegate ACL allowlist, spectate, per-delegate positive+adversarial authz)
+        # Proves the exact authenticated allowlist (13 client delegates; internals service_role-only; zero anon/PUBLIC),
+        # the published spectator predicate, and per-delegate authorization (cross-org / missing-cap / non-owner / invalid-code denied).
+        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6c0_gate_test.sql
       - name: Schema reproducibility (re-apply migrations cleanly)
         run: supabase db reset
+      - name: Default-privileges regression probe (born-locked; zero anon-executable functions)
+        # Guards the A5.1a invariant against regression on every push (psql ships on ubuntu-latest runners).
+        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/probe_defpriv.sql
 
   # Live PRODUCTION contract gate — runs on main ONLY, before deploy, and GATES it. Proves the to-be-deployed
   # client's SCHEMA_VERSION matches live e10_schema_version(). Uses the protected `production` environment's

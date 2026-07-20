@@ -2,7 +2,7 @@
 
 ## CI/CD
 `.github/workflows/ci.yml` — on every push to `main` and every PR:
-- **test job:** `npm install` (tests/), `supabase start` (ephemeral local stack — **proves A1 reproducibility on a clean stack continuously**), provision local users, then the pure-helper suites, local integration + RLS-adversarial suites (incl. `rls_test` — the roles/permissions engine, wired in A4 via `tests/provision_rls_users.js`, so the admin/member/viewer isolation surface is exercised on every push), browser suites, and a final `supabase db reset` (re-apply migrations cleanly). No production access.
+- **test job:** `npm ci` (tests/, lockfile-exact), `supabase start` (ephemeral local stack — **proves A1 reproducibility on a clean stack continuously**), provision local users, then the pure-helper suites (incl. the `schema_gate_test` comparator), local integration + RLS-adversarial suites (incl. `rls_test` — the roles/permissions engine, wired in A4 via `tests/provision_rls_users.js`), browser suites, a final `supabase db reset` (re-apply migrations cleanly), and the **default-privileges regression probe** (`tests/probe_defpriv.sql` — new functions born locked + zero anon-executable functions). No production access.
 - **deploy job:** runs ONLY on `main` and ONLY after `test` passes. Publishes **web assets only** (`index.html`, `open/overlay/companion.html`, `.nojekyll`) to GitHub Pages — never `tests/`, `supabase/`, `docs/`, or `.github/`. (The prior `static.yml` published the entire repo; removed.)
 
 **Branch protection:** `main` requires the `test` check to pass before merge. Workflow: branch → PR → CI green → merge → auto-deploy.
@@ -18,6 +18,42 @@ Every DB change flows through the pipeline; the client never ships against an in
 **Two layers of the same guarantee.** CI's `schema-gate` is the *release-time* backstop (proves CONTRACT compatibility — client vs DB version — **not** migration completeness); it is exercised on every PR in pure-unit form by `tests/schema_gate_test.js` (the "gate bites" proof, since the live job only runs on `main`). The client's fail-closed `_schemaHandshake()` / `_schemaContract()` is the *runtime* backstop (a mismatched client goes read-only). Because the platform runs 24/7 with no maintenance windows, deploys are **zero-downtime** and this gate is what makes an out-of-order client/schema ship impossible.
 
 **Gate account:** `e10schemagate@example.com` — authenticated, **no `e10_members` row** (may call `e10_schema_version()`, reads nothing else). Its password + the prod anon key + `E10_ALLOW_PROD` live as secrets in the protected `production` GitHub environment (never in logs). Rotate via the same admin-API provisioning + `gh secret set --env production`.
+
+## Staging apply-path guard (A6/A6b — the linked-project hazard)
+The Supabase CLI is linked to **production** (`supabase/.temp/project-ref` = `ddhkkumiyidorzmajwde`). Which CLI
+command hits what:
+- **`supabase db push` (bare)** → pushes migrations to the **linked project = production**. **PROHIBITED** while the
+  link points at prod (the A6a.3 near-miss).
+- **`supabase db reset` (bare)** → resets the **LOCAL** dev stack only (safe; it does not touch any remote).
+- **`supabase db reset --linked`** → destructively **resets the linked REMOTE project** (= production, right now).
+  **NEVER** run this while linked to prod — it would wipe the live database.
+
+While Foundation Gate A6 is **staging-only** (zero prod changes until A10), every **remote** DB write MUST go through
+an **explicit target**, never the linked project:
+- **MCP** `apply_migration` / `execute_sql` with explicit `project_id: csmbjfmoxkexcyssntbg`; after `apply_migration`, reconcile the recorded `schema_migrations.version` to the repo filename (it stamps its own wall-clock version), or
+- `supabase db push --db-url "postgresql://postgres.csmbjfmoxkexcyssntbg:<SUPABASE_STAGING_DB_PASSWORD>@aws-0-us-east-1.pooler.supabase.com:5432/postgres"` (session pooler, port 5432 — session mode so advisory locks/`SET`s work; the transaction pooler on 6543 does **not**), or
+- direct `psql` / `\copy` against that same staging session-pooler URL.
+
+**Rules:** never run a bare `supabase db push` (or `db reset --linked`) while the link points at prod; a bare
+`db reset` is fine (LOCAL only). Prove the target before each remote apply with a harmless read
+(`select current_database()` + a staging-only marker such as the presence of the `e10` schema / `e10_organizations`);
+take staging secrets from `.env.local` (`SUPABASE_STAGING_DB_PASSWORD`) and stop if missing; production contact stays
+**read-only** under `E10_ALLOW_PROD` until A10.
+
+### A6b Step 1 — INVALID concurrent-index recovery (ADR §12 step 2)
+The 19 Step-1 index migrations (`20260718140001..140019`) each build a `(org, key)` index with `CREATE UNIQUE INDEX
+CONCURRENTLY IF NOT EXISTS`. A failed concurrent build (uniqueness violation, deadlock, cancel) leaves a **named but
+INVALID** index (`pg_index.indisvalid = false`); re-running the migration would then skip it via `IF NOT EXISTS` and
+falsely advance history. **Recovery** (the executable rule those migrations only described):
+1. Run `supabase/recovery/a6b_s1_reindex_recovery.sql` through the **guarded staging path** (`psql` against the
+   staging session pooler, autocommit — never wrapped in a transaction, since `DROP INDEX CONCURRENTLY` forbids it).
+   It drops **only** the 19 allowlisted `*_org_uq` indexes that are `indisvalid = false`, via `DROP INDEX
+   CONCURRENTLY`; anything outside the allowlist is never selected (refuses unknown by construction); valid indexes
+   are untouched; if nothing is invalid it is a no-op.
+2. Then re-run the corresponding unapplied index migration through `supabase db push --db-url <staging pooler>`.
+Proven by `tests/a6b_reindex_recovery_test.sh` (fabricates a real invalid allowlisted index + a non-allowlisted
+invalid index, runs the recovery script, asserts the allowlisted one is dropped, the unknown one survives, and the
+rebuild is `indisvalid = true`). CI runs this proof on every push.
 
 ## Supply-chain
 The two external scripts are pinned to exact versions with Subresource Integrity + `crossorigin`:
@@ -36,11 +72,19 @@ The two external scripts are pinned to exact versions with Subresource Integrity
 - **Leaked-password protection — ENABLED (prod, 2026-07-16).** Supabase Auth now checks passwords against
   HaveIBeenPwned; advisor `auth_leaked_password_protection` is cleared on prod. It is a GoTrue **dashboard**
   toggle (not settable via Management API/CLI). To re-enable/verify elsewhere: Dashboard → project →
-  **Authentication → Providers → Email → "Check against HaveIBeenPwned" → Save.** (Enable on
-  `element10-staging` too if desired.)
+  **Authentication → Attack Protection → "Leaked password protection" (checks against HaveIBeenPwned) → Save.**
+  (Enable on `element10-staging` too if desired.)
 - **Auth DB connection strategy:** left at absolute (10 connections). Fine at the current small instance size;
   switch to percentage-based allocation only when the instance is resized (advisor `auth_db_connections_absolute`,
   INFO — dispositioned in `docs/SECURITY.md`). Pooler config unchanged.
+
+## CI flakes / infrastructure protocol
+- **Edge-runtime `Bus error (core dumped)` during `supabase start`.** Seen intermittently on the CI runner while
+  the `supabase_edge_runtime` container boots (unrelated to app code — migrations apply fine). **Protocol:** a
+  re-run is a *workaround, not a fix*. On any recurrence, **capture the failed job's container logs** (the run's
+  `Start local Supabase` step already prints them) and **open an infrastructure issue** tracking the frequency /
+  runner image / CLI version, rather than silently re-running. (We don't use edge functions; disabling the
+  edge-runtime container in CI's `config.toml` is the candidate fix if it recurs often.)
 
 ## The M4-incident guardrails (see docs/incidents/2026-07-15-m4-blob-clobber.md)
 - Tests never default to production (`tests/env.js`; prod requires `E10_ALLOW_PROD=1`, read-only gate only).
