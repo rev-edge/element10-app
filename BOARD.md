@@ -39,6 +39,93 @@ work has been independently accepted.
 | A6c authorization plan rev 6 | GRANTED | CPI | 2026-07-20 | `Element10_A6c_PLAN.md` SHA-256 `2d1710bfdb0653271960f021c12efacb4c83f1be22067d6e064e6724ed33ce70` |
 | PF-C1 Product Master | NOT ACCEPTED — PF-C1.2 corrective active | - | - | - |
 
+## NEXT PROMPT TO SEND
+
+This section is written and replaced only by the Chief Project Inspector at each
+reconciliation. Each agent executes ONLY its own subsection and ignores the other.
+If your subsection says ALREADY DISPATCHED, do not re-run it.
+
+---
+
+### TRACK A — Claude Code — READY TO DISPATCH
+
+Implement A6c.0 only.
+
+Authorization: the Approvals Ledger above records
+`A6c authorization plan rev 6 | GRANTED | CPI | 2026-07-20 |
+Element10_A6c_PLAN.md SHA-256 2d1710bfdb0653271960f021c12efacb4c83f1be22067d6e064e6724ed33ce70`.
+Cite that row. Do not infer authorization from anything else.
+
+Repository verification before editing:
+- Canonical repo `/Users/tsconnely/dev/element10-app`, branch `foundation-a6`.
+- Accepted **code** head is `53501928a6ef928ad5a5ec4401e4e12073e6527a`. HEAD is
+  currently `51667c0`, a documentation-only commit adding this board on top of it.
+  Verify **ancestry** against the accepted code head. Do not require equality
+  with HEAD.
+- Read `AGENTS.md`, ADR 0005 rev 3.2.2, `Element10_A6c_PLAN.md` (rev 6), and the
+  97-policy census before writing anything.
+- Report any uncommitted user changes and preserve them.
+- All diffs are taken against `53501928...`, never a range you select. Where you
+  describe deployed behavior, pull the function body from staging rather than
+  characterizing it from a diff.
+
+Scope — A6c.0 ONLY:
+- Additive prerequisites, predicates, visibility, and constraints.
+- All `e10_org_*` delegates and `_e10_inv_*` helpers created born-locked per the
+  section 5.d ACL matrix: 13 client delegates granted `authenticated` +
+  `service_role`; `e10_org_emit_inventory_movement`, `_e10_inv_guard(p_org)` and
+  every org-aware helper revoked from `authenticated` and granted `service_role`
+  only; PUBLIC and anon revoked throughout.
+- Nothing is switched over. No wrapper cutover. No policy cutover.
+- Existing sessions remain private.
+- STAGING and LOCAL only. Production stays read-only.
+- Stop before A6c.1.
+
+Fold in while you work — documentation only, no behavior change, no re-review:
+1. State the function arithmetic explicitly so it is not re-derived: 14 public
+   inventory RPCs in section 5.a map to 14 delegates; 13 are client-callable; the
+   14th, `e10_org_emit_inventory_movement`, is internal-only per section 5.d;
+   with section 5.b's 10 helpers that is the 24-function inventory. The
+   "19 RPC wrappers" figure in the Track A handoff is stale.
+2. Membership-bound inventory wrappers that pass `e10.current_org()` fail closed
+   for users with multiple active memberships. `e10_buyer_suggest` and
+   `e10_redeem_code` are exceptions: both derive organization from session context
+   and never call `e10.current_org()`. Buyer Suggest remains Entity
+   (session-owner); Redeem Code remains Viewer.
+
+Do not: add product-first physical tables; rename or remove persisted capability
+rows; persist `product.write` or `session.approve`; modify accepted A6a/A6b
+migrations; promote composite candidate keys to primary keys; touch production;
+begin A6c.1.
+
+Run the A6c.0 gate tests to completion. Report, leading with:
+1. Changed files with before/after hashes, diffed against `53501928...`.
+2. The exact authenticated-executable allowlist, proving it is the pre-existing
+   public wrappers plus exactly the 13 client delegates and nothing else.
+3. `has_function_privilege('authenticated', oid, 'EXECUTE')` = false for every
+   internal helper, and zero anon/PUBLIC execution across all A6c functions.
+4. Confirmation that no wrapper or policy was cut over and existing sessions
+   remain private.
+5. Confirmation that A6a/A6b migrations and production are untouched, and that
+   A6c.1 has not begun.
+6. A proposed `BOARD.md` delta. Do not mark the gate accepted yourself.
+
+Stop and request "A6c.0 accepted."
+
+---
+
+### TRACK B — Claude Design — ALREADY DISPATCHED
+
+PF-C1.2 is in flight. Do not re-run it and do not start PF-C2.
+
+Its required closure items are listed under TRACK B → "PF-C1.2 required closure"
+below. On return, package as `Element10_PFC1_2_REVIEW.zip` plus
+`PFC1_2_ARCHIVE_HASHES.txt`, attach both, lead the report with changed-file
+hashes and the completed verifier result, propose a `BOARD.md` delta, and stop
+requesting "PF-C1 accepted." Do not mark the gate accepted yourself.
+
+---
+
 ## TRACK A: ENGINE AND AUTHORIZATION
 
 ### Accepted
@@ -183,6 +270,10 @@ start of every run and act only within their track's Next authorized action.
 
 - Agents propose a `BOARD.md` delta in their reports. They do not apply it.
 - Agents do not mark their own gates accepted.
+- Execution instructions live in `## NEXT PROMPT TO SEND`. Each agent runs only
+  its own subsection there. That section is authored and replaced solely by the
+  Chief Project Inspector; an agent never edits it, including to record that it
+  has finished.
 - Only the Chief Project Inspector reconciles state and applies gate changes,
   after independent review.
 - If a required approval is not recorded in the Approvals Ledger, it does not
