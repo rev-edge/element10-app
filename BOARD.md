@@ -14,8 +14,8 @@ snapshot is stale.
 - [x] PF-0 provenance and hub gate accepted
 - [x] A6c authorization plan rev 6 approved
 - [ ] A6c.0 additive prerequisites implemented and accepted - CURRENT TRACK A GATE
-- [ ] PF-C1 Product Master accepted - CURRENT TRACK B GATE
-- [ ] PF-C2 Product Configuration accepted
+- [x] PF-C1 Product Master accepted
+- [ ] PF-C2 Product Configuration accepted - CURRENT TRACK B GATE
 - [ ] Human walkthrough of the combined PF-C1 + PF-C2 Product workflow
 
 ## APPROVALS LEDGER
@@ -34,10 +34,10 @@ work has been independently accepted.
 |---|---|---|---|---|
 | A6a organization core / tenant spine | GRANTED | CPI | 2026-07-20 | head `53501928a6ef928ad5a5ec4401e4e12073e6527a` |
 | A6b tenant-zero backfill + capability catalog | GRANTED | CPI | 2026-07-20 | head `53501928...`, CI run `29688509320` |
-| Product-first workflow | GRANTED | CPI | 2026-07-20 | `874b8f40a519ddbb22c79bfd4e8180746e5c0a13e8eba2fd18a96d0951ed82fb` (see Open Items — unverified) |
+| Product-first workflow | GRANTED | CPI | 2026-07-20 | `Element10_PRODUCT_FIRST_CANONICAL.zip` SHA-256 `874b8f40a519ddbb22c79bfd4e8180746e5c0a13e8eba2fd18a96d0951ed82fb` — **VERIFIED** against the original archive 2026-07-20; extracted content 12/12, content anchor `2ae67f8c...` |
 | PF-0 provenance and hub gate | GRANTED | CPI | 2026-07-20 | PF-0.2 archives — see `PF0_2_ARCHIVE_HASHES.txt` |
 | A6c authorization plan rev 6 | GRANTED | CPI | 2026-07-20 | `Element10_A6c_PLAN.md` SHA-256 `2d1710bfdb0653271960f021c12efacb4c83f1be22067d6e064e6724ed33ce70` |
-| PF-C1 Product Master | NOT ACCEPTED — PF-C1.2 corrective active | - | - | - |
+| PF-C1 Product Master | GRANTED | CPI | 2026-07-20 | `Element10_PFC1_3_REVIEW.zip` SHA-256 `f522cf4fbbb1495ae81ab56613343a061bd2ae514d816e06572d9e2c83036b24`; screen 08 `1fec03464f614c75a2e1582de1acd85d260c8fb9cd69e0eff8642771787cb29e` |
 
 ## NEXT PROMPT TO SEND
 
@@ -114,15 +114,160 @@ Stop and request "A6c.0 accepted."
 
 ---
 
-### TRACK B — Claude Design — ALREADY DISPATCHED
+### TRACK B — Claude Design — READY TO DISPATCH (relay this whole subsection)
 
-PF-C1.2 is in flight. Do not re-run it and do not start PF-C2.
+Claude Design cannot read this file. The CPI must paste this subsection to it.
+Ignore any `BOARD.md` copy in your own workspace — it is stale by construction.
+This relayed text is the authority for your run.
 
-Its required closure items are listed under TRACK B → "PF-C1.2 required closure"
-below. On return, package as `Element10_PFC1_2_REVIEW.zip` plus
-`PFC1_2_ARCHIVE_HASHES.txt`, attach both, lead the report with changed-file
-hashes and the completed verifier result, propose a `BOARD.md` delta, and stop
-requesting "PF-C1 accepted." Do not mark the gate accepted yourself.
+LEDGER STATE AS OF DISPATCH, quoted so you do not have to look it up:
+  | PF-C1 Product Master | GRANTED | CPI | 2026-07-20 |
+    Element10_PFC1_3_REVIEW.zip f522cf4fbbb1495ae81ab56613343a061bd2ae514d816e06572d9e2c83036b24;
+    screen 08 1fec03464f614c75a2e1582de1acd85d260c8fb9cd69e0eff8642771787cb29e |
+
+PF-C1 was independently audited against the full gate scope and PASSED. It is
+ACCEPTED. Begin PF-C2 only.
+
+## 0. Fail-closed input
+
+Start from the accepted PF-C1 package:
+  `Element10_PFC1_3_REVIEW.zip`
+  SHA-256 `f522cf4fbbb1495ae81ab56613343a061bd2ae514d816e06572d9e2c83036b24`
+  `08-product-workspace.html`
+  SHA-256 `1fec03464f614c75a2e1582de1acd85d260c8fb9cd69e0eff8642771787cb29e`
+
+Verify both before editing. If either differs, STOP and report. Copy to uniquely
+named working paths; never re-resolve an input by filename.
+
+FROZEN — must remain byte-identical:
+  screens 01-07, and `e10.css` = `cd37cd43c47d5594df28dfecc5e833d977bb57de69861d17cb59a019539b4e87`
+
+`e10.css` has been frozen since D1.2.1 and stays frozen. Build the Configuration
+editor from existing classes. If you believe new CSS is genuinely unavoidable,
+STOP and request approval with the specific rule and reason. Do not edit it and
+report afterwards.
+
+## 1. Build: Product Configuration ONLY
+
+A Product Configuration is the purchasable and stockable packaging variant of a
+Product Master. It is a CHILD of exactly one Product Master.
+
+Scope:
+- create, edit, archive/restore, and list Configurations under a Product Master
+- a canonical base unit per Configuration (the unit stock is held in)
+- allowed units plus validated conversion factors between them
+- conversions are VERSIONED: changing a factor creates a new version and never
+  silently rewrites the meaning of quantities already recorded under the old one
+- every quantity displayed or entered names its unit; no bare "12 units" anywhere
+- reject invalid conversions: zero, negative, non-numeric, self-referential, or
+  any factor that makes two units ambiguous
+- reject a duplicate Configuration identity within one Product Master
+- return context is the parent Product detail, with scroll and focus intact
+
+Explicitly NOT in this checkpoint:
+- vendors, purchase orders, expected supply        (PF-C3, PF-C4)
+- receiving, Inventory Lots, cost, movements       (PF-C5, PF-C6)
+- checklists, chase, formats, recipes              (PF-C7 - PF-C10)
+- ProductRequirements, allocations, reservations   (PF-C11 - PF-C13)
+- any shared or platform Product catalog
+
+## 2. Authority — reuse PF-C1's mapping exactly, propose nothing new
+
+- Read: org-scoped, surfaced under `inventory.read` + `mod.inventory` visibility.
+  There is NO `product.read` in v1.
+- Mutation: interim persisted authority `act.inventory_edit`, exactly as PF-C1.
+  `product.write` remains proposed and unpersisted.
+- Entitlement: core. A cards-off organization must be able to use the entire
+  Configuration surface.
+
+Do NOT propose a new capability leaf in this checkpoint. The
+`CAPABILITY_CROSSWALK.md` reconciliation against the persisted catalog (legacy
+twelve plus fifteen A6b additive) is still open; proposing a leaf before it
+closes risks duplicating an authority that already ships.
+
+## 3. Cards-off is the sharp edge here
+
+Packaging is where card vocabulary leaked in PF-C1. Configuration examples like
+Hobby Box, Hobby Case and Jumbo Box are cards-specific and must be conditional on
+the cards entitlement. A cards-off organization sees neutral packaging language
+only, in every state including empty states, placeholders, validation messages,
+and help text.
+
+Scan hosts, unchanged and externally specified:
+  `#app`, `#ovhost`, `#toast`, plus any new host you introduce. `#harness` is
+  excluded. Report the host list and prove `#ovhost` is populated during dialog
+  states.
+
+Forbidden list, unchanged, case-insensitive, word/phrase boundaries. It only
+grows; it is not yours to shorten:
+  card, cards, Card Catalog, baseball, basketball, checklist, Break, Breaks,
+  chase, player, team assignment, spot, spots, tier, tiers, repack, repacks,
+  Hobby Box, Hobby Case, Jumbo Box
+
+Run the cards-off scan across every state: product list, product detail,
+configuration list, configuration create, configuration edit, configuration
+detail, read-only, denied, not-found, archived variants. Paste the raw
+serialized return per state.
+
+## 4. Standing rules — all five apply
+
+1. Every function exposed on the harness object fails closed on its own. Gating
+   the UI entry point is not gating the mutation. Configuration create, edit,
+   archive and restore each self-guard on authority, target existence, and
+   organization, exactly as `saveForm` and `archiveState` do today.
+2. The forbidden-term list is externally supplied and only grows.
+3. Scan scope is externally specified and must cover every rendered surface.
+4. If a test you ran reports a failure, you may not replace it with a
+   differently-constructed passing test. Report both and explain.
+5. Never let a higher layer's correctness stand in as evidence for a lower one.
+   Probe mutators directly via `window.__pf`, bypassing the UI and any
+   transition handler.
+
+## 5. Preserve PF-C1 — it is accepted and must not regress
+
+Re-verify, do not redesign: `saveForm` four-part identity guard plus
+archived-not-editable; `archiveState` guards; archived records read-only until
+restored; archived identity still blocks duplicates; the archived-conflict
+refusal naming the record and offering View / Restore; `applyPendingFocus`
+restoring focus in the SETTLED render on both the sync route and the async
+hashchange; default list hiding archived with the labelled include control.
+
+Optional cleanup, non-blocking: `archiveP` on an already-archived record and
+`restoreP` on an already-active one are currently idempotent. Refusing instead
+would match the stated test list. Fix it or leave it, but say which.
+
+## 6. Acceptance
+
+Positive, failure, permission, entitlement, two-organization, and return-context
+for every Configuration action. Two-organization remains a PROTOTYPE SIMULATION
+and must not be described as an isolation proof.
+
+Cumulative regression to rerun: I1 organization isolation, I2 product and
+configuration identity, I3 unit normalization. Plus the standing C1-C3 checks:
+hash routing and route authorization, capability gating, dialog focus in, trap
+and return, no horizontal overflow at standard width, zero console errors.
+
+## 7. Package and report
+
+`Element10_PFC2_REVIEW.zip` plus `PFC2_ARCHIVE_HASHES.txt`, both attached, with a
+machine-readable content manifest inside the zip that passes
+`shasum -a 256 -c` with no warnings. The external manifest records the full
+chain of custody including the accepted PF-C1 anchor `f522cf4f...`.
+
+Complete all verification BEFORE requesting acceptance. No background run may be
+outstanding.
+
+Lead the report with:
+1. Changed files, before and after hashes.
+2. Confirmation that screens 01-07 and `e10.css` are byte-identical.
+3. Raw cards-off scan output with the host list, per state.
+4. Direct mutator refusal results for every Configuration action.
+5. Versioned-conversion evidence: a factor change creating a new version and
+   leaving previously recorded quantities unambiguous.
+6. Settled-state focus results.
+7. A proposed `BOARD.md` delta. Do not mark the gate accepted yourself.
+
+Stop and request "PF-C2 accepted."
 
 ---
 
@@ -198,12 +343,17 @@ Two items to fold into the plan text. Neither changes behavior.
 
 ### Current gate
 
-- PF-C1 Product Master is implemented but not accepted.
-- PF-C1.1 was rejected.
-- PF-C1.2 is the active corrective closure.
-- PF-C2 has not started.
+- **PF-C1 Product Master ACCEPTED 2026-07-20** against `f522cf4f...` (screen 08
+  `1fec0346...`), after independent CPI audit of the full gate scope rather than
+  the delivery report. PF-C1.1 was rejected; PF-C1.3 passed.
+- **PF-C2 Product Configuration is now the active gate. Not started.**
+- Carried forward from the PF-C1 audit, non-blocking: `archiveP` on an already
+  archived record and `restoreP` on an already active one are idempotent rather
+  than refusing. No harmful mutation. Fold into PF-C2 if convenient.
+- Frozen for PF-C2: screens 01-07 and `e10.css` (`cd37cd43...`). Screen 08 is the
+  working surface and may change; its accepted baseline is `1fec0346...`.
 
-### PF-C1.2 required closure
+### PF-C1 closure history (accepted — retained for provenance)
 
 - Add active/archived state, Archive, and Restore.
 - Archived identity continues blocking normalized duplicates.
@@ -251,9 +401,18 @@ These survive every future pass. Any change that violates one is rejected on sig
 - Track A handoff records "19 RPC wrappers". The A6c plan rev 6 inventory is 14
   public inventory RPCs, 13 client delegates, 1 internal delegate, 10 internal
   helpers. Correct the handoff; the plan is right.
-- Canonical anchor `874b8f40...` was recomputed only against the extracted
-  directory, never the original archive. Recompute, or record as
-  accepted-unverified. Every Track B chain of custody cites it as root of trust.
+- ~~Canonical anchor `874b8f40...` unverified.~~ **CLOSED 2026-07-20 — VERIFIED.**
+  Recomputed against the original `Element10_PRODUCT_FIRST_CANONICAL.zip` from
+  `prototypes/exports/`. Actual SHA-256 =
+  `874b8f40a519ddbb22c79bfd4e8180746e5c0a13e8eba2fd18a96d0951ed82fb`, matching
+  the recorded anchor exactly. The anchor was correct all along and may be cited
+  as a verified root of trust.
+  Extracted content additionally verified: 12/12 members match their own
+  `HASHES.txt`; content anchor
+  `2ae67f8c4efd3a74e0fe6dd12bdea1ee8d94e76eab3df7f1555cc91ac6453f0d`.
+  (An earlier revision of this item wrongly asserted the archive did not exist
+  and was unrecomputable. That was inferred from a search scoped to the CPI's
+  own mounts. Retained here as the reason the coordination rule below exists.)
 - `CAPABILITY_CROSSWALK.md` describes a twelve-key persisted catalog. Staging
   holds the legacy twelve plus fifteen A6b additive capabilities. Reconcile
   before PF-C2 so no new leaf is proposed for an authority that already ships.
@@ -280,3 +439,22 @@ start of every run and act only within their track's Next authorized action.
   exist.
 - Where any other document disagrees with this board on current state, this board
   wins and the other document is corrected.
+- Never record a limitation of one participant's access as a fact about the
+  world. "Not reachable from here" is not "does not exist." State the scope of
+  any search that produces a negative finding.
+
+### Board access is asymmetric — know which side you are on
+
+- **Track A (Claude Code)** runs on the local machine and reads this file
+  DIRECTLY. It is the live authority for that track.
+- **Track B (Claude Design)** runs in a separate cloud filesystem and CANNOT
+  reach this file. Its subsection of `NEXT PROMPT TO SEND` is relayed by the
+  Chief Project Inspector at dispatch time.
+- Therefore: **Track B must not maintain, consult, or trust any local copy of
+  `BOARD.md`.** Any such copy is stale by construction. For a Track B run, the
+  relayed instruction IS the authority for that run, and the ledger state quoted
+  inside it is current as of dispatch.
+- A Track B agent that finds a board file in its own workspace should ignore it
+  and say so, rather than reasoning from it.
+- The CPI relays the ledger rows a Track B run depends on, inside the
+  instruction, so the agent never has to look them up.
