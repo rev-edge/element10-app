@@ -92,6 +92,11 @@ jobs:
         # Under `set role authenticated` (RLS enforced): cross-org, non-member, participant, viewer-vs-member,
         # buyer_uid, handle, published-vs-private axes each positive+denial; deleted item's ledger row stays readable; cross-org write denied.
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6c1_rls_test.sql
+      - name: A6c.2 wrapper-cutover gate (relocated delegates enforce org boundaries; legacy wrappers forward via current_org)
+        # Proves the relocated e10_org_* delegates ARE the mechanism: cross-org Entity mutation, missing-capability, and
+        # multi-membership fail-closed (through a legacy-wrapper cutover path) each denied with the specific 42501; the
+        # relocated delete path keeps the deleted item's correction movement readable; buyer_suggest non-owner denied; redeem-null.
+        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6c2_cutover_test.sql
       - name: Schema reproducibility (re-apply migrations cleanly)
         run: supabase db reset
       - name: Default-privileges regression probe (born-locked; zero anon-executable functions)
