@@ -40,6 +40,10 @@ begin
   insert into public.e10_break_sessions(id,organization_id,streamer_uid,share_code,visibility) values
     ('11111111-0000-4000-8000-0000000000a1'::uuid,v_orgA,v_amem,'__a6c1_pub','published'),
     ('11111111-0000-4000-8000-0000000000a2'::uuid,v_orgA,v_amem,'__a6c1_priv','private');
+  -- an org-B session, so an org-B slot referencing it is FK-VALID (the composite FK break_slots(org,session_id)->
+  -- break_sessions is satisfied). This lets the cross-org write assertion isolate sl_ins's WITH CHECK from the FK.
+  insert into public.e10_break_sessions(id,organization_id,streamer_uid,share_code,visibility) values
+    ('11111111-0000-4000-8000-0000000000b9'::uuid,v_orgB,v_bmem,'__a6c1_bsess','private');
   -- slots in org A on the published session: one owned by buyer_uid, one by handle
   insert into public.e10_break_slots(id,organization_id,session_id,buyer_uid) values
     ('22222222-0000-4000-8000-0000000000b1'::uuid,v_orgA,'11111111-0000-4000-8000-0000000000a1'::uuid,v_buyer);
@@ -99,11 +103,18 @@ begin
   perform set_config('request.jwt.claims', json_build_object('sub',v_amem::text,'role','authenticated')::text, true);
   if (select count(*) from public.e10_inventory_movements where item_id='__a6c1_del')=1
      and (select count(*) from public.e10_inventory_items where id='__a6c1_del')=0 then ok:=ok+1; else bad:=bad||' deleted_ledger'; end if;
-  -- write-side WITH CHECK: org-A member cannot INSERT a break_slot into org B (cross-org write denied)
+  -- write-side WITH CHECK, isolated from the FK: as the org-A member (current_org=A) INSERT an org-B slot referencing
+  -- the org-B session (row is FK-VALID -> the composite FK passes), so ONLY sl_ins's WITH CHECK can refuse it. Require
+  -- the SPECIFIC RLS SQLSTATE 42501; ANY other error (e.g. FK 23503) is a defect that fails the test.
+  perform set_config('request.jwt.claims', json_build_object('sub',v_amem::text,'role','authenticated')::text, true);
   begin
-    insert into public.e10_break_slots(id,organization_id,session_id) values (gen_random_uuid(),v_orgB,v_pub);
-    bad:=bad||' xorg_write_not_denied';
-  exception when others then ok:=ok+1; end;
+    insert into public.e10_break_slots(id,organization_id,session_id)
+      values (gen_random_uuid(), v_orgB, '11111111-0000-4000-8000-0000000000b9'::uuid);
+    bad:=bad||' xorg_write_allowed';            -- insert succeeded => RLS WITH CHECK failed to refuse
+  exception
+    when sqlstate '42501' then ok:=ok+1;        -- the required RLS row-level-security refusal
+    when others then bad:=bad||(' xorg_write_wrongerr:'||SQLSTATE);  -- FK / any other layer fired first = defect
+  end;
 
   if ok = 15 then raise notice 'A6c.1 RLS gate: PASS (8 axes, positive+denial, under authenticated JWT; deleted-item ledger visible; cross-org write denied)';
   else raise exception 'A6c.1 RLS gate: FAIL passed=%/15 failures=[%]', ok, bad; end if;
