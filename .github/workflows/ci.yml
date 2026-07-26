@@ -88,6 +88,10 @@ jobs:
         # Proves the exact authenticated allowlist (13 client delegates; internals service_role-only; zero anon/PUBLIC),
         # the published spectator predicate, and per-delegate authorization (cross-org / missing-cap / non-owner / invalid-code denied).
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6c0_gate_test.sql
+      - name: A6c.1 RLS rewrite gate (8-axis adversarial under authenticated JWT + deleted-item ledger visibility)
+        # Under `set role authenticated` (RLS enforced): cross-org, non-member, participant, viewer-vs-member,
+        # buyer_uid, handle, published-vs-private axes each positive+denial; deleted item's ledger row stays readable; cross-org write denied.
+        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6c1_rls_test.sql
       - name: Schema reproducibility (re-apply migrations cleanly)
         run: supabase db reset
       - name: Default-privileges regression probe (born-locked; zero anon-executable functions)

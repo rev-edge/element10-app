@@ -105,7 +105,10 @@ async function signIn(email) {
     }
     {
       const { data } = await cb.from('e10_break_sessions').select('id').eq('id', sess.id).maybeSingle();
-      ok('member (non-owner) CANNOT read another streamer session', data === null, 'got: ' + JSON.stringify(data));
+      // A6c.1 model change: sessions are org-scoped. An org member reads all their org's sessions
+      // (bs_sel = e10.is_org_member(organization_id) OR ...); the pre-org owner-only rule is superseded.
+      // Non-member isolation still holds (viewer checks above); a cross-ORG member is denied (a6c1_rls_test.sql).
+      ok('member (org member) CAN read another org session (A6c.1 org-scoping)', data !== null, 'got: ' + JSON.stringify(data));
     }
   }
 
