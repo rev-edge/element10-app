@@ -2,6 +2,12 @@
 
 Updated: 2026-07-14 (rev 3: Phase 6–11 subpasses restored; mutation-level idempotency contract added to 2.7; immediate queue rendered as a dependency graph; cross-cutting verification made proportional). This document supersedes the original roadmap. Progress is measured by whether a business action is **authoritative, recoverable, idempotent, and reconcilable** — not by whether a screen exists.
 
+**Lifecycle alignment, 2026-07-27:** `OPERATOR_LIFECYCLE.md` and
+`UX_WORKFLOW_CONTRACT.md` are binding on Track B planning and UI acceptance.
+Progress also requires a complete operator task loop: entry, commit, result,
+continuation, review/return, repeat, resume, recovery, and handoff. A screen or
+checkpoint-local control is not progress if the operator is stranded after using it.
+
 ## Product direction (recorded 2026-07-15)
 
 Element 10 will eventually be **productized (multi-tenant SaaS) and verticalized across industries** beyond trading cards. Consequences, in force from now:
@@ -26,7 +32,13 @@ Element 10 will eventually be **productized (multi-tenant SaaS) and verticalized
    9. **Realtime scale strategy** — org-filtered operational subscriptions; Broadcast for high-fanout live audiences.
    10. **Load, recovery, production cutover** — 2× defined workload in staging, restore drill, migrate production to tenant zero, verify reconciliation.
 
-   **Track B order:** 0. Workflow inventory + complaints (Trent's homework — everything depends on it) → 1. Domain + module map, classifying every concept as core-SaaS / tenant-owned / global-reference / vertical-specific → 2. Navigation prototype → 3. Five critical journeys → 4. Realistic usability test → 5. Tenant-aware app skeleton → 6. First complete working slice → 7. Progressive migration.
+   **Track B order:** 0. Workflow inventory + complaints → 0.5. maintain the
+   operator lifecycle and UX workflow contract → 1. Domain + module map,
+   classifying every concept as core-SaaS / tenant-owned / global-reference /
+   vertical-specific → 2. Navigation prototype → 3. Critical journeys, each with
+   a reviewed workflow preflight → 4. Realistic task-loop usability tests,
+   including repeat/resume/recovery → 5. Tenant-aware app skeleton → 6. First
+   complete working slice → 7. Progressive migration.
 
    **Cross-track dependencies (binding):** Track B steps 0–4 run in parallel with Track A 1–5. The **app skeleton (B5) waits for a stable org/membership contract (A6)**. The **first slice (B6) waits for isolation proof (A7)**. **Progressive migration (B7) waits for bounded APIs, realtime strategy, CI, and staging verification (A8–A9 + A3)**. Production cutover (A10) precedes broad migration.
 

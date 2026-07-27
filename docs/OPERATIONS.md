@@ -5,6 +5,12 @@
 - **test job:** `npm ci` (tests/, lockfile-exact), `supabase start` (ephemeral local stack — **proves A1 reproducibility on a clean stack continuously**), provision local users, then the pure-helper suites (incl. the `schema_gate_test` comparator), local integration + RLS-adversarial suites (incl. `rls_test` — the roles/permissions engine, wired in A4 via `tests/provision_rls_users.js`), browser suites, a final `supabase db reset` (re-apply migrations cleanly), and the **default-privileges regression probe** (`tests/probe_defpriv.sql` — new functions born locked + zero anon-executable functions). No production access.
 - **deploy job:** runs ONLY on `main` and ONLY after `test` passes. Publishes **web assets only** (`index.html`, `open/overlay/companion.html`, `.nojekyll`) to GitHub Pages — never `tests/`, `supabase/`, `docs/`, or `.github/`. (The prior `static.yml` published the entire repo; removed.)
 
+For a UI or workflow release, CI green is necessary but not sufficient. The release
+evidence also includes the behavioral scenarios in `UX_WORKFLOW_CONTRACT.md`, the
+operator job and handoff from `OPERATOR_LIFECYCLE.md`, and an operator walkthrough
+of the complete touched task loop. The release record names the lifecycle stage and
+handoff it changed.
+
 **Branch protection:** `main` requires the `test` check to pass before merge. Workflow: branch → PR → CI green → merge → auto-deploy.
 
 ## Release runbook (schema-safe ordering)

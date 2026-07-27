@@ -1,6 +1,15 @@
 # Element 10 — Domain & Module Map (Track B, step 1)
 
-_v1.3 — 2026-07-17. Classifies every concept in the system into four layers. This document drives three things: the new app's information architecture and navigation naming, the tenancy spine's data model (Track A step 6), and the boundary between the core product and the cards vertical. Sources: Workflow Inventory (journeys S1/M1/O1/R1/F1/RP1 + complaints), Platform Overview, the tenancy spec, ADR 0005, D0.1, and D2-0._
+_v1.4 — lifecycle alignment revision, 2026-07-27. Classifies every concept in
+the system into four layers. This document drives the new app's information
+architecture and navigation naming, the tenancy spine's data model, and the
+boundary between core product and the cards vertical. Sources include
+`OPERATOR_LIFECYCLE.md`, `UX_WORKFLOW_CONTRACT.md`, Workflow Inventory, Platform
+Overview, the tenancy spec, ADR 0005, D0.1, and D2-0._
+
+`OPERATOR_LIFECYCLE.md` owns job order and cross-object handoffs. This document
+owns concept classification. A concept may be implemented at a later gate without
+allowing the current UI to strand the operator at that boundary.
 
 > **v1.2 catch-up (folds in everything decided/discovered 2026-07-15 → 07-17):** the ADR 0005 gate rulings (A–D), the checklist + role corrections below, and the prototype ①–⑥ product concepts + repack model. Applied as corrections in place where they supersede an existing line, and as new sections at the end. Nothing decided is dropped.
 

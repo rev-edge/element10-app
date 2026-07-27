@@ -2,6 +2,10 @@
 
 _A comprehensive functional + UI/UX reference. Written for an LLM (or a new teammate) to understand the tool end to end. Each "Major page" section is meant to pair with a screenshot of that page._
 
+For target operator behavior, read `OPERATOR_LIFECYCLE.md` before this page
+inventory and apply `UX_WORKFLOW_CONTRACT.md`. This overview contains current and
+legacy surfaces. It is not permission to treat a page as a complete workflow.
+
 ---
 
 ## 1. What it is
@@ -129,12 +133,23 @@ Two selectable layouts, both driven by the live session over realtime, styled to
 
 ## 5. Core end-to-end workflow
 
-1. **Import a checklist** (Smart or Direct) → cards land in `e10_cards`, linked to players/teams; flag chases (bulk or via a player chase list).
-2. **Load inventory** — add the sealed product (box/case cost basis) and any singles; quick-add links singles to the catalog.
-3. **Design the format** — generate spots (team roster / players / on the fly), tier + price them, read the viability projection.
-4. **Schedule the show** and attach the format, products, copy, repacks, needs.
-5. **Go live** — pre-flight review sets products/cost/slots → live board. As spots sell, assign winners + hammer; ROI climbs; toggle incentives; cross off chases. The OBS overlay mirrors it all.
-6. **Fulfill** — the Ship view groups everything by buyer into a pack-and-ship list; modeled-vs-actual shows the break's real margin.
+The target operating lifecycle is defined in `OPERATOR_LIFECYCLE.md`:
+
+1. Plan demand.
+2. Source or acquire through a qualified acquisition channel.
+3. Receive sealed supply or intake guarded physical-card records.
+4. Identify and enrich products and CardInstances.
+5. Establish and review authoritative cost provenance.
+6. Choose a destination: stock, Listing, repack, Show, or other supported intent.
+7. List, allocate, or prepare; reserve before a conflicting commitment.
+8. Sell directly, through a sales channel, or through a LiveSession.
+9. Fulfill the resulting order or execution.
+10. Reconcile fees, payouts, costs, corrections, and margin.
+11. Feed outcomes into replenishment and planning.
+
+The existing Whatnot break path remains one important vertical slice:
+checklist/product setup → inventory → format → Show → Prepared handoff → Live →
+fulfillment → reconciliation. It is not the only acquisition or sales lifecycle.
 
 ---
 

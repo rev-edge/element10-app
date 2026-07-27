@@ -1,15 +1,18 @@
 # Element 10 — Workflow Inventory (Track B, step 0 → 1)
 
-_v0.1 — 2026-07-15. Built from Trent's role narratives. This document is the input to the domain map, the navigation prototype, and the five journey prototypes. It describes how work ACTUALLY flows, not how the current app models it._
+_v0.2 — lifecycle alignment revision, 2026-07-27. Built from Trent's role
+narratives. This remains observed workflow input. `OPERATOR_LIFECYCLE.md` is the
+current cross-workflow authority and extends this inventory through acquisition,
+singles intake, multi-channel listing/sale, fulfillment, and reconciliation._
 
 ## The operating spine
 
-One loop, every role enters at a different point:
+One connected operating loop, every role enters at a different point:
 
 ```
-PLAN the week → STOCK inventory → DESIGN breaks → SCHEDULE & assign
-     → PREPARE the show → GO LIVE → COMPLETE → FULFILL & SHIP → RECONCILE money
-                                                      ↘ ANALYZE → feeds next PLAN
+PLAN demand → SOURCE / ACQUIRE → RECEIVE / INTAKE → IDENTIFY → ESTABLISH COST
+     → CHOOSE DESTINATION → LIST / ALLOCATE / PREPARE → RESERVE / COMMIT
+     → SELL / GO LIVE → FULFILL → RECONCILE → LEARN / RESTOCK → next PLAN
 ```
 
 Roles are not separate workflows — they are **entry points, cadences, and permissions on this spine**. The product's connective tissue is the **handoff objects**: a *prepared show* (manager → streamer), an *approved break* (design → live), a *completed session* (streamer → fulfillment/reporting). These become first-class concepts in the domain map, and "readiness" (checklist ✓, inventory reserved ✓, format ✓, streamer assigned ✓) is a computable state of the prepared show, not a vibe.
@@ -18,7 +21,34 @@ Roles are not separate workflows — they are **entry points, cadences, and perm
 
 Actor · Trigger · Frequency · Steps (every module-hop marked **[→]**) · Context that must travel · Detours · Done-state · Next natural action.
 
+Also required by `UX_WORKFLOW_CONTRACT.md`: entry/origin, commit point, immediate
+success, state-aware continuation, review/correction, Back/Cancel/close, repetitive
+path, incomplete exit, resume, denied/conflicted recovery, and next lifecycle
+handoff.
+
 **The detour rule:** every "realize they need to…" is a nested task. A detour must return the user to exactly where they were, with all entered state intact. This is the single highest-leverage fix over the current app.
+
+**The completion rule:** a successful mutation is not the Done-state. Done includes
+an understandable result plus an intentional next action, review path, or truthful
+stopping point. A future checkpoint may remain unbuilt, but the present workflow may
+not dead-end because of it.
+
+## Journey A1 — Acquire and intake singles or a collection
+
+- **Trigger:** a single card or collection is purchased through a distributor,
+  marketplace, show, private collection, or trade.
+- **Steps:** create Acquisition → record source/seller/date/amount → save →
+  add the first guarded CardInstance → repeat for a collection → review acquisition
+  progress → assign cost when available → choose destination.
+- **Context:** Acquisition identity and progress persist through every card entry.
+- **Detours:** duplicate/archived identity, missing checklist, manual identity,
+  interrupted intake, cost assignment, seller correction.
+- **Done-state:** acquisition review accurately shows cards entered, amount paid,
+  cost state, unresolved work, and available destination actions.
+- **Next action handoff:** add another, resume later, assign cost, list, allocate,
+  hold, or prepare for another destination.
+- **Channel distinction:** acquisition channel is not sales channel, Distribution,
+  or fulfillment route.
 
 ---
 

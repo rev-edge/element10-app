@@ -5,6 +5,15 @@
 Regenerate the raw findings with MCP `get_advisors` (security + performance) on `ddhkkumiyidorzmajwde`,
 or the dashboard's Advisors tab. Re-run before/after every schema change (OPERATIONS.md).
 
+## Workflow and authority boundary
+
+`OPERATOR_LIFECYCLE.md` defines operator intent and `UX_WORKFLOW_CONTRACT.md`
+defines UI continuity. Neither grants access. A visible next action is permitted
+only when the authoritative membership, ownership, capability, legal, and lifecycle
+conditions allow it. Hidden or disabled UI is not enforcement; direct invocation
+must fail closed. A deferred stage must be described truthfully without adding a
+temporary authority bypass.
+
 ## Standing rule — functions are born non-executable (A5.1a)
 The default-function-privileges **factory is closed** (migration `20260716110000`): PostgreSQL's built-in
 database-level `EXECUTE TO PUBLIC` default **and** Supabase's schema-level anon/authenticated grants are both
