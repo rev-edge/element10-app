@@ -109,6 +109,7 @@ work has been independently accepted.
 | A6c.1 RLS policy rewrite (55 policies) + A6c.1.1 test corrective | GRANTED | CPI | 2026-07-26 | Commits `7138716743250d47e3cf90da9196fd471f18a322` (migration `20260726120000_e10_a6c1_rls_rewrite.sql`, CI `30206547507`) + `d2ad844` (test-only, CI `30207551465`). CPI-verified against live staging: 97-policy census reconciles exactly (55 rewritten = 41 USING + 14 WITH CHECK; 100 live minus 3 storage = 97); `imov_sel` now `e10.is_org_member(organization_id)` closing the A6c.0 finding; every WITH CHECK pins `organization_id = e10.current_org()`; correlated refs table-qualified with the `owned_slot` alias (rev-4 shadowing not reintroduced); 11 delegates intact, wrapper still legacy (no A6c.2 creep); prod untouched (12 migrations, head `20260716110000`, zero e10 policies). Outside review found the cross-org write denial was a false positive (FK shadowed RLS behind `exception when others` — standing rule 5); A6c.1.1 rebuilt it FK-valid requiring SQLSTATE 42501, audited the other 7 denials (SELECT-count/predicate, unshadowable), and proved falsifiability by permissive-replace after finding a bare DROP yields default-deny — a stronger construction than the corrective specified. Agent's ADR flag was correct; board's stale rev3.2.2 note fixed. |
 | A6c.0 additive prerequisites | GRANTED | CPI | 2026-07-20 | commit `7f0d38385e05682da5bc51879a1ac04683d27afd`; migration `20260720120000_e10_a6c0_prereqs.sql`; CI green run `29768281886`; staging head `20260720120000`. CPI-verified against live prod + staging: 13-delegate allowlist exact, internals `authenticated=false`, zero anon/PUBLIC, no wrapper or policy cutover, 0 published sessions, prod untouched. |
 | PF-C2 Product Configuration | GRANTED | CPI | 2026-07-20 | `Element10_PFC2_REVIEW.zip` SHA-256 `c001a8bb169b50e94103277f205d0290023513786da431233d1ef521166ca7d3`; screen 08 `a7d056e881f89c0fc19748e9...`. CPI-verified in source: `saveConfig` fails closed; conversions append-only with `cur` pointer; forbidden list and scan hosts unshortened; unit arithmetic independently recomputed (360 / 4320 / 48); cards-off handled via per-org seed data. Passed on first attempt. |
+| PF-C-S1.7 (preflight + implementation) + PF-C-S2 cost assignment | GRANTED | CPI | 2026-07-27 | `Element10_PFCS1_7_REVIEW.zip` SHA-256 `88c9b8c5629f148d36608d3de2de39c7d868731fa8ad4725b2641c164a2bbec5`; screen 08 `875422ab71204c257ec75c93cf2e5ca9850d1282dc515c505375a980fff71bc8`. First gate under the full protocol: relay → preflight `PFCS1_7-PREFLIGHT-1` → CPI review (one correction: team-choice reuse) → E1 baseline ruling (revert to S1.6; divergent file preserved as labelled no-authority reference) → phase-2 implementation → audit → walkthrough. CPI audit: manifest clean; rebuild provably not the reference (carries the team-choice correction the reference lacks); state-aware continuation panel proven behaviorally (below→Add another, at→Review); zero blanks/datalist/"next"-copy/render-fallbacks; zero-acq seam present. S2 (opened mid-flight by direct operator authorization, agent flagged correctly): assign→review→approve with single guarded writer, dirty-guarded draft, card-form basis lock re-proven post-approval, 60/40-of-100 arithmetic verified, approval recorded on the acquisition. 12/12 CPI behavioral checks. Operator: "i reviewed it and it works - approved." Outstanding conformance corrective → S2.1 (admin-only over-assignment per the standing 2026-07-21 ruling; current build flat-caps everyone). |
 | PF-C-S1.6 financial + identity discipline | GRANTED | CPI | 2026-07-26 | `Element10_PFCS1_6_REVIEW.zip` SHA-256 `fd47e4610058fad2ba7bd1af14b972a5293c23cd59f5406c43c378c119069b41`; screen 08 `d2065b29e3d72a556e004610b80987f1718b85b047ccdd43df26c5fa7c183eb6`. Eight items: cost basis unwritable (input removed; mutator refuses a direct write naming attempted vs derived — closed the build-contradicts-PF-M2.1-§4.2 inconsistency); collection import creates ZERO instances (the unguarded blank-creation path is dead, `saveAcq` has no pushes; "Expected cards" is advisory progress); Name required; org-wide duplicate company+cert refused naming the existing card via composed title (archived included); raw-duplicate warn-then-save; `cardTitle()` composed identity, load-bearing in 7 places, no dangling separators; Channel→Distribution rename complete; Checklists entry point into the same wizard with origin-aware landing; search visibly inert. Acceptance evidence: CPI source audit + **CPI-executed behavioral run at operator direction — 18/18 checks via real DOM events** (mousedown→click picker rows, native input events), covering the full sequence: checklists-first wizard → zero-blank collection → picker autofill → basis probe refusal → duplicate-cert refusal → origin landing. Finding from the run: a fresh org has an empty picker index until a product import runs — correct per spec; a why-and-what-next line added to S1.7's no-match item. |
 | PF-C-S1.5 + PF-C-S1.5.1 walkthrough batch + picker-click fix | GRANTED | CPI | 2026-07-26 | S1.5 `Element10_PFCS1_5_REVIEW.zip` SHA-256 `5e3cc57f224fe5e61ef8e1fa38721a75ebbe002d91e726d83316b26e0a067933` (7/8 verified: delegated dismissal with Escape swallow, quiet filter row + contains/not/equals/empty ops, required brand/line/year, "/" print-run adornment + serial redirect, acq→first-card flow, images/links/asking outside money math, advisory cert warning; 3 self-found defects disclosed pre-package) was NOT ACCEPTED on the operator finding that picker rows were unclickable — `||S.ciform` repainted the picker on every mousedown, destroying the row between mousedown and click. S1.5.1 `Element10_PFCS1_5_1_REVIEW.zip` SHA-256 `37d72670c657224d5515d68ea2cfd815778a39447b62943478113d0ae1103ea5`; screen 08 `a492aa29818164f670dbf9ccbd4baee59205ffe879b4d0e92a7f002019418f17`. Repaint-only-what-closed; while proving it the agent found and fixed the focus-reopen defect (programmatic focus is not a user focus, `S._noFocusOpen` at three sites) rather than shipping a fix that visibly broke the feature a new way; proof used the full native mousedown→click sequence. Operator confirmed selection and autofill working. |
 | PF-C-S1.3 + PF-C-S1.4 checklist autofill + caret fix | GRANTED | CPI | 2026-07-26 | S1.3 `Element10_PFCS1_3_REVIEW.zip` `274e85b6...` (substance: org-scoped picker, variant→parallel translation at the boundary, provenance marks, subject→name) was NOT ACCEPTED on the operator finding that typing rendered backwards — `cifNameInput` redrew the form per keystroke with no caret restore, fifth pattern-reuse failure. S1.4 `Element10_PFCS1_4_REVIEW.zip` SHA-256 `67c2da4c859074c25c688d55d4bf82ccfc2f152596045b93659b519cb5146714`; screen 08 `a0e3de7be87989e675a05ffe2ad08a054c30e06ab1e5460b5128ea60c0f645ca`. Fix is structural: the input is never rebuilt while typing (stable `#cifPicker` host repaints alone); the four legitimate redraw paths share `ciCaptureCaret`/`ciRestoreCaret`; live-DOM input audit. Accepted on the operator's own walkthrough screenshot showing in-order text. |
@@ -167,189 +168,65 @@ Do NOT touch the 55 A6c.1 policies, the accepted delegate bodies (beyond the 8
 re-aligns), or anything in A6c.4 scope. Propose the delta; do not self-accept.
 Stop and request "A6c.3 accepted."
 
-### TRACK B — Claude Design — READY TO DISPATCH (PF-C-S1.7)
+### TRACK B — Claude Design — READY TO DISPATCH (PF-C-S2.1 · CORRECTIVE)
 
-Claude Design cannot read this file or any repository document. Everything you
-need is inline below, verbatim where it comes from a canonical document. Do not
-rely on any cached board text or earlier relay.
-
-## PF-C-S1.7 — intake-loop completion + walkthrough findings (TWO PHASES)
-
-Per the newly applied `docs/UX_WORKFLOW_CONTRACT.md` and `AGENTS.md` Design
-gate: a new or materially changed workflow requires a reviewed **workflow
-preflight before implementation**. Two of this gate's items change workflows
-materially. Therefore:
-
-**PHASE 1 (this dispatch): produce the preflights. STOP. Submit for CPI review.
-Do not implement.**
-**PHASE 2 (after review): implement the reviewed plan, run the behavioral
-scenarios, package.**
-
-## 0. Fail-closed input
-
-Chain root, accepted PF-C-S1.6:
-  `Element10_PFCS1_6_REVIEW.zip` SHA-256
-  `fd47e4610058fad2ba7bd1af14b972a5293c23cd59f5406c43c378c119069b41`
+## 1. AUTHORITY
+- Relay: **PFCS2_1 rev 1**, 2026-07-27 (hash reported in the dispatch message;
+  verify before executing). Self-contained; ignore repository paths, cached
+  board text, prior chat context.
+- Current Track B gate: **PF-C-S2.1. Authorized phase: CORRECTIVE** — one
+  enumerated change. No preflight required (no new workflow; one rule inside an
+  accepted flow).
+- Accepted baseline: PF-C-S1.7+S2 — `Element10_PFCS1_7_REVIEW.zip` SHA-256
+  `88c9b8c5629f148d36608d3de2de39c7d868731fa8ad4725b2641c164a2bbec5`;
   `08-product-workspace.html`
-  `d2065b29e3d72a556e004610b80987f1718b85b047ccdd43df26c5fa7c183eb6`
-FROZEN: screens 01-07; `e10.css` `cd37cd43...`.
+  `875422ab71204c257ec75c93cf2e5ca9850d1282dc515c505375a980fff71bc8`.
+- Ledger authority: `PF-C-S1.7 + PF-C-S2 | GRANTED | CPI | 2026-07-27`.
+- Out of scope: everything else. FROZEN: screens 01-07, `e10.css` `cd37cd43...`.
 
-## Phase 1 deliverable — the COMPLETE design preflight
+## 2. THE RULING THIS IMPLEMENTS (operator, 2026-07-21, reaffirmed 2026-07-27)
+Assigning cost basis beyond an acquisition's total paid is **admin-only**, never
+a flat refusal and never freely allowed. Named legitimate cases: correcting an
+earlier under-assignment; deliberately weighting cost onto specific high-value
+cards. Approved-model capability: `singles.cost_assign_over` (PROPOSED, not
+persisted — in the prototype, gate on the existing harness admin scenario via
+`isAdmin()`, the same stand-in `canMintField` already uses).
 
-For each of the two materially changed workflows —
-**(A) the card intake loop with post-save continuation** (item 5) and
-**(B) the no-match / player-aware picker flow** (item 4) —
-produce ALL of the following, verbatim requirements from
-`docs/OPERATOR_LIFECYCLE.md` §9 (inlined because you cannot read it):
+## 3. EXACT SCOPE (one change)
+- Non-admin: exactly the current behavior — over-assignment refused at review
+  AND at `saveCostAssignment`, verbatim messages kept.
+- Admin: may proceed past total paid. The review step states it plainly
+  ("$X over the total paid — admin override") before approve; the mutator
+  re-checks `isAdmin()` itself (standing rule: fails closed independently —
+  UI absence is never the enforcement).
+- After an over-assigned approval, the acquisition detail shows a persistent,
+  visible over-assigned flag: "Cost assignment: Approved — $X assigned, $Y OVER
+  total paid (admin override)". The flag is state derived from the recorded
+  totals, not a dismissible note.
+- Under-assignment behavior unchanged. Single-card acquisitions unchanged.
+  Card-form basis lock unchanged.
 
-- a **journey statement**;
-- a **state and transition map**;
-- an **action inventory for each touched surface**;
-- the **task-loop fields** (the 12-row table below);
-- **cases** for first item, repeated item, incomplete exit, final item, edit,
-  Cancel, denied authority, and recovery;
-- **adjacent lifecycle gaps, split into "must close now" and "reported for a
-  later checkpoint"**;
-- **any model, capability, tenancy, or channel contract that requires CPI or
-  Track A** — identified and escalated, never silently implemented; show how the
-  current checkpoint ends honestly without it.
+## 4. STANDING RULES — the load-bearing ones here, in full
+1. Every harness-exposed function fails closed on its own — the mutator checks
+   admin itself. 2. Evidence for conditional behaviour demonstrates the
+   condition occurring — BOTH identities exercised. 3. Render claims need
+   correctly-captioned screenshots. 4. Cards-off scan (28 terms min, hosts
+   `#app`+`#ovhost`+`#toast`) with the assignment dialog open. 5. Org isolation
+   including mid-dialog switch. 6. No native dialogs/popovers. 7. Rendered
+   defaults live in state.
 
-The 12-row task-loop table, verbatim from `docs/UX_WORKFLOW_CONTRACT.md` §2:
-
-| Field | Required content |
-|---|---|
-| Operator job | outcome in the operator's language |
-| Start | entry points, origin, parent object, preconditions |
-| Commit | exact business mutation or handoff |
-| Success | immediate state and saved evidence |
-| Continue | primary and secondary next actions |
-| Review | detail, summary, edit, archive, undo, or additive correction |
-| Leave | Back, Cancel, close, unsaved-work behavior |
-| Repeat | add another, bulk, keyboard/focus, progress |
-| Resume | durable surface or queue for incomplete work |
-| Recover | empty, loading, denied, duplicate, conflict, stale, failed |
-| Boundary | deferred model/capability and the honest present-day seam |
-| Return context | route, filters, selection, object, focus |
-
-**Surface action inventory** — for every touched surface, verbatim from the
-contract §3, identify: one state-aware primary action; relevant secondary
-actions; Save/commit behavior; review or detail destination; Back or
-origin-aware return; Cancel/close behavior; unavailable and permission-denied
-behavior; empty and interrupted-work behavior. Not every surface needs every
-button; every operator task needs every responsibility addressed.
-
-**Adjacent-flow responsibility**, verbatim from the contract §4: inspect the
-step immediately before and after the requested change. In-scope, low-risk
-continuity defects go in the plan. A larger data, security, or lifecycle
-contract is reported to the CPI and not silently implemented. The present
-checkpoint must still end in a usable, truthful state. "Out of scope" means
-"do not build it," not "do not think about it."
-
-**Navigation rules**, verbatim from the contract §6: preserve origin, parent
-object, filters, selection, and focus. Use explicit origin-aware return for
-detours. Provide visible Back or breadcrumb on full working surfaces. Guard
-unsaved work before destructive navigation. Cancel never commits. Success never
-strands the operator. Parent detail is the durable resume surface for
-child-entry workflows.
-
-## The six items (implementation happens in Phase 2 only)
-
-### 1 — Rendered defaults must live in state
-The "Cards to create"/"Expected cards" field rendered 5 while state held ''.
-Defaults are set in state; render only echoes state. Audit every input for the
-`value="${...||...}"` fallback pattern; list and fix every hit.
-
-### 2 — Compact provenance
-Nine autofilled fields repeat the same basis sentence nine times. Per field: a
-compact glyph with tooltip, individually dismissible. One summary line for the
-batch with "clear all". Manual edit still drops that field's mark.
-
-### 3 — No native suggest popovers
-Replace the brand `<datalist>` with the in-app suggest pattern (the picker's
-stable-host dropdown, reused). Audit for other `<datalist>` uses. Plain
-`<select>` for short enums stays allowed.
-
-### 4 — Player-aware no-match flow (PREFLIGHT B)
-No checklist match: if the typed name matches a known player (union of this
-org's checklist names and existing card instances) offer "Use player 'X'"
-(fills name + team where sources agree, provenance-marked); otherwise "New
-player: 'X'" — affirmative, keeps what was typed, focus to next field. When the
-org has NO persisted checklists at all, additionally explain why and what to
-do: "No checklists in this organization yet — set up a product from documents
-to enable autofill." Still NO persisted Player entity (model boundary stands).
-
-### 5 — State-aware post-save continuation (PREFLIGHT A)
-After Save card the flow currently dead-ends. Continuation is STATE-AWARE —
-this table is verbatim from `docs/OPERATOR_LIFECYCLE.md` §4.2 and supersedes
-any earlier static-primary instruction:
-
-| Condition | Primary continuation | Secondary continuation |
-|---|---|---|
-| Collection below expected count | Add another card | Review acquisition |
-| Collection at or above expected count | Review acquisition | Add another card |
-| Expected count absent | Add another card | Review acquisition |
-| Single-card acquisition after first card | Review acquisition | View saved card |
-| Editing an existing card | Return to invoking grid/detail context | View saved card |
-
-The continuation shows progress ("3 of ~5 entered"). Expected count never
-blocks and never creates records. "Add another" opens an EMPTY form, same
-acquisition preselected, focus in Player/Character; nothing exists until save
-succeeds through the guarded path. Toast-only is not a continuation.
-
-### 6 — Honest seam copy (new, from the workflow contract)
-The shipped locked-zero basis display says "assigned in cost assignment (next
-checkpoint)". Contract rule, verbatim: "unavailable future stage: explain that
-it is not available and do not call it the immediate next step." Reword to an
-honest present-day seam, e.g. "Cost assignment for collection cards is not yet
-available; basis stays 0 until it is." Audit for any other copy that names an
-unbuilt stage as "next".
-
-## Phase 2 evidence — the seven workflow scenarios, verbatim from the contract §7
-
-1. First-time completion.
-2. Repeated or bulk action.
-3. Incomplete exit and resume.
-4. Final-item completion.
-5. Edit and return.
-6. Cancel with no phantom record.
-7. Denial/conflict and recovery.
-
-Evidence states the start, action, committed outcome, immediate UI,
-continuation, and ending context. Screenshots remain required for render claims
-(correctly captioned, filename matching) but screenshots alone cannot satisfy
-workflow acceptance.
-
-## Standing rules — enumerated, no shorthand
-
-1. Every harness-exposed function fails closed on its own.
-2. The forbidden-term list is externally supplied and only grows (28 minimum);
-   scan hosts `#app` + `#ovhost` + `#toast`, dialogs open.
-3. A failing test may not be replaced by a differently-constructed passing one.
-4. Never let a higher layer's correctness stand in as evidence for a lower one.
-5. Evidence for a conditional behaviour must demonstrate the condition occurring
-   — including unhappy paths.
-6. Any claim that something renders needs a screenshot; captions state what is
-   actually shown.
-7. A host is never repainted during an in-flight interaction with it; a
-   programmatic focus is not a user focus.
-8. A rendered default must exist in state.
-9. No native dialogs and no native suggest popovers.
-10. When several fields share one provenance basis: compact glyphs + one summary
-    line.
-11. Dropdowns dismiss on outside click, Escape, and focus departure; a no-result
-    state offers an affirmative close.
-12. Cards are never created as blanks; every instance passes the single guarded
-    creation path.
-13. Cross-organization isolation on everything, including preferences and open
-    dialogs.
-
-## Package and report
-
-Phase 1: the two preflight tables, plus your adjacent-gap observations
-(separate from authorized implementation). Stop and request CPI review.
-Phase 2 (only after review): `Element10_PFCS1_7_REVIEW.zip`, full 64-char
-hashes, manifest `shasum -c` clean, chain rooted at S1.6 `fd47e461...`. Do not
-mark accepted yourself. Needs the operator walkthrough.
+## 5. EVIDENCE AND COMPLETION
+- Non-admin refusal (review + direct mutator probe, screenshots).
+- Admin over-assign end-to-end: review statement → approve → flagged
+  acquisition detail (screenshots), plus the recorded totals correct.
+- Direct probe: non-admin calling `saveCostAssignment` with an over-total draft
+  refuses even with the UI bypassed.
+- Regression: the 12-check S1.7+S2 behavioral set still passes; full S1.x
+  guards intact.
+- Package `Element10_PFCS2_1_REVIEW.zip`, full 64-char hashes, manifest
+  `shasum -c` clean, chain rooted at `88c9b8c5...`. **Do not update BOARD.md or
+  self-accept.** Operator walkthrough required. Stop and request:
+  "PF-C-S2.1 accepted."
 
 ---
 
@@ -440,7 +317,26 @@ Two items to fold into the plan text. Neither changes behavior.
   titles, raw-duplicate warn-then-save, Distribution rename, Checklists entry
   point with origin-aware landing, inert search. Full S1 arc S1..S1.6 GRANTED in
   the ledger.
-- **PF-C-S1.7 is the current gate, PHASE 1 ONLY: workflow preflights** per
+- [x] **PF-C-S1.7 + PF-C-S2 ACCEPTED 2026-07-27** (full protocol run: preflight → review → ruled baseline → implementation → audit 12/12 → operator walkthrough)
+
+- **PF-C-S2 OPENED MID-FLIGHT BY DIRECT OPERATOR AUTHORIZATION** (Trent,
+  2026-07-27, hands-on): the assignment workflow (assign → review → approve,
+  single writer, dirty-guarded draft, under-assignment shown as explicit
+  remainder, adjust-anytime) was built into the same working file and the
+  package rebuilt (zip `88c9b8c5...`, screen `875422ab...`, supersedes the
+  Phase-2-only hashes `e5c4e1ca...`/`99dd7a3f...`). The agent exceeded the
+  relay scope on operator instruction and FLAGGED it — correct conduct under
+  the protocol; operator authority outranks the relay.
+- **S2 conformance ruling (Trent, 2026-07-27): the July-21 admin-only
+  over-assignment ruling STANDS.** The delivered flat cap is a conformance
+  defect: ordinary operators are refused past total paid; an admin may exceed
+  it with the over-assigned state recorded and visibly flagged
+  (`singles.cost_assign_over`, PROPOSED). Corrective required in the S1.7+S2
+  audit round.
+- S2 remaining scope, unchanged: acquisition channel + landed-cost components;
+  the assignment "Adjust" flow may overwrite freely ONLY until S3 dispositions
+  exist — from S3 on, corrections to sold cards' basis are additive events per
+  PF-M2.1 §4.2 (seam recorded). Per-acquisition margin reporting stays S5. per
   `docs/UX_WORKFLOW_CONTRACT.md` + `docs/OPERATOR_LIFECYCLE.md` §9 — no
   implementation until the CPI reviews the preflights. See NEXT PROMPT TO SEND.
 - Then: S2 cost assignment (expanded scope: acquisition channel, landed-cost
