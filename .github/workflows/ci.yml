@@ -102,6 +102,11 @@ jobs:
         # there across release/mark_sold/consume/set_reservations/reverse (org-B admin retains it); buyer_suggest's `seen`
         # is scoped to the requested session, so no same-owner-other-session or cross-org buyer identities leak.
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6c2_1_authority_test.sql
+      - name: A6c.3 workspace policy + CAS gate (org-scoped workspace RLS; optimistic-concurrency CAS; global-PK invariant)
+        # The 4 rewritten e10_workspace policies enforce the org boundary: an org0 member reads + CAS-bumps (org0,'shared')
+        # and a stale-rev CAS matches 0 rows (merge signal); an org-B-only member is denied read and write; an org-B
+        # 'shared' INSERT fails the retained global PRIMARY KEY(id) with 23505; a cross-org re-stamp is refused 42501.
+        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6c3_workspace_test.sql
       - name: Schema reproducibility (re-apply migrations cleanly)
         run: supabase db reset
       - name: Default-privileges regression probe (born-locked; zero anon-executable functions)
