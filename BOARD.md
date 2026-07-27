@@ -476,6 +476,34 @@ Two items to fold into the plan text. Neither changes behavior.
   disposition.** Listing references a CardInstance and carries channel, external
   id, SKU/title, asking, status, timestamps, fees, reservation, sync state. This
   is the double-sale guard. S3 does not build until PF-M3 is approved.
+- **Multi-location ruling (Trent + outside review, 2026-07-27 — REPLACES the
+  CPI's earlier over-specified version, which asserted physical design without
+  reading the mechanisms):** Locations operated by one tenant are
+  organization-owned facilities, not separate tenant boundaries. Inventory and
+  operational facts must be designed for location-level AND
+  organization-consolidated reporting. **PF-M4 must settle — and be approved
+  BEFORE PF-C4 physical-schema implementation, and certainly before PF-C5
+  receiving:** inventory positions (per-location balances vs child-lot splitting
+  vs whole-lot-only — a lot CAN be split between stores; CardInstance's single
+  current location is the natural nonfungible case), transfer postings (the
+  current movement writer has NO transfer semantics: zero-net returns null, a
+  single nonzero delta shifts org-wide on-hand — transfers need paired postings
+  or a transfer event with derived postings proving source≠destination, same
+  org, sufficient free stock, -q/+q, org-net zero, atomicity, idempotency, and
+  no stranded or silently moved reservations), reservation locality (lot_free
+  is lot-level today; a show at Store B cannot treat Store A stock as
+  fulfillable — confirmed reservations likely bind to a location position),
+  in-transit behavior (NOT automatically additive later: needs transfer
+  identity, stateful postings, partial receipt and discrepancy handling —
+  reconcile with DOMAIN_MAP's existing five-axis custody model incl.
+  `in-transit` and `pending-transfer`), permissions, and historical reporting
+  (events retain the location applicable AT EVENT TIME; a current-location
+  pointer alone distorts yesterday's reports). Default location per org and
+  location-UI-only-when-plural stand as UX decisions. "Never a second
+  organization" is scoped: franchisees, separate legal entities, currencies, or
+  independently administered businesses may still be separate organizations,
+  with a future reporting-group concept for cross-org rollup — not designed
+  now.
 - **Costing method is lot-level actual cost** (Trent, 2026-07-21). A received
   case or box becomes a lot carrying what was actually paid. Consuming the lot
   charges that lot's cost. Cost is never derived through the nesting chain: if no

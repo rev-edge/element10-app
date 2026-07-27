@@ -8,6 +8,17 @@ Progress also requires a complete operator task loop: entry, commit, result,
 continuation, review/return, repeat, resume, recovery, and handoff. A screen or
 checkpoint-local control is not progress if the operator is stranded after using it.
 
+## PF-M4 — Locations and transfers (model gate)
+
+Multi-location businesses are one organization with organization-owned facility
+locations (ruling 2026-07-27; see BOARD.md). PF-M4 settles inventory positions
+(split-lot question), transfer postings and their ledger invariants, reservation
+locality, in-transit behavior (reconciled with DOMAIN_MAP's custody axis),
+permissions, and event-time historical reporting. **Sequencing: approved before
+PF-C4 physical-schema implementation and before PF-C5 receiving.** Franchise /
+separate-legal-entity cases remain separate organizations; a reporting-group
+concept for cross-org rollup is future scope.
+
 ## Product direction (recorded 2026-07-15)
 
 Element 10 will eventually be **productized (multi-tenant SaaS) and verticalized across industries** beyond trading cards. Consequences, in force from now:
