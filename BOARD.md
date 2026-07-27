@@ -15,7 +15,8 @@ snapshot is stale.
 - [x] A6c authorization plan rev 6 approved
 - [x] A6c.0 additive prerequisites accepted
 - [x] A6c.1 + A6c.1.1 RLS policy rewrite ACCEPTED (two independent audits; falsifiable denial proof)
-- [ ] A6c.2 wrapper cutover + mechanic relocation - CURRENT TRACK A GATE
+- [x] A6c.2 implemented (0a7da40) — outside review: NOT ACCEPTED (buyer_suggest unscoped `seen`; global-admin authority in 6 delegate bodies; compact staging body)
+- [ ] **A6c.2.1 authority corrective - CURRENT TRACK A GATE**
 - [x] PF-C1 Product Master accepted
 - [x] PF-C2 Product Configuration accepted
 - [x] Human walkthrough of the combined PF-C1 + PF-C2 Product workflow — DONE, feedback captured
@@ -42,8 +43,8 @@ snapshot is stale.
 - [x] PF-C-S1.3 NOT ACCEPTED (typing rendered backwards)
 - [x] PF-C-S1.4 caret fix ACCEPTED (proven in operator use — in-order text in the walkthrough screenshot)
 - [x] PF-C-S1.5 NOT ACCEPTED (picker rows unclickable) · PF-C-S1.5.1 fix ACCEPTED — both GRANTED as a pair
-- [ ] **PF-C-S1.6 (7 items: basis lock, identity guards, composed titles, Distribution, checklists entry, inert search) - CURRENT TRACK B GATE, DISPATCHED**
-- [ ] PF-C-S1.7 queued (state-not-render defaults + audit, compact provenance, no-native-popover extension, player-aware no-match)
+- [x] PF-C-S1.6 ACCEPTED (source audit + CPI behavioral run 18/18 at operator direction)
+- [ ] **PF-C-S1.7 - CURRENT TRACK B GATE, READY TO DISPATCH** (state-not-render defaults + audit, compact provenance, no-native-popover, player-aware no-match + cold-start hint)
 - [ ] ~~PF-C-S1.5 walkthrough findings:~~ superseded line — see above: dropdown dismissal (universal), filter affordance (universal), required brand/line/year, print-run affordance, acq→first-card flow, images/links/asking, cert sanity - CURRENT TRACK B GATE**
 - [ ] PF-C-S2 cost-basis assignment (zero-basis → assign to total) - next after S1.2
 - [ ] PF-C-S2 cost assignment · S3 disposition · S4 repack · S5 margin reporting - sequenced after S1
@@ -69,9 +70,11 @@ work has been independently accepted.
 | Product-first workflow | GRANTED | CPI | 2026-07-20 | `Element10_PRODUCT_FIRST_CANONICAL.zip` SHA-256 `874b8f40a519ddbb22c79bfd4e8180746e5c0a13e8eba2fd18a96d0951ed82fb` — **VERIFIED** against the original archive 2026-07-20; extracted content 12/12, content anchor `2ae67f8c...` |
 | PF-0 provenance and hub gate | GRANTED | CPI | 2026-07-20 | PF-0.2 archives — see `PF0_2_ARCHIVE_HASHES.txt` |
 | A6c authorization plan rev 6 | GRANTED | CPI | 2026-07-20 | `Element10_A6c_PLAN.md` SHA-256 `2d1710bfdb0653271960f021c12efacb4c83f1be22067d6e064e6724ed33ce70` |
+| A6c.2 wrapper cutover + mechanic relocation | NOT ACCEPTED | CPI | 2026-07-26 | Commit `0a7da40eb7d3249266cd19914b8abf3b68967895`, migration `20260726140000_e10_a6c2_cutover.sql`, CI `30211865339`. Structure verified clean (delegates are the mechanism, wrappers thin one-line forwards, 0 recursion, 7 legacy helpers retired with refcount proof, 55 A6c.1 policies untouched, prod untouched). **Rejected on outside review, both findings CPI-confirmed on live staging: (1) `buyer_suggest`'s `seen` query has no session or org filter — `streamer_uid=auth.uid() OR e10_is_admin()` exposes buyer identities across sessions and, for a legacy global admin, across organizations; (2) SIX delegates (reviewer's five + buyer_suggest) retain legacy GLOBAL `e10_is_admin()` authority inside org-aware bodies — a legacy global admin could exercise admin behavior in an org where they hold ordinary membership; no test covers that identity combination.** Root cause: "preserve legacy behavior verbatim" (m31/m32 oracle) preserved legacy AUTHORITY verbatim; no census ever covered delegate-body predicates. Also: compact staging body + reconciled ledger makes staging appear identical to clean replay when it is not — insufficient for a security-definer migration. CPI's own audit missed both (checked structure, not authority semantics) and the CPI's stale board sections violated its own 2026-07-21 maintenance rule a second time. |
 | A6c.1 RLS policy rewrite (55 policies) + A6c.1.1 test corrective | GRANTED | CPI | 2026-07-26 | Commits `7138716743250d47e3cf90da9196fd471f18a322` (migration `20260726120000_e10_a6c1_rls_rewrite.sql`, CI `30206547507`) + `d2ad844` (test-only, CI `30207551465`). CPI-verified against live staging: 97-policy census reconciles exactly (55 rewritten = 41 USING + 14 WITH CHECK; 100 live minus 3 storage = 97); `imov_sel` now `e10.is_org_member(organization_id)` closing the A6c.0 finding; every WITH CHECK pins `organization_id = e10.current_org()`; correlated refs table-qualified with the `owned_slot` alias (rev-4 shadowing not reintroduced); 11 delegates intact, wrapper still legacy (no A6c.2 creep); prod untouched (12 migrations, head `20260716110000`, zero e10 policies). Outside review found the cross-org write denial was a false positive (FK shadowed RLS behind `exception when others` — standing rule 5); A6c.1.1 rebuilt it FK-valid requiring SQLSTATE 42501, audited the other 7 denials (SELECT-count/predicate, unshadowable), and proved falsifiability by permissive-replace after finding a bare DROP yields default-deny — a stronger construction than the corrective specified. Agent's ADR flag was correct; board's stale rev3.2.2 note fixed. |
 | A6c.0 additive prerequisites | GRANTED | CPI | 2026-07-20 | commit `7f0d38385e05682da5bc51879a1ac04683d27afd`; migration `20260720120000_e10_a6c0_prereqs.sql`; CI green run `29768281886`; staging head `20260720120000`. CPI-verified against live prod + staging: 13-delegate allowlist exact, internals `authenticated=false`, zero anon/PUBLIC, no wrapper or policy cutover, 0 published sessions, prod untouched. |
 | PF-C2 Product Configuration | GRANTED | CPI | 2026-07-20 | `Element10_PFC2_REVIEW.zip` SHA-256 `c001a8bb169b50e94103277f205d0290023513786da431233d1ef521166ca7d3`; screen 08 `a7d056e881f89c0fc19748e9...`. CPI-verified in source: `saveConfig` fails closed; conversions append-only with `cur` pointer; forbidden list and scan hosts unshortened; unit arithmetic independently recomputed (360 / 4320 / 48); cards-off handled via per-org seed data. Passed on first attempt. |
+| PF-C-S1.6 financial + identity discipline | GRANTED | CPI | 2026-07-26 | `Element10_PFCS1_6_REVIEW.zip` SHA-256 `fd47e4610058fad2ba7bd1af14b972a5293c23cd59f5406c43c378c119069b41`; screen 08 `d2065b29e3d72a556e004610b80987f1718b85b047ccdd43df26c5fa7c183eb6`. Eight items: cost basis unwritable (input removed; mutator refuses a direct write naming attempted vs derived — closed the build-contradicts-PF-M2.1-§4.2 inconsistency); collection import creates ZERO instances (the unguarded blank-creation path is dead, `saveAcq` has no pushes; "Expected cards" is advisory progress); Name required; org-wide duplicate company+cert refused naming the existing card via composed title (archived included); raw-duplicate warn-then-save; `cardTitle()` composed identity, load-bearing in 7 places, no dangling separators; Channel→Distribution rename complete; Checklists entry point into the same wizard with origin-aware landing; search visibly inert. Acceptance evidence: CPI source audit + **CPI-executed behavioral run at operator direction — 18/18 checks via real DOM events** (mousedown→click picker rows, native input events), covering the full sequence: checklists-first wizard → zero-blank collection → picker autofill → basis probe refusal → duplicate-cert refusal → origin landing. Finding from the run: a fresh org has an empty picker index until a product import runs — correct per spec; a why-and-what-next line added to S1.7's no-match item. |
 | PF-C-S1.5 + PF-C-S1.5.1 walkthrough batch + picker-click fix | GRANTED | CPI | 2026-07-26 | S1.5 `Element10_PFCS1_5_REVIEW.zip` SHA-256 `5e3cc57f224fe5e61ef8e1fa38721a75ebbe002d91e726d83316b26e0a067933` (7/8 verified: delegated dismissal with Escape swallow, quiet filter row + contains/not/equals/empty ops, required brand/line/year, "/" print-run adornment + serial redirect, acq→first-card flow, images/links/asking outside money math, advisory cert warning; 3 self-found defects disclosed pre-package) was NOT ACCEPTED on the operator finding that picker rows were unclickable — `||S.ciform` repainted the picker on every mousedown, destroying the row between mousedown and click. S1.5.1 `Element10_PFCS1_5_1_REVIEW.zip` SHA-256 `37d72670c657224d5515d68ea2cfd815778a39447b62943478113d0ae1103ea5`; screen 08 `a492aa29818164f670dbf9ccbd4baee59205ffe879b4d0e92a7f002019418f17`. Repaint-only-what-closed; while proving it the agent found and fixed the focus-reopen defect (programmatic focus is not a user focus, `S._noFocusOpen` at three sites) rather than shipping a fix that visibly broke the feature a new way; proof used the full native mousedown→click sequence. Operator confirmed selection and autofill working. |
 | PF-C-S1.3 + PF-C-S1.4 checklist autofill + caret fix | GRANTED | CPI | 2026-07-26 | S1.3 `Element10_PFCS1_3_REVIEW.zip` `274e85b6...` (substance: org-scoped picker, variant→parallel translation at the boundary, provenance marks, subject→name) was NOT ACCEPTED on the operator finding that typing rendered backwards — `cifNameInput` redrew the form per keystroke with no caret restore, fifth pattern-reuse failure. S1.4 `Element10_PFCS1_4_REVIEW.zip` SHA-256 `67c2da4c859074c25c688d55d4bf82ccfc2f152596045b93659b519cb5146714`; screen 08 `a0e3de7be87989e675a05ffe2ad08a054c30e06ab1e5460b5128ea60c0f645ca`. Fix is structural: the input is never rebuilt while typing (stable `#cifPicker` host repaints alone); the four legitimate redraw paths share `ciCaptureCaret`/`ciRestoreCaret`; live-DOM input audit. Accepted on the operator's own walkthrough screenshot showing in-order text. |
 | PF-C-S1.2 print run + serial split | GRANTED | CPI | 2026-07-21 | `Element10_PFCS1_2_REVIEW.zip` SHA-256 `50807b79c89baef9f045762cf3eb7bf137a9a4e96802afb9b9ad259b72948592`; screen 08 `d45f7726d113e206b0f6f3ddd4c07b9ada707adb11d605d6f37d50d41ae2612b`. `serial_number` → `print_run` + `serial`, display rule covers 14/149, 1/1, /149 and unnumbered; print-run filter proven narrowing. **Included a self-caught, self-disclosed tenant-boundary fix:** `setOrg`/`setEnt` never cleared `#ovhost`, so a dialog open across an org switch left card vocabulary in the other org's DOM — reproduced failing (`hits:["card","player","parallel"]`), fixed, reproduced clean; CPI verified the prior build lacked the clear. Rules 4 and 6 applied unprompted. |
@@ -101,62 +104,91 @@ If your subsection says ALREADY DISPATCHED, do not re-run it.
 
 ### TRACK A — Claude Code — READY TO DISPATCH
 
-A6c.1 + A6c.1.1 are ACCEPTED. Implement **A6c.2 only** — wrapper cutover and
-mechanic relocation, per the approved A6c plan rev 6 (`2d1710bf...`).
+## A6c.2 NOT ACCEPTED — implement A6c.2.1 (authority corrective)
 
-Authorization: cite the ledger rows `A6c.1 RLS policy rewrite + A6c.1.1 | GRANTED
-| CPI | 2026-07-26` and `A6c authorization plan rev 6 | GRANTED`. Do not infer
-authorization from anything else.
+The relocation's structure passed two audits: delegates are the mechanism,
+wrappers are one-line forwards, zero recursion, seven helpers retired with
+refcount proofs, the 55 A6c.1 policies untouched, prod untouched. None of that
+is being redone. The defects are in the AUTHORITY SEMANTICS of the relocated
+bodies — "preserve legacy behavior verbatim" preserved legacy authority
+verbatim, and legacy authority embedded global-admin power that is wrong in a
+multi-tenant world. Where behavior-preservation and org-scoping conflict,
+**org-scoping wins**; note each divergence from m31/m32 explicitly instead of
+preserving it.
 
-## Baseline
+Authorization: ledger rows `A6c.1 + A6c.1.1 | GRANTED | CPI | 2026-07-26` and
+`A6c authorization plan rev 6 | GRANTED`. Baseline: accepted code head
+`d2ad844`; A6c.2's `0a7da40` is the corrective's parent. STAGING and LOCAL only.
 
-- Accepted code head: **`d2ad844`**. Diff against it; verify ancestry.
-- STAGING and LOCAL only. Production remains read-only until A10 — re-prove it
-  untouched at the end (12 migrations, head `20260716110000`, no `e10` schema).
+## 1 — BLOCKING: scope `buyer_suggest`'s `seen` query
 
-## Scope — A6c.2 ONLY, from the plan
+Confirmed on staging: `seen` collects from `e10_break_slots` joined to sessions
+`where (s.streamer_uid=auth.uid() or public.e10_is_admin())` — no session
+filter, no org filter. Every buyer the caller ever hosted (or, for a legacy
+global admin, EVERY buyer in EVERY organization) leaks into suggestions.
 
-- Relocate the legacy mechanics into the `e10_org_*` delegates: the delegate
-  guard stops being a wrapper over `_e10_inv_guard()` and becomes the mechanism.
-- Cut the legacy wrappers over to the delegates per the plan's 5.a mapping
-  (14 public inventory RPCs → 14 delegates; 13 client-callable; the 14th
-  internal). The "19 RPC wrappers" figure is stale; the plan's inventory governs.
-- Legacy guard bodies retired only when nothing references them; prove the
-  reference count is zero before dropping anything.
-- Do NOT touch the 55 accepted policies. Do not start A6c.3 (workspace) or
-  A6c.4 (platform/identity).
+Required: `seen` scopes to **the requested session** (`sl.session_id =
+p_session`), consistent with the roster CTE; the entry already verifies
+`e10.owns_session(p_session)`. Remove `e10_is_admin()` here entirely.
+This changes suggestion breadth vs legacy — that is the point; record it as an
+approved behavioral divergence.
 
-## Proof standard — raised by what A6c.1 taught
+## 2 — BLOCKING: purge legacy global-admin authority from delegate bodies
 
-Two audits found that a denial test passed for the wrong reason. Carry the
-lesson:
-- Every denial assertion must require its **specific** SQLSTATE; `exception when
-  others` is prohibited in gate tests.
-- Every new denial must be **falsified once**: demonstrate the test goes red via
-  permissive-replace (not DROP — a bare drop yields default-deny and stays
-  green), then green with the real mechanism. Include the red/green pair in the
-  report.
-- For each assertion, state what other layer could plausibly fire first (FK,
-  trigger, constraint) and how the test excludes it. "None" must be said
-  explicitly, not implied.
+Six delegates carry `public.e10_is_admin()` (the reviewer's five —
+`inv_release`, `inv_consume`, `inv_mark_sold`, `inv_set_reservations`,
+`inv_reverse_consumption` — plus `buyer_suggest` per item 1). Replace the five
+inventory uses with **organization-scoped authority**:
+`e10.is_org_admin(p_org)` (or the capability check the plan's ACL matrix
+assigns, if stricter). A legacy global admin with ordinary membership in org B
+gets ordinary-member treatment in org B, nothing more.
 
-## Hard invariants
+**Then census, don't spot-fix:** enumerate EVERY legacy authority predicate
+(`e10_is_admin`, `e10_is_member`, `e10_is_org`, `e10_can_read_session`, legacy
+`e10_owns_session`) across ALL `e10_org_*` bodies and org-aware `_e10_inv_*`
+helpers. Report the census table: function, predicate found, replacement or
+justified retention. Zero unexplained legacy predicates remain. The A6c.1
+census covered policies; nothing ever covered delegate bodies — this closes
+that gap permanently.
 
-- The ledger outlives its items: no relocated mechanic may reintroduce a
-  movement→item dependency. Re-prove the deleted-item ledger read on the
-  cutover paths.
-- Idempotency receipts still scoped `(organization_id, idempotency_key)`.
-- `e10_buyer_suggest` and `e10_redeem_code` never call `e10.current_org()`.
-- Multi-membership fails closed on every membership-bound path.
+## 3 — Regression tests for the uncovered identity combination
+
+Per the raised proof standard (specific SQLSTATE, no `when others` except as a
+`*_wrongerr` recorder, layer-exclusion notes):
+- Legacy global admin + ordinary member of org B → each of the five admin-privileged
+  operations in org B refuses with its specific SQLSTATE (and the org-B admin
+  positive case succeeds).
+- `buyer_suggest` for session X returns no buyer whose only appearance is in
+  session Y (same owner) and none from another organization (adversarial two-org
+  fixture).
+- Falsify once each via permissive-replace (session exercise, described with
+  before/after in the report — not committed to CI).
+
+## 4 — Staging artifact discipline (reviewer concern, adopted)
+
+The compact-body practice ends for authorization objects. Required here:
+- Re-apply the EXACT committed migration text to staging (reset the A6c.2 +
+  A6c.2.1 state as needed), or prove object-level identity: `pg_get_functiondef`
+  of every touched object diffed against a local clean replay of the committed
+  files, zero diffs, the diff transcript in the report.
+- **Standing rule going forward: staging receives the byte-exact committed
+  artifact for any migration touching authorization objects.** The A6b-era
+  compact-body contract notes stand for their own accepted gates; they are not
+  precedent for future ones.
+
+## 5 — Housekeeping (fold in)
+
+Drop `_e10_inv_receipt` and `_e10_inv_replay` — dead since A6c.0 (reference the
+dropped `response` column), refcount 0, locked; carry the same refcount-proof
+pattern as the seven already retired.
 
 ## Report
 
-Changed files vs `d2ad844`; the wrapper→delegate mapping with before/after
-bodies; reference-count proof before every drop; the red/green pair per new
-denial; full suite green; staging verified; prod untouched. Propose the BOARD.md
-delta; do not self-accept. Stop and request "A6c.2 accepted."
+Changed files vs `0a7da40`; the authority census table; per-test red/green;
+staging identity proof; full suite green; prod re-proven untouched. Propose the
+delta; do not self-accept. Stop before A6c.3 and request "A6c.2.1 accepted."
 
-### TRACK B — Claude Design — QUEUED BEHIND PF-C-S1.6 (relay after S1.6 is accepted)
+### TRACK B — Claude Design — READY TO DISPATCH (PF-C-S1.7)
 
 Claude Design cannot read this file. The CPI must paste this subsection to it.
 Ignore any `BOARD.md` copy in your own workspace. This relayed text is authority.
@@ -165,8 +197,11 @@ Ignore any `BOARD.md` copy in your own workspace. This relayed text is authority
 
 ## 0. Fail-closed input
 
-Start from **accepted PF-C-S1.6** (fill hashes from its acceptance; if S1.6 is
-not accepted, stop and report). FROZEN: screens 01-07; css per the S1.6 baseline.
+Start from accepted PF-C-S1.6:
+  `Element10_PFCS1_6_REVIEW.zip`
+  SHA-256 `fd47e4610058fad2ba7bd1af14b972a5293c23cd59f5406c43c378c119069b41`
+  `08-product-workspace.html` `d2065b29e3d72a556e004610b80987f1718b85b047ccdd43df26c5fa7c183eb6`
+FROZEN: screens 01-07; `e10.css` `cd37cd43...`.
 
 ## 1 — Rendered defaults must live in state (the "Cards to create" bug)
 
@@ -217,6 +252,10 @@ match:
   name, and team where all sources agree; provenance-marked).
 - Otherwise offer **"New player: 'X'"** — affirmative, closes the picker, keeps
   what was typed, focus moves to the next field.
+- **Cold-start hint** (CPI behavioral-run finding): when the organization has NO
+  persisted checklists at all, the no-match state additionally explains why and
+  what to do — "No checklists in this organization yet — set up a product from
+  documents to enable autofill." One line; renders only in the truly-empty case.
 - Still NO persisted Player entity (model boundary from S1.3 stands; derivation
   only). If a durable player record is wanted later, that is a model gate —
   flagged for the CPI, not built here.
@@ -480,14 +519,14 @@ Needs the operator walkthrough. Stop and request "PF-C-S1.5.1 accepted."
 
 ### Current gate
 
-- A6c plan rev 6 APPROVED; **A6c.0 ACCEPTED 2026-07-20** against commit
-  `7f0d383...` after CPI verification against live prod and staging.
-- **A6c.1 (RLS policy rewrite, 55 policies) is now the active gate.** It is the
-  first step that switches live authorization rather than adding alongside it.
-- Carried forward to A6c.2: the write delegates currently layer the
-  org-authorization boundary over legacy mechanics. A6c.2 must relocate those
-  mechanics into the delegates. Until it does, the delegate guard is a wrapper
-  rather than the mechanism.
+- A6c.0, A6c.1 + A6c.1.1 ACCEPTED. Accepted code head `d2ad844`.
+- **A6c.2 implemented (commit `0a7da40`) and NOT ACCEPTED** on outside review —
+  two tenant-boundary defects in relocated delegate bodies plus the compact
+  staging-body concern. **A6c.2.1 is the active gate** (see NEXT PROMPT TO SEND).
+- A6c.3 (workspace) and A6c.4 (platform/identity) remain out of scope until
+  A6c.2.1 is accepted. The two dead orphans `_e10_inv_receipt`/`_e10_inv_replay`
+  (refcount 0, locked, reference a dropped column) fold into A6c.2.1.
+
 
 ### Approved-with-amendment (documentation only, no re-review required)
 
@@ -508,22 +547,14 @@ Two items to fold into the plan text. Neither changes behavior.
 
 ### Next authorized action
 
-**Superseded 2026-07-21.** This section previously still read "Implement A6c.0
-ONLY ... Stop before A6c.1" after A6c.0 had been accepted, contradicting the
-dispatch section and instructing an agent to redo accepted work. Corrected here.
+**Rewritten 2026-07-26 in the same reconciliation as the A6c.2 ledger row, per the
+standing maintenance rule (which the CPI violated twice before this).**
 
-1. Implement **A6c.1 ONLY**: the RLS policy rewrite of the 55 policies in the
-   reviewed 97-policy census. Full instructions are in `## NEXT PROMPT TO SEND`
-   -> TRACK A. That subsection is authoritative; this is a pointer to it.
-2. STAGING and LOCAL only. Production remains read-only until A10.
-3. Stop before A6c.2. Do not touch the wrappers and do not relocate legacy
-   mechanics into the delegates; both are A6c.2.
-4. Run the A6c.1 gate proofs, log results, propose a BOARD.md delta. Do not mark
-   the gate accepted.
+1. Implement **A6c.2.1 ONLY** — the authority corrective. Full instructions in
+   `## NEXT PROMPT TO SEND` → TRACK A; that subsection is authoritative.
+2. STAGING and LOCAL only. Production read-only until A10.
+3. Stop before A6c.3. Propose the delta; do not self-accept.
 
-**Standing maintenance rule:** when a gate is accepted, this section is rewritten
-in the same reconciliation that adds the ledger row. A stale "next action" is a
-defect, not a leftover.
 
 ## TRACK B: PRODUCT AND OPERATOR INTERFACE
 
