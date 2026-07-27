@@ -1,6 +1,7 @@
 # Element 10 Project Board
 
-_Last reconciled: 2026-07-27 by Chief Project Inspector (operator-lifecycle package applied; S1.7 restructured two-phase)._
+_Last reconciled: 2026-07-27 by Chief Project Inspector (operator-lifecycle and
+walkthrough protocols applied; S1.7 restructured two-phase)._
 
 **CANONICAL LOCATION:** `/Users/tsconnely/dev/element10-app/BOARD.md`.
 That file is the only authoritative copy. Any other copy of this document,
@@ -23,10 +24,12 @@ state/transition map, per-surface action inventory, the 12 task-loop fields, the
 escalations; (4) EXACT IMPLEMENTATION SCOPE — enumerated changes, state-aware
 actions, honest unavailable-stage handling, context preservation, forbidden
 changes, standing rules written out in full (no shorthand ever);
-(5) EVIDENCE AND COMPLETION — behavioral scenarios, screenshot/caption
-standards, regression + cards-off + isolation checks, package/manifest/chain
-root, operator-walkthrough requirement, stop condition, exact acceptance
-phrase, and "Do not update BOARD.md or self-accept." Workflow gates use two
+(5) EVIDENCE AND COMPLETION — behavioral scenarios, the five walkthrough tours,
+baseline + materially different adversarial passes, defect-family expansion,
+separate interaction/mutator/persisted/render/boundary evidence,
+screenshot/caption standards, regression + cards-off + isolation checks,
+package/manifest/chain root, operator-walkthrough requirement, stop condition,
+exact acceptance phrase, and "Do not update BOARD.md or self-accept." Workflow gates use two
 separate dispatches: Phase 1 authorizes the preflight only and stops for CPI
 review; Phase 2 cites the approved preflight identifier and authorizes only
 that implementation. Relays are always regenerated whole — never incremental
@@ -38,9 +41,13 @@ history and still execute correctly.
 - `docs/OPERATOR_LIFECYCLE.md` defines the end-to-end operator jobs and handoffs.
 - `docs/UX_WORKFLOW_CONTRACT.md` defines workflow planning, navigation, and
   behavioral acceptance.
+- `docs/OPERATOR_WALKTHROUGH_PROTOCOL.md` defines multi-pass walkthrough tours,
+  evidence classes, defect-family expansion, claim discipline, and acceptance
+  separation.
 - These documents do not alter schema, security, capability, or gate authority.
-- Every Track B relay must include the relevant lifecycle and workflow-contract
-  requirements verbatim when the receiving agent cannot read these files.
+- Every Track B relay must include the relevant lifecycle, workflow-contract, and
+  walkthrough-protocol requirements verbatim when the receiving agent cannot read
+  these files.
 
 ## CURRENT SYSTEM MOMENT
 
@@ -395,6 +402,12 @@ Two items to fold into the plan text. Neither changes behavior.
 - **Workflow evidence is behavioral.** In addition to render screenshots, prove
   first-time, repeat, incomplete/resume, final-item, edit/return, Cancel, and one
   denial/conflict recovery path.
+- **One walkthrough is never acceptance.** Follow
+  `docs/OPERATOR_WALKTHROUGH_PROTOCOL.md`: run baseline and materially different
+  adversarial passes across the lifecycle, interruption, boundary-transition,
+  mutation/invariant, and temporal/input tours. Every finding expands to its
+  invariant and sibling paths. Builders report ready for independent review;
+  only the CPI records acceptance after the required operator ruling.
 - **A resolution must be earned.** No action may mark an exception, gate or
   decision resolved unless it actually performed the resolution. An action that
   changed nothing leaves the blocker standing. Same class as `gApprove` asserting

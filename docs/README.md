@@ -9,6 +9,9 @@ been promoted here.
   business handoffs, multi-channel lifecycle, and task-loop completeness.
 - **[UX_WORKFLOW_CONTRACT.md](UX_WORKFLOW_CONTRACT.md)** — binding UI planning,
   navigation, behavioral evidence, and workflow Definition of Done.
+- **[OPERATOR_WALKTHROUGH_PROTOCOL.md](OPERATOR_WALKTHROUGH_PROTOCOL.md)** —
+  binding multi-pass operator testing, adversarial tours, defect-family expansion,
+  evidence discipline, and independent acceptance.
 - **[DATABASE.md](DATABASE.md)** — the database blueprint: how production is reproduced from
   `supabase/migrations/`, the local workflow, and the reproducibility proof.
 - **[ROADMAP.md](ROADMAP.md)** — product direction, the Foundation Gate, Track A/B ordering.
@@ -34,5 +37,7 @@ been promoted here.
 - Functions are **born non-executable** (A5.1a): intended-public RPCs must `grant execute … to authenticated` explicitly (see SECURITY.md).
 - One-way / grant migrations ship a tested down-path (in `supabase/recovery/`) before the window closes.
 - **A pass is not complete until the canonical docs describe the world it leaves behind.**
-- UI and prototype passes must satisfy `UX_WORKFLOW_CONTRACT.md`; screenshots prove
-  rendering, while scenario runs prove task-loop completion.
+- UI and prototype passes must satisfy `UX_WORKFLOW_CONTRACT.md` and
+  `OPERATOR_WALKTHROUGH_PROTOCOL.md`; screenshots prove rendering, while
+  multi-pass tours, mutator probes, and persisted-state evidence prove task-loop
+  completion.

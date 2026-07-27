@@ -1,7 +1,7 @@
 # Element 10 UX Workflow Contract
 
-Status: proposed binding design and review contract. Read with
-`OPERATOR_LIFECYCLE.md`.
+Status: binding design and review contract. Read with
+`OPERATOR_LIFECYCLE.md` and `OPERATOR_WALKTHROUGH_PROTOCOL.md`.
 
 ## 1. Definition of done
 
@@ -38,7 +38,10 @@ Before implementation, produce a workflow preflight with:
 | Boundary | deferred model/capability and the honest present-day seam |
 | Return context | route, filters, selection, object, focus |
 
-The implementation plan follows this artifact. A corrective ticket does not waive it.
+The implementation plan follows this artifact. A corrective that creates or
+materially changes workflow does not waive it. A narrow corrective inside an
+already reviewed task loop may cite the approved preflight and use the targeted
+walkthrough matrix defined by `OPERATOR_WALKTHROUGH_PROTOCOL.md`.
 
 ## 3. Surface action inventory
 
@@ -89,9 +92,9 @@ Examples:
 - Success never strands the operator.
 - Parent detail is the durable resume surface for child-entry workflows.
 
-## 7. Evidence
+## 7. Evidence and walkthrough coverage
 
-Required workflow scenarios:
+The following lifecycle scenarios are the minimum outcome coverage:
 
 1. First-time completion.
 2. Repeated or bulk action.
@@ -105,18 +108,36 @@ Evidence states the start, action, committed outcome, immediate UI, continuation
 ending context. Screenshots remain required for render claims, but screenshots alone
 cannot satisfy workflow acceptance.
 
+`OPERATOR_WALKTHROUGH_PROTOCOL.md` supplies the execution method. It requires:
+
+- lifecycle, interruption, boundary-transition, mutation/invariant, and
+  temporal/input tours;
+- baseline and materially different adversarial passes;
+- a risk-based state and transition matrix;
+- separate interaction, mutator, persisted-state, render, and boundary evidence;
+- defect-family expansion and regression for every finding;
+- bounded claims, explicit untested conditions, and independent acceptance.
+
+One end-to-end click-through cannot establish workflow acceptance. Static
+organization, role, or entitlement checks do not prove transitions made while work
+is open.
+
 ## 8. Agent directive
 
 For every UI planning or implementation task:
 
-1. Read `OPERATOR_LIFECYCLE.md` and this contract.
+1. Read `OPERATOR_LIFECYCLE.md`, this contract, and
+   `OPERATOR_WALKTHROUGH_PROTOCOL.md`.
 2. Inspect the existing implementation and nearest equivalent pattern.
 3. Produce the workflow preflight before code.
 4. Identify adjacent gaps proactively.
 5. Separate observations from authorized implementation.
 6. Implement only the reviewed plan.
-7. Run the workflow scenarios before packaging.
-8. Report unresolved lifecycle gaps without self-authorizing them.
+7. Declare the walkthrough coverage matrix and scenario IDs before testing.
+8. Run the required tours and separate evidence classes before packaging.
+9. Expand every finding into its invariant and sibling paths.
+10. Report unresolved lifecycle gaps and untested conditions without
+    self-authorizing them.
 
 The agent is expected to challenge an incomplete task loop even when every named
 control in the prompt can be implemented literally.

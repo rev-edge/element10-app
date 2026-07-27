@@ -1,6 +1,6 @@
 # Element 10 Operator Lifecycle
 
-Status: proposed coordination authority for operator-experience planning and review.
+Status: binding coordination authority for operator-experience planning and review.
 
 This document defines how an organization member gets work done across Element 10. It
 does not grant database authority, approve a schema, create a capability, or replace
@@ -278,7 +278,7 @@ the need and show how the current checkpoint ends honestly without it.
 ## 10. Workflow evidence and acceptance
 
 Static screenshots prove paint, not workflow completeness. A workflow package must
-also include an operator-style behavioral run covering:
+cover these operator outcomes:
 
 1. First-time happy path.
 2. Repetitive or bulk path.
@@ -288,6 +288,11 @@ also include an operator-style behavioral run covering:
 6. Cancel with no unintended creation.
 7. One denied or conflicted path and its recovery.
 8. One multi-organization or cards-off case where applicable.
+
+These outcomes are not a complete walkthrough method.
+`OPERATOR_WALKTHROUGH_PROTOCOL.md` requires separate lifecycle, interruption,
+boundary-transition, mutation/invariant, and temporal/input tours; at least two
+materially different passes; defect-family expansion; and independent acceptance.
 
 For each scenario, evidence records:
 
@@ -306,7 +311,12 @@ A gate fails workflow acceptance if:
 - repeated work loses parent context;
 - Cancel, Back, or close produces a phantom record;
 - a future checkpoint is used as justification for a present dead end;
-- the report proves controls individually but not the complete task loop.
+- the report proves controls individually but not the complete task loop;
+- only one walkthrough pass was run;
+- static starting-state coverage stands in for mid-operation transitions;
+- a finding was not expanded across its sibling mutators and transitions;
+- any finding remains undispositioned;
+- the builder reports its own work accepted.
 
 ## 11. Relationship to other authorities
 
@@ -317,6 +327,8 @@ A gate fails workflow acceptance if:
 - `CAPABILITY_CROSSWALK.md` and Track A security contracts own authority.
 - `UX_WORKFLOW_CONTRACT.md` turns this lifecycle into repeatable design and review
   requirements.
+- `OPERATOR_WALKTHROUGH_PROTOCOL.md` owns walkthrough tours, evidence classes,
+  defect-family expansion, and acceptance separation.
 - `BOARD.md` selects the current gate and records acceptance.
 
 Where another approved contract conflicts with this document on schema, arithmetic,
