@@ -116,6 +116,11 @@ jobs:
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6c4_disclosures_test.sql
       - name: A6c.4 two-connection workspace CAS race (concurrent optimistic-concurrency proof)
         run: bash tests/a6c4_cas_race.sh
+      - name: A7 hostile two-org matrix (every identity class x both orgs x every census family, real JWTs, specific refusals)
+        # docs/A7_HOSTILE_MATRIX.md proven: F1-F8 cross-org denials + legitimate positives under real authenticated JWTs;
+        # ledger outlives items under a hostile identity; receipts server-only (no authenticated grant); anon zero access;
+        # delegate authority census 0. Proofs only — a gap would be a FINDING, not an in-gate fix.
+        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a7_hostile_matrix_test.sql
       - name: Schema reproducibility (re-apply migrations cleanly)
         run: supabase db reset
       - name: Default-privileges regression probe (born-locked; zero anon-executable functions)
