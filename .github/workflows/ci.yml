@@ -107,6 +107,15 @@ jobs:
         # and a stale-rev CAS matches 0 rows (merge signal); an org-B-only member is denied read and write; an org-B
         # 'shared' INSERT fails the retained global PRIMARY KEY(id) with 23505; a cross-org re-stamp is refused 42501.
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6c3_workspace_test.sql
+      - name: A6c.4 platform/identity gate (catalog SELECT platform/org-scoped; 15 mutations deny-by-default; identity org-scoped)
+        # The 5 platform-catalog SELECTs read for an org member or platform admin (no-org denied); the 15 catalog mutation
+        # policies are dropped so an authenticated INSERT is refused 42501 (deny-by-default under enabled RLS); members/
+        # role_permissions/viewers are org-scoped with e10.is_org_admin(e10.current_org()) writes.
+        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6c4_platform_identity_test.sql
+      - name: A6c.4 workspace disclosures (carried A6c.3 branches — ws_del, missing-cap, multi-membership, universal/owner)
+        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6c4_disclosures_test.sql
+      - name: A6c.4 two-connection workspace CAS race (concurrent optimistic-concurrency proof)
+        run: bash tests/a6c4_cas_race.sh
       - name: Schema reproducibility (re-apply migrations cleanly)
         run: supabase db reset
       - name: Default-privileges regression probe (born-locked; zero anon-executable functions)
