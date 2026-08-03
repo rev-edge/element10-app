@@ -186,17 +186,21 @@ begin
 end $$;
 reset role;
 
--- ============ Anonymous (role anon) — F1/F6 read denials (0 rows OR table-privilege refusal, both fail-closed) ============
+-- ============ Anonymous (role anon) — F1/F6 read denials, DIFFERENT layers, both 42501 insufficient_privilege ============
+-- Inventory: anon holds NO table grant on e10_inventory_items -> "permission denied for table" (grant layer).
+-- Catalog:  anon DOES hold table grants on e10_cards, but the card_sel policy calls e10.is_platform_admin(), on which
+--           anon has NO EXECUTE -> "permission denied for function is_platform_admin" (policy-function-execute layer).
+-- (An authenticated no-org caller, by contrast, executes the policy fn and is filtered to 0 rows — see F6 in the gate.)
 do $$
 declare c int; ok int:=0;
 begin
   set local role anon;
   begin select count(*) into c from public.e10_inventory_items where id='__a7_itemA'; if c=0 then ok:=ok+1; end if;
-  exception when insufficient_privilege then ok:=ok+1; end;                 -- anon holds no table grant: strongest denial
+  exception when insufficient_privilege then ok:=ok+1; end;                 -- table grant absent
   begin select count(*) into c from public.e10_cards where id='a7000000-0000-4000-8000-000000000ca1'; if c=0 then ok:=ok+1; end if;
-  exception when insufficient_privilege then ok:=ok+1; end;
+  exception when insufficient_privilege then ok:=ok+1; end;                 -- is_platform_admin EXECUTE absent
   reset role;
-  if ok=2 then raise notice 'A7 anon (role anon): PASS (no inventory + no catalog access — 0 rows or table-privilege denied)';
+  if ok=2 then raise notice 'A7 anon (role anon): PASS (no inventory access [table grant absent] + no catalog access [is_platform_admin EXECUTE absent] — both 42501)';
   else raise exception 'A7 anon: FAIL ok=%/2', ok; end if;
 end $$;
 reset role;
