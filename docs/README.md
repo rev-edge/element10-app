@@ -11,10 +11,16 @@ been promoted here.
   navigation, behavioral evidence, and workflow Definition of Done.
 - **[OPERATOR_WALKTHROUGH_PROTOCOL.md](OPERATOR_WALKTHROUGH_PROTOCOL.md)** —
   binding multi-pass operator testing, adversarial tours, defect-family expansion,
-  evidence discipline, and independent acceptance.
+  evidence discipline, and independent acceptance. Includes **§6a** the mandatory
+  self-debug sweep, **§7a** the checkpoint working model (batched gates, hard
+  stops, provisional results), and **§8a** evidence-tooling independence.
 - **[DATABASE.md](DATABASE.md)** — the database blueprint: how production is reproduced from
   `supabase/migrations/`, the local workflow, and the reproducibility proof.
 - **[ROADMAP.md](ROADMAP.md)** — product direction, the Foundation Gate, Track A/B ordering.
+- **`../tests/harness/`** — the canonical evidence harness (node + jsdom, no
+  browser). `e10_harness.js` runs any prototype build headlessly;
+  **`selfdebug.js` is the mandatory pre-evidence sweep** (protocol §6a). Any
+  agent runs the same tool on the same build and gets the same result.
 - **[CODING_STANDARDS.md](CODING_STANDARDS.md)** — standing engineering + UX/QA standards.
 - **[Platform_Overview.md](Platform_Overview.md)** — system overview.
 - **[SPIKE_storage_decision.md](SPIKE_storage_decision.md)** — the S1 storage spike behind ADR 0001.

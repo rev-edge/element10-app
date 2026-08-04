@@ -94,6 +94,19 @@ Examples:
 
 ## 7. Evidence and walkthrough coverage
 
+**Floor first: the self-debug sweep.** Before any scenario evidence, run
+`tests/harness/selfdebug.js` on every touched surface and report it green, or
+every failure explained (walkthrough protocol §6a). Scenario evidence over a
+surface whose basic controls are broken proves nothing — unclickable controls,
+reversed typing, dead buttons, dead-end saves and undismissable dropdowns are
+the builder's to find, never the operator's.
+
+Evidence classes are independently satisfiable: four of the five need no
+renderer. A renderer outage degrades the render class ONLY, disclosed by
+scenario id, and never blocks a gate (§8a). Deliver the build where others can
+reach it — a build only the builder can open cannot be independently verified.
+
+
 The following lifecycle scenarios are the minimum outcome coverage:
 
 1. First-time completion.

@@ -9,6 +9,43 @@ anywhere, is a non-authoritative snapshot and must not be used to decide a gate.
 If a snapshot disagrees with the repository copy, the repository wins and the
 snapshot is stale.
 
+## ACCEPTANCE AUTHORITY (Trent, 2026-08-03)
+
+**Trent accepts:** anything operator-facing — UI, UX, workflow shape, new
+surfaces, and every walkthrough. If it changes what the operator sees or does,
+it is his.
+
+**CPI accepts, with the outside reviewer:** engine gates, model documents,
+correctives with no operator-visible change, infrastructure, evidence and
+process discipline. These are batched and never queued for Trent.
+
+**Trent RULES (not accepts) on genuine commercial judgment** — costing method,
+authority policy, catalog strategy, anything about how the business actually
+operates. The CPI decides technical and consistency questions itself, including
+inside model documents; their workflow consequences surface at Trent's
+walkthrough, where he can still veto. Nothing operator-visible is locked in
+without him seeing it work.
+
+**Standing carve-out — production cutover (A8-A10) requires Trent's explicit
+go before EXECUTION.** The plan is CPI-accepted; pulling the trigger on
+production is a business-risk decision against a live operation with real
+inventory and ledger history, not a review formality.
+
+## WORKING MODEL: CHECKPOINTS, NOT PER-GATE (Trent, 2026-08-03)
+
+Agents self-review each gate and continue; external review — CPI audit,
+operator walkthrough, outside reviewer — happens once per CHECKPOINT, for the
+whole batch. Gate discipline itself does not relax: baseline verification, both
+passes, full regression, evidence classes, and the standing rules apply per
+gate as before. Self-recorded results are PROVISIONAL; only the CPI writes
+ledger rows. Hard stops (contract needed, ruling needed, undispositionable
+finding, baseline/regression failure, charter boundary, frozen surface) halt the
+batch immediately. Protocol §7a governs. **This model rests on the regression
+set catching a defect that propagates from an early gate — if a checkpoint
+audit ever finds one the regressions should have caught, batch size tightens.**
+Dispatches are CHARTERS (a batch with a purpose and boundaries), not single-gate
+relays; the relay-protocol blocks below still govern their construction.
+
 ## TRACK B RELAY PROTOCOL (Trent, 2026-07-27 — binding on every Design dispatch)
 
 Every Design relay is one self-contained, gate-specific document copied from this
@@ -57,7 +94,13 @@ history and still execute correctly.
 - [x] A6c.0 additive prerequisites accepted
 - [x] A6c.1 + A6c.1.1 RLS policy rewrite ACCEPTED (two independent audits; falsifiable denial proof)
 - [x] A6c.2 + A6c.2.1 wrapper cutover + authority corrective ACCEPTED (outside review + CPI independent census)
-- [ ] **A6c.3 workspace policy family - CURRENT TRACK A GATE** (incl. A6c.0 byte-exact re-align)
+- [x] A6c.3 workspace family + CAS + A6c.0 re-align ACCEPTED 2026-07-27
+- [x] A6c.4 platform/identity ACCEPTED 2026-07-31 — **97-policy census CLOSED; cross-org catalog write hole shut on staging**
+- [x] A7 hostile two-org matrix ACCEPTED 2026-08-03 — zero findings; matrix doc authored once, consumed again at PF-C20
+- [x] **ENGINE AUTHORIZATION SERIES COMPLETE (A6a → A7).** Multi-tenant isolation designed, built, rewritten, cut over, and proven hostile-resistant on staging.
+- [x] A8 production cutover plan ACCEPTED 2026-08-03 (plan only; execution needs Trent's go)
+- [ ] **CHECKPOINT C-REHEARSE - CURRENT TRACK A WORK** (full P0 rehearsal on a scratch restore: capture, prove, all 36 migrations, rollback drills, idempotency; production untouched throughout)
+- [ ] **CROSS-TRACK: PF-M5 curation path blocks A8-P5** — the catalog hole cannot close in production until it ships
 - [x] PF-C1 Product Master accepted
 - [x] PF-C2 Product Configuration accepted
 - [x] Human walkthrough of the combined PF-C1 + PF-C2 Product workflow — DONE, feedback captured
@@ -111,11 +154,18 @@ work has been independently accepted.
 | Product-first workflow | GRANTED | CPI | 2026-07-20 | `Element10_PRODUCT_FIRST_CANONICAL.zip` SHA-256 `874b8f40a519ddbb22c79bfd4e8180746e5c0a13e8eba2fd18a96d0951ed82fb` — **VERIFIED** against the original archive 2026-07-20; extracted content 12/12, content anchor `2ae67f8c...` |
 | PF-0 provenance and hub gate | GRANTED | CPI | 2026-07-20 | PF-0.2 archives — see `PF0_2_ARCHIVE_HASHES.txt` |
 | A6c authorization plan rev 6 | GRANTED | CPI | 2026-07-20 | `Element10_A6c_PLAN.md` SHA-256 `2d1710bfdb0653271960f021c12efacb4c83f1be22067d6e064e6724ed33ce70` |
+| A6c.3 workspace policy family + CAS + A6c.0 re-align | GRANTED | CPI | 2026-07-27 | Commit `1e94544` (exactly 3 files, +329), migration `20260727140000_e10_a6c3_workspace_policies.sql`, CI `30285456119`. CPI-verified on live staging: 4 workspace policies org-scoped / 0 legacy / WITH CHECK pinned on both write paths, matching census rows 94-97; total new-style 66 with the 55 A6c.1 policies untouched; independent census — zero legacy predicates in any delegate body; the 8 A6c.0 objects re-aligned (staging `redeem_code` functiondef md5 matches the reported AFTER; whole inventory surface now byte-exact); CAS proof incl. stale-rev 0-rows and cross-org 42501; gate test's only `when others` are `*_wrongerr` recorders; red/green by permissive-replace at two strengths; prod untouched (12, `20260716110000`, 0 org-scoped ws policies). Layer-honesty disclosure (UPDATE refusal defended by ws_upd WITH CHECK AND ws_sel visibility; falsification removed both) exceeded the standard. Carried disclosures → A6c.4/A7 scope: missing-cap on the shared write branch unexercised; live two-connection CAS race; universal/owner branches with no extant rows. |
 | A6c.2 + A6c.2.1 wrapper cutover + authority corrective | GRANTED | CPI | 2026-07-27 | Commits `0a7da40` (cutover, CI `30211865339`) + `8152f2d` (authority corrective, migration `20260727120000`, CI `30260835702`). CPI-verified on live staging with an independent census query: ZERO legacy authority predicates remain in any org-aware body; `buyer_suggest.seen` scoped to `p_session` with `e10_is_admin` removed (approved behavioral divergence from the m31/m32 oracle — org-scoping wins over verbatim legacy authority); five inventory delegates on `e10.is_org_admin(p_org)`; both dead orphans retired; wrappers thin, zero recursion; 55 A6c.1 policies untouched; prod untouched (12, `20260716110000`, 0 delegates). Byte-exact staging artifact applied per the new standing rule; 6 touched delegates proven byte-identical via `pg_get_functiondef` hashes. Gate test 15/15 with zero `when others`; admin denials pinned by exact ok/msg (business-capability refusals, not exceptions) — justified, hard 42501s still covered by the A6c.2 gate. Identity-combination regression covered: legacy global admin with ordinary org-B membership receives ordinary-member treatment. Reviewer's bonus finding recorded: 8 A6c.0 objects cosmetically differ on staging (token-identical) — re-align folded into A6c.3. |
 | A6c.2 wrapper cutover (superseded history) | NOT ACCEPTED | CPI | 2026-07-26 | Commit `0a7da40eb7d3249266cd19914b8abf3b68967895`, migration `20260726140000_e10_a6c2_cutover.sql`, CI `30211865339`. Structure verified clean (delegates are the mechanism, wrappers thin one-line forwards, 0 recursion, 7 legacy helpers retired with refcount proof, 55 A6c.1 policies untouched, prod untouched). **Rejected on outside review, both findings CPI-confirmed on live staging: (1) `buyer_suggest`'s `seen` query has no session or org filter — `streamer_uid=auth.uid() OR e10_is_admin()` exposes buyer identities across sessions and, for a legacy global admin, across organizations; (2) SIX delegates (reviewer's five + buyer_suggest) retain legacy GLOBAL `e10_is_admin()` authority inside org-aware bodies — a legacy global admin could exercise admin behavior in an org where they hold ordinary membership; no test covers that identity combination.** Root cause: "preserve legacy behavior verbatim" (m31/m32 oracle) preserved legacy AUTHORITY verbatim; no census ever covered delegate-body predicates. Also: compact staging body + reconciled ledger makes staging appear identical to clean replay when it is not — insufficient for a security-definer migration. CPI's own audit missed both (checked structure, not authority semantics) and the CPI's stale board sections violated its own 2026-07-21 maintenance rule a second time. |
 | A6c.1 RLS policy rewrite (55 policies) + A6c.1.1 test corrective | GRANTED | CPI | 2026-07-26 | Commits `7138716743250d47e3cf90da9196fd471f18a322` (migration `20260726120000_e10_a6c1_rls_rewrite.sql`, CI `30206547507`) + `d2ad844` (test-only, CI `30207551465`). CPI-verified against live staging: 97-policy census reconciles exactly (55 rewritten = 41 USING + 14 WITH CHECK; 100 live minus 3 storage = 97); `imov_sel` now `e10.is_org_member(organization_id)` closing the A6c.0 finding; every WITH CHECK pins `organization_id = e10.current_org()`; correlated refs table-qualified with the `owned_slot` alias (rev-4 shadowing not reintroduced); 11 delegates intact, wrapper still legacy (no A6c.2 creep); prod untouched (12 migrations, head `20260716110000`, zero e10 policies). Outside review found the cross-org write denial was a false positive (FK shadowed RLS behind `exception when others` — standing rule 5); A6c.1.1 rebuilt it FK-valid requiring SQLSTATE 42501, audited the other 7 denials (SELECT-count/predicate, unshadowable), and proved falsifiability by permissive-replace after finding a bare DROP yields default-deny — a stronger construction than the corrective specified. Agent's ADR flag was correct; board's stale rev3.2.2 note fixed. |
 | A6c.0 additive prerequisites | GRANTED | CPI | 2026-07-20 | commit `7f0d38385e05682da5bc51879a1ac04683d27afd`; migration `20260720120000_e10_a6c0_prereqs.sql`; CI green run `29768281886`; staging head `20260720120000`. CPI-verified against live prod + staging: 13-delegate allowlist exact, internals `authenticated=false`, zero anon/PUBLIC, no wrapper or policy cutover, 0 published sessions, prod untouched. |
 | PF-C2 Product Configuration | GRANTED | CPI | 2026-07-20 | `Element10_PFC2_REVIEW.zip` SHA-256 `c001a8bb169b50e94103277f205d0290023513786da431233d1ef521166ca7d3`; screen 08 `a7d056e881f89c0fc19748e9...`. CPI-verified in source: `saveConfig` fails closed; conversions append-only with `cur` pointer; forbidden list and scan hosts unshortened; unit arithmetic independently recomputed (360 / 4320 / 48); cards-off handled via per-org seed data. Passed on first attempt. |
+| A8 production cutover plan | GRANTED (plan only — NOT execution authority) | CPI | 2026-08-03 | Commit `1c49f99`, `docs/A8_PRODUCTION_CUTOVER_PLAN.md` (196 lines). Accepted under the CPI acceptance authority for non-operator-facing work. Plan gates everything on a P0 restore-rehearsal against production-shaped data; uses the ledger content checksum as the crown-jewels verification; expand→backfill→promote→contract for zero downtime against the 24/7 SLO; per-phase rollback boundaries, abort criteria, verification queries, and idempotency proofs. **Key finding, credited: P5 (closing the catalog write hole) is BLOCKED by a real dependency — the deployed production client creates checklists and cards by direct table INSERT, so dropping the 15 policies breaks operator checklist creation.** The plan refuses to silently choose "disable catalog creation," naming it as a business call. **This puts Track B's PF-M5 (curation path, per the shared-canonical + org-overlays ruling) on the critical path for the final cutover phase.** Execution against production remains gated on Trent's explicit go. |
+| A7 hostile two-organization matrix | GRANTED | CPI | 2026-08-03 | Commits `00e808d` + `6eab46a` (CPI layer-attribution correction), CI green `30657187213`. **Proofs only — CPI-verified zero migrations across both commits; staging head unchanged at `20260731120000`.** `docs/A7_HOSTILE_MATRIX.md` authored ONCE for A7 now and PF-C20 later (11 identity classes × both orgs × 8 census families, each naming attacker / target / expected refusal / layer) — closing a board parallel-queue item open since 2026-07-20. Gate 29/29 + anon under real authenticated JWTs, never definer: cross-org denial + legitimate positive per family; **ledger-outlives-items re-proven under a hostile identity** (org-A member reads the correction movement of a hard-deleted item; org-B member cannot) — the invariant frozen since A6b holding under attack; receipts server-only; published-vs-private spectate; buyer_uid and verified-handle boundaries; multi-membership fail-closed; catalog and identity write denials. Red/green falsification one scenario per family (F1-F7 permissive policy, F8 delegate stub). **FINDINGS: NONE — every hostile denial held.** CPI independently confirmed on live staging: zero legacy policy predicates, zero legacy delegate bodies, zero anon-executable delegates, zero `authenticated` grants on receipts. Prod untouched (12 migrations, `20260716110000`, no `e10` schema). Agent resumed correctly from a crashed session whose recap was wrong, trusting artifacts over narrative. **Track A engine authorization series A6c.0–A6c.4 + A7 COMPLETE.** |
+| A6c.4 platform-catalog + identity family + disclosures | GRANTED | CPI | 2026-07-31 | Commit `1a87bad`, migration `20260731120000_e10_a6c4_platform_identity.sql`, CI `30654018116`. CPI-verified on live staging: 5 catalog SELECTs scoped (platform-admin OR in-an-org), ZERO catalog mutation policies with RLS enabled on all 5 — **closing a live cross-org write hole** (global reference tables were member-writable; the old rls_test assertions had encoded the hole and were corrected); 8 identity policies org-scoped; zero legacy predicates anywhere — **the 97-policy census is fully consumed (A6c.0–A6c.4)**. Carried A6c.3 disclosures all exercised (ws_del branches, missing-cap, multi-membership 42501, universal/owner fixtures, genuine two-connection CAS race). Gates 20/20 + 12/12; red/green three ways; byte-exact staging artifact; prod untouched (and prod still carries the hole until A8-A10 — noted as cutover motivation). Agent correctly proceeded past the CPI's stale NEXT-PROMPT subsection (4th instance of that CPI defect) on the unambiguous authorization sections and flagged it. FLAG carried to roadmap: tenant-read-only catalog forces the checklist-curation decision before checklist physicalization. |
+| PF-C-S2.3 acquisition channel + landed cost | GRANTED | CPI | 2026-08-03 | `Element10_PFCS2_3_REVIEW.zip` SHA-256 `548b465359c476eddaab85a20050a630587e77d415b5b88dcf26c4d5ab085fce`; build `9075d0736d4d2824f2a32946...` (identical in package and drop zip); `e10.css` frozen. Two-phase gate: preflight `PFCS2_3-PREFLIGHT-1` approved, then implementation, then a blocked-evidence recovery. Components are the stored facts, landed total derived, `total_paid` demoted to a cache with `saveAcq` its sole writer (7 remaining occurrences all designed, censused); channel an org-scoped suggest vocabulary, required on create; MIGRATED legacy records never auto-decomposed. **CPI ran the canonical headless harness against the delivered build and independently verified the substance**: components `[300,12,9,45]` stored, landed = 366, cache agrees, and the `C2r` claim confirmed — single-card basis derives from the LANDED total (366), not the purchase line (300); card-form basis lock still refuses. Three CPI fixture stumbles were accepted guards refusing bad input, incl. the new required-channel guard. Baseline 8 cases + adversarial pass (dirty-guard races, mutator-level floor and authority attacks with crafted drafts, MIGRATED fabrication attack, cross-org vocabulary probes, double-save, CPI-correction-1 continuation regression) + 6 render captures once the environment recovered. One baseline FAIL left in the log UNEDITED and correctly diagnosed as a probe artifact, re-proven as `C2r` — standing rule 4 honored, not gamed. **Finding W1 escalated not fixed** (3 user-facing strings still say "total paid"; values correct) — cosmetic, folded into the next Track B gate. |
+| PF-C-S2.2 entitlement + truth + context corrective | GRANTED | CPI | 2026-07-31 | `Element10_PFCS2_2_REVIEW.zip` SHA-256 `71e9ffbdb9b6124da725af01aaf1299c88e0e74e6a519c24b6e331031d211eff`; screen 08 `09c21696...`. CPI audit + CPI-executed delegate walkthrough at operator direction — 16/16 across two materially different passes (core lifecycle/mutator; adversarial context-switch/temporal). F2: `ent.cards` fails closed in every vertical mutator and opener, probed directly. F3: held totals derived from actual bases with explicit discrepancy states on both sides of a moved-basis card, move-back resolving — proven end-to-end. F1: `guardContextChange` census (5 draft families × 3 context changes, Stay/Discard holds, no resurrection, scan clean post-switch). Three CPI fixture stumbles were accepted guards refusing bad fixtures (raw-dup pause, zero-cards refusal, single-mode derivation) — incidental adversarial confirmation. Operator accepted on the delegate run. |
+| PF-C-S2.1 admin-only over-assignment | GRANTED | CPI | 2026-07-27 | `Element10_PFCS2_1_REVIEW.zip` SHA-256 `60700f84e3060f2a43acf64a208c0b3a55bd02aa0f3b365f4979a2a81f584b31`; screen 08 `b7567fa46b05c7ab5f2e1c30e4215f5d2c1a9fd94afdd5f8683c7c964a1e09c3`. First Track B gate under the adversarial walkthrough protocol, and the first relay delivered by verified file-reference after the agent correctly REFUSED a hash-mismatched truncated paste. Change verified conformant (review gate + independent mutator `isAdmin()` re-check + admin-override statement + flag derived from recorded totals; non-admin verbatim-unchanged). Adversarial pass surfaced four pre-existing family findings, all CPI-dispositioned: F1 stale dialog on scenario switch, F2 mutators ignore module entitlement (CPI-reproduced: zero `cardsOn()` in `saveCostAssignment`/`saveInstance`), F3 between-acquisitions basis move leaves untruthful held totals (CPI-reproduced: acquisition selector on edit form) — all three must-close → PF-C-S2.2; F4 float precision at 10^15 → binding Track A note: money is integer cents in the physical schema. Operator walkthrough approved. |
 | PF-C-S1.7 (preflight + implementation) + PF-C-S2 cost assignment | GRANTED | CPI | 2026-07-27 | `Element10_PFCS1_7_REVIEW.zip` SHA-256 `88c9b8c5629f148d36608d3de2de39c7d868731fa8ad4725b2641c164a2bbec5`; screen 08 `875422ab71204c257ec75c93cf2e5ca9850d1282dc515c505375a980fff71bc8`. First gate under the full protocol: relay → preflight `PFCS1_7-PREFLIGHT-1` → CPI review (one correction: team-choice reuse) → E1 baseline ruling (revert to S1.6; divergent file preserved as labelled no-authority reference) → phase-2 implementation → audit → walkthrough. CPI audit: manifest clean; rebuild provably not the reference (carries the team-choice correction the reference lacks); state-aware continuation panel proven behaviorally (below→Add another, at→Review); zero blanks/datalist/"next"-copy/render-fallbacks; zero-acq seam present. S2 (opened mid-flight by direct operator authorization, agent flagged correctly): assign→review→approve with single guarded writer, dirty-guarded draft, card-form basis lock re-proven post-approval, 60/40-of-100 arithmetic verified, approval recorded on the acquisition. 12/12 CPI behavioral checks. Operator: "i reviewed it and it works - approved." Outstanding conformance corrective → S2.1 (admin-only over-assignment per the standing 2026-07-21 ruling; current build flat-caps everyone). |
 | PF-C-S1.6 financial + identity discipline | GRANTED | CPI | 2026-07-26 | `Element10_PFCS1_6_REVIEW.zip` SHA-256 `fd47e4610058fad2ba7bd1af14b972a5293c23cd59f5406c43c378c119069b41`; screen 08 `d2065b29e3d72a556e004610b80987f1718b85b047ccdd43df26c5fa7c183eb6`. Eight items: cost basis unwritable (input removed; mutator refuses a direct write naming attempted vs derived — closed the build-contradicts-PF-M2.1-§4.2 inconsistency); collection import creates ZERO instances (the unguarded blank-creation path is dead, `saveAcq` has no pushes; "Expected cards" is advisory progress); Name required; org-wide duplicate company+cert refused naming the existing card via composed title (archived included); raw-duplicate warn-then-save; `cardTitle()` composed identity, load-bearing in 7 places, no dangling separators; Channel→Distribution rename complete; Checklists entry point into the same wizard with origin-aware landing; search visibly inert. Acceptance evidence: CPI source audit + **CPI-executed behavioral run at operator direction — 18/18 checks via real DOM events** (mousedown→click picker rows, native input events), covering the full sequence: checklists-first wizard → zero-blank collection → picker autofill → basis probe refusal → duplicate-cert refusal → origin landing. Finding from the run: a fresh org has an empty picker index until a product import runs — correct per spec; a why-and-what-next line added to S1.7's no-match item. |
 | PF-C-S1.5 + PF-C-S1.5.1 walkthrough batch + picker-click fix | GRANTED | CPI | 2026-07-26 | S1.5 `Element10_PFCS1_5_REVIEW.zip` SHA-256 `5e3cc57f224fe5e61ef8e1fa38721a75ebbe002d91e726d83316b26e0a067933` (7/8 verified: delegated dismissal with Escape swallow, quiet filter row + contains/not/equals/empty ops, required brand/line/year, "/" print-run adornment + serial redirect, acq→first-card flow, images/links/asking outside money math, advisory cert warning; 3 self-found defects disclosed pre-package) was NOT ACCEPTED on the operator finding that picker rows were unclickable — `||S.ciform` repainted the picker on every mousedown, destroying the row between mousedown and click. S1.5.1 `Element10_PFCS1_5_1_REVIEW.zip` SHA-256 `37d72670c657224d5515d68ea2cfd815778a39447b62943478113d0ae1103ea5`; screen 08 `a492aa29818164f670dbf9ccbd4baee59205ffe879b4d0e92a7f002019418f17`. Repaint-only-what-closed; while proving it the agent found and fixed the focus-reopen defect (programmatic focus is not a user focus, `S._noFocusOpen` at three sites) rather than shipping a fix that visibly broke the feature a new way; proof used the full native mousedown→click sequence. Operator confirmed selection and autofill working. |
@@ -145,95 +195,202 @@ If your subsection says ALREADY DISPATCHED, do not re-run it.
 
 ---
 
-### TRACK A — Claude Code — READY TO DISPATCH
-
-A6c.2 + A6c.2.1 are ACCEPTED. Implement **A6c.3 only** — the workspace policy
-family, per the approved A6c plan rev 6 (`2d1710bf...`): the 4 deferred
-workspace policies from the 97-policy census, including the workspace CAS proof
-the plan specifies.
-
-Authorization: ledger rows `A6c.2 + A6c.2.1 | GRANTED | CPI | 2026-07-27` and
-`A6c authorization plan rev 6 | GRANTED`. Baseline: accepted code head
-`8152f2d`. Diff against it; verify ancestry. STAGING and LOCAL only; prod
-read-only until A10 — re-prove untouched at the end.
-
-Also in scope (folded, from A6c.2.1's identity sweep):
-- **Byte-exact re-align of the 8 A6c.0 objects** whose staging bodies differ
-  cosmetically from the committed file (7 whitespace-only + redeem_code's
-  dropped comment; proven token-identical). Re-apply the exact committed bodies
-  so staging and clean replay are byte-identical everywhere, per the standing
-  rule. Prove with `pg_get_functiondef` hashes before/after.
-
-Proof standard (carried forward, non-negotiable): specific SQLSTATE or exact
-ok/msg pin per denial; `when others` prohibited except as a `*_wrongerr`
-recorder; per-assertion layer-exclusion notes; red/green falsification via
-permissive-replace as a session exercise with before/after in the report; the
-delegate-body authority census stays clean — re-run it and report zero.
-Byte-exact committed artifact applied to staging.
-
-Do NOT touch the 55 A6c.1 policies, the accepted delegate bodies (beyond the 8
-re-aligns), or anything in A6c.4 scope. Propose the delta; do not self-accept.
-Stop and request "A6c.3 accepted."
-
-### TRACK B — Claude Design — READY TO DISPATCH (PF-C-S2.1 · CORRECTIVE)
+### TRACK A — Claude Code — CHECKPOINT CHARTER (C-REHEARSE)
 
 ## 1. AUTHORITY
-- Relay: **PFCS2_1 rev 1**, 2026-07-27 (hash reported in the dispatch message;
-  verify before executing). Self-contained; ignore repository paths, cached
-  board text, prior chat context.
-- Current Track B gate: **PF-C-S2.1. Authorized phase: CORRECTIVE** — one
-  enumerated change. No preflight required (no new workflow; one rule inside an
-  accepted flow).
-- Accepted baseline: PF-C-S1.7+S2 — `Element10_PFCS1_7_REVIEW.zip` SHA-256
-  `88c9b8c5629f148d36608d3de2de39c7d868731fa8ad4725b2641c164a2bbec5`;
-  `08-product-workspace.html`
-  `875422ab71204c257ec75c93cf2e5ca9850d1282dc515c505375a980fff71bc8`.
-- Ledger authority: `PF-C-S1.7 + PF-C-S2 | GRANTED | CPI | 2026-07-27`.
-- Out of scope: everything else. FROZEN: screens 01-07, `e10.css` `cd37cd43...`.
+- Charter: **C-REHEARSE rev 1**, 2026-08-03. Working model is CHECKPOINT, not
+  per-gate: work continuously, self-review and record each phase, continue
+  without waiting. External review happens once, at the end of the batch.
+- Ledger authority: `A7 hostile two-organization matrix | GRANTED | CPI |
+  2026-08-03` and `A8 production cutover plan | GRANTED | CPI | 2026-08-03`
+  (commit `1c49f99`, `docs/A8_PRODUCTION_CUTOVER_PLAN.md`). Baseline: accepted
+  code head `1c49f99`.
+- **Authorized: the ENTIRE A8 §2 P0 rehearsal, and nothing beyond it.**
 
-## 2. THE RULING THIS IMPLEMENTS (operator, 2026-07-21, reaffirmed 2026-07-27)
-Assigning cost basis beyond an acquisition's total paid is **admin-only**, never
-a flat refusal and never freely allowed. Named legitimate cases: correcting an
-earlier under-assignment; deliberately weighting cost onto specific high-value
-cards. Approved-model capability: `singles.cost_assign_over` (PROPOSED, not
-persisted — in the prototype, gate on the existing harness admin scenario via
-`isAdmin()`, the same stand-in `canMintField` already uses).
+## 2. THE ABSOLUTE BOUNDARY
+**PRODUCTION IS NOT TOUCHED. AT ALL. FOR ANY REASON.** No migration, no policy,
+no grant, no backfill, no "harmless" read-modify. Production is
+`20260716110000`, read-only, 35/41/6, and must be re-proven exactly there at
+the end of this batch. Executing any phase against production requires the
+operator's explicit go — a business-risk decision on a live operation — which
+this charter does NOT grant and cannot grant.
 
-## 3. EXACT SCOPE (one change)
-- Non-admin: exactly the current behavior — over-assignment refused at review
-  AND at `saveCostAssignment`, verbatim messages kept.
-- Admin: may proceed past total paid. The review step states it plainly
-  ("$X over the total paid — admin override") before approve; the mutator
-  re-checks `isAdmin()` itself (standing rule: fails closed independently —
-  UI absence is never the enforcement).
-- After an over-assigned approval, the acquisition detail shows a persistent,
-  visible over-assigned flag: "Cost assignment: Approved — $X assigned, $Y OVER
-  total paid (admin override)". The flag is state derived from the recorded
-  totals, not a dismissible note.
-- Under-assignment behavior unchanged. Single-card acquisitions unchanged.
-  Card-form basis lock unchanged.
+## 3. THE WORK — A8 §2 in full, on a scratch restore
+1. **P0.1 Capture** a production-shaped dataset. **Default to a LOCAL restore**
+   (you already run supabase locally); only if local cannot hold prod's shape
+   should a throwaway hosted project be proposed — that is a cost decision and
+   a HARD STOP, not your call. `pg_dump` of prod's `public` schema + data is a
+   READ of production and is permitted; nothing is written back, ever.
+2. **P0.2 Prove the restore** matches prod on the cutover surface: row counts
+   per table, the ledger content checksum (the crown jewels), and confirmation
+   it is a true pre-cutover clone (no `e10` schema, no org columns).
+3. **P0.3 Rehearse all 36 migrations** in order against the restore, capturing
+   per step: duration, lock waits, rows touched, and the plan's §9 verification
+   queries. A step not green on rehearsal is not eligible for production — say
+   so plainly if one isn't.
+4. **P0.4 Rehearse every rollback boundary** (§6): for each phase, exercise its
+   documented recovery and confirm it returns to that phase's start state.
+5. **P0.5 Rehearse re-runnability:** re-run each step; confirm no-op
+   (idempotency proof).
 
-## 4. STANDING RULES — the load-bearing ones here, in full
-1. Every harness-exposed function fails closed on its own — the mutator checks
-   admin itself. 2. Evidence for conditional behaviour demonstrates the
-   condition occurring — BOTH identities exercised. 3. Render claims need
-   correctly-captioned screenshots. 4. Cards-off scan (28 terms min, hosts
-   `#app`+`#ovhost`+`#toast`) with the assignment dialog open. 5. Org isolation
-   including mid-dialog switch. 6. No native dialogs/popovers. 7. Rendered
-   defaults live in state.
+## 4. WHAT I WANT FOUND, NOT JUST CONFIRMED
+The rehearsal's value is discovering what the plan got wrong. Report explicitly:
+any step whose real duration or lock behaviour differs materially from the
+plan's estimate; any rollback that does NOT cleanly return to its start state;
+any step that is not idempotent; any ordering dependency the plan missed; and
+the actual tenant-zero backfill behaviour against 35 real items / 41 movements /
+6 receipts rather than fixtures. **A rehearsal that finds nothing is a weaker
+result than one that finds something — treat "all green" as a claim requiring
+the same scrutiny as a failure.**
 
-## 5. EVIDENCE AND COMPLETION
-- Non-admin refusal (review + direct mutator probe, screenshots).
-- Admin over-assign end-to-end: review statement → approve → flagged
-  acquisition detail (screenshots), plus the recorded totals correct.
-- Direct probe: non-admin calling `saveCostAssignment` with an over-total draft
-  refuses even with the UI bypassed.
-- Regression: the 12-check S1.7+S2 behavioral set still passes; full S1.x
-  guards intact.
-- Package `Element10_PFCS2_1_REVIEW.zip`, full 64-char hashes, manifest
-  `shasum -c` clean, chain rooted at `88c9b8c5...`. **Do not update BOARD.md or
-  self-accept.** Operator walkthrough required. Stop and request:
-  "PF-C-S2.1 accepted."
+## 5. HARD STOPS — halt and report
+Production would be written · a local restore cannot hold prod's shape (cost
+decision) · a rehearsal step fails and the fix is outside this charter · a
+rollback does not restore cleanly · the plan proves wrong in a way that needs
+re-planning rather than patching · a schema/capability/tenancy/financial
+contract is implicated · the charter boundary is reached.
+
+## 6. KNOWN DEPENDENCY — do not attempt to resolve it here
+**P5 (closing the catalog write hole) is blocked by the curation path**, because
+the deployed production client creates checklists and cards by direct table
+INSERT. The curation path is Track B's PF-M5 (shared canonical catalog +
+org-scoped overlays, operator-ruled). Rehearse P5 on the scratch restore to
+prove the mechanics and the abort path; do NOT propose it for production, and do
+not design the curation path.
+
+## 7. DELIVERY
+One rehearsal transcript: per-step durations, lock waits, verification query
+results, rollback drill outcomes, idempotency proofs, and the §4 findings.
+Plus the standing proof standard throughout (specific SQLSTATEs, no
+`when others` except as a recorder, layer notes). Re-prove production untouched
+at the end. Propose the BOARD.md delta; **do not self-accept**. Report
+"C-REHEARSE ready for independent review."
+
+### TRACK B — Claude Design — CHECKPOINT CHARTER (C-SELL)
+
+## 1. AUTHORITY
+- Charter: **C-SELL rev 3**, 2026-08-03. Verify this file's SHA-256 against the
+  dispatch message; execute only on exact match. Self-contained; sole authority.
+  Supersedes relay PFM3_1 (its content is folded in as gate 1).
+- **Working model: CHECKPOINT, not per-gate.** Work continuously through the
+  gates below, self-reviewing and recording each, and continue without waiting
+  for external acceptance. External review — CPI audit, operator walkthrough,
+  outside reviewer — happens once, at the end, for the whole batch.
+- Baselines: model `PRODUCT_LISTINGS_MODEL.md`
+  `ea0dfd8b21d08d95d39a120b493935e065e8cbf7a27b16aadb5f6c9c24c9cf91`;
+  build `Element10_PFCS2_3_REVIEW.zip`
+  `548b465359c476eddaab85a20050a630587e77d415b5b88dcf26c4d5ab085fce`
+  (`08-product-workspace.html` `9075d073...`). Verify before touching either.
+- Ledger authority: `PF-C-S2.3 | GRANTED | CPI | 2026-08-03`.
+- FROZEN throughout: screens 01-07, `e10.css` `cd37cd43...`.
+
+## 2. THE CHECKPOINT'S PURPOSE
+**An operator can sell a card and the books tell the truth.** The batch is done
+when a card can be listed on multiple channels, sold on one, and the money,
+the inventory state, the margin, and the losing channels are all correct and
+evidenced.
+
+## 3. GATES IN THIS CHARTER — work them in order, self-reviewed
+
+**Gate 1 — PF-M3.1 (document).** Close the three gaps in the listings model.
+The approved substance is NOT to be rewritten (guard at commitment; arrival
+ordering; SaleConflict evidence; no auto-refund; §6 hold interaction; adapter-
+only `live_confirmed`; asking-vs-list; `quantity_reserved` omission ACCEPTED).
+  1.1 **BLOCKING — sale with NO listing.** Show-table and hand-to-hand sales are
+      routine and unmodelled. Decide with reasoning: every sale requires a
+      Listing (direct sales create an implicit one) OR Disposition stands alone
+      with `listing_id` nullable. **Either way the at-most-one-sale-per-instance
+      guarantee and the §5.2 commitment discipline must hold identically on both
+      paths.** Add the cardinality row; state how a direct sale interacts with
+      live listings.
+  1.2 `Disposition.channel` moves from a free list to a SalesChannel registry
+      reference — state it as a refinement of PF-M2.1 §5, with compatibility for
+      dispositions recorded before the registry.
+  1.3 Archived instances with live listings — specify, truth-first per §5.3.
+  1.4 In §12, name the unmodelled boundary: a losing channel may hold the
+      buyer's money; payments are project-wide unmodelled.
+  **Decide 1.1 yourself if the reasoning supports it** — record the decision and
+  continue to gate 2. Halt only if you genuinely cannot choose; the CPI (not the
+  operator) answers modelling questions. The workflow consequence of whichever
+  path you choose will surface at the operator's checkpoint walkthrough, where
+  it can still be vetoed — so choose the one you can defend, not the one that
+  avoids commitment.
+
+**Gate 2 — S3.a: sell a single card.** Build disposition per the approved model:
+sold price, date, sales channel (registry), the commitment discipline, margin
+computed at sale time from basis, instance → `disposed`, append-only correction
+for a later basis change preserving the closed sale's reported margin.
+
+**Gate 3 — S3.b: listings surface.** Create/publish/end listings on the shared
+grid; multiple concurrent channels on one instance; `attested` vs `local_only`
+vocabulary that never claims live channel presence; delist obligations visible.
+
+**Gate 4 — S3.c: the guard, provable in the UI.** Sell via one listing; siblings
+auto-end superseded with obligations; a second sale attempt on a disposed
+instance refuses with zero mutation; SaleConflict rendered as an operator
+obligation with both claims' evidence.
+
+**Gate 5 — carried debt.** W1: three user-facing strings still say "total paid"
+where the vocabulary is "landed total" (values correct).
+
+## 4. PER-GATE SELF-REVIEW — required, recorded, provisional
+
+**FIRST, every gate: the MANDATORY self-debug sweep.**
+`cd tests/harness && node e10_harness.js <build.html> selfdebug.js` on every
+touched surface. It types into every input (re-acquiring the live node each
+keystroke so self-rerendering inputs are genuinely tested), clicks every enabled
+button checking for thrown errors and for actually changing something, proves
+every dialog it opens dismisses on Escape, checks the native-popover ban, and
+runs the cards-off scan per surface. **Green — or every failure explained —
+BEFORE scenario evidence begins.** Every `NO — inert control?` needs an
+explanation in the report. If this gate adds a surface or control class the
+sweep does not reach, extend the sweep in the same gate. A sweep finding is a
+finding: defect-family expansion applies, and it is reported even when
+self-fixed. The operator is not your debugger — unclickable controls, reversed
+typing, dead buttons, dead-end saves and undismissable dropdowns are yours to
+find. Protocol §6a.
+
+Then, for every gate: verify the baseline hash · implement · run BOTH passes
+(baseline scenarios + a materially different adversarial pass) · run the full
+S1.x/S2.x regression · self-review against the gate's own criteria · record
+PASS-with-evidence or the finding plus its defect-family expansion · disposition
+findings (fix inside charter, record outside) · carry your artifact forward as
+the next gate's baseline. Maintain a **checkpoint log** — the CPI audit's index.
+A self-recorded result is PROVISIONAL; only the CPI records acceptance.
+
+## 5. HARD STOPS — halt and report, whatever remains
+Schema/capability/tenancy/financial/channel/lifecycle contract needed ·
+a CPI ruling needed (technical, consistency, or model question — report and continue when answered) · a genuine COMMERCIAL ruling needed (how the business operates: pricing policy, authority policy, what counts as a sale) · a finding you cannot disposition ·
+baseline verification failure · a regression you cannot fix in scope · the
+charter boundary reached · about to touch anything frozen or out of scope.
+**Out of scope entirely:** repacks (S4), margin reporting (S5), locations
+(PF-M4), checklist catalog (PF-M5), sealed purchasing (PF-C4+), payments,
+channel adapters, physical schema.
+
+## 6. STANDING RULES — unchanged and in full
+1. Every mutator/opener fails closed independently on capability, organization,
+   archived state, and module entitlement. 2. Cost basis is never form-writable.
+3. Cards never created as blanks; single guarded creation path. 4. Rendered
+defaults live in state. 5. No native dialogs or suggest popovers. 6. Dropdowns
+dismiss on outside click, Escape, focus departure; no-result states offer an
+affirmative close. 7. A host is never repainted during an in-flight interaction;
+programmatic focus is not user focus. 8. Compact provenance: glyphs plus one
+summary line. 9. Forbidden-term list 28+ minimum, scan `#app`+`#ovhost`+`#toast`
+with dialogs open. 10. Cross-org isolation on everything including preferences,
+open dialogs and vocabularies. 11. Evidence classes stay separate; a claim in
+one never substitutes for another. 12. Render claims need correctly-captioned
+screenshots; a renderer outage degrades the render class only, disclosed by
+scenario id. 13. A failing test is never replaced by a differently-constructed
+passing one. 14. Never claim an unbuilt stage is "next"; honest seams only.
+
+## 7. DELIVERY AT THE CHECKPOINT
+One package: `Element10_C_SELL_REVIEW.zip` — the revised model document, the
+final build, the checkpoint log with every gate's provisional result and
+evidence, all passes' logs, render captures, the full regression results, and a
+DROP ZIP of the build (+ frozen css) so the CPI can run the canonical harness
+`tests/harness/e10_harness.js` against it. Full 64-char hashes, manifest
+`shasum -c` clean, chain rooted at `548b4653...`. **Do not update BOARD.md and
+do not self-accept any gate.** Report "C-SELL ready for independent review."
 
 ---
 
@@ -271,11 +428,15 @@ persisted — in the prototype, gate on the existing harness admin scenario via
 
 ### Current gate
 
-- A6c.0 through A6c.2.1 ACCEPTED. Accepted code head `8152f2d`.
-- **A6c.3 (workspace policy family) is the active gate** — see NEXT PROMPT TO
-  SEND. Scope includes the byte-exact re-align of the 8 cosmetically-divergent
-  A6c.0 objects surfaced by A6c.2.1's identity sweep.
-- A6c.4 (platform/identity) remains out of scope until A6c.3 is accepted.
+- **A6c.0–A6c.4 + A7 ALL GRANTED. The engine authorization series is COMPLETE.**
+  Accepted code head `6eab46a`. Staging carries the full multi-tenant model,
+  proven against 11 hostile identity classes with zero findings.
+- **A8 is the active gate — the production path begins.** Everything to date has
+  been staging-only by design. A8-A10 carries the model to production, including
+  the cross-org catalog write hole that A6c.4 closed on staging and that remains
+  OPEN in production today. Production is read-only until A10.
+- Before A8 builds: it needs its own authorization plan reviewed the way A6c rev 6
+  was — this is the only irreversible sequence in the project.
 
 
 ### Approved-with-amendment (documentation only, no re-review required)
@@ -297,11 +458,18 @@ Two items to fold into the plan text. Neither changes behavior.
 
 ### Next authorized action
 
-**Rewritten 2026-07-27 in the same reconciliation as the A6c.2.1 ledger row.**
+**Rewritten 2026-08-03 with the A7 ledger row (maintenance rule).**
 
-1. Implement **A6c.3 ONLY** per NEXT PROMPT TO SEND → TRACK A.
-2. STAGING and LOCAL only. Production read-only until A10.
-3. Stop before A6c.4. Propose the delta; do not self-accept.
+1. **A8 PLANNING ONLY — no production mutation, no migration applied to prod.**
+   Author the production cutover plan for CPI + outside review before any
+   execution gate: exact ordered migration set, backup and restore rehearsal,
+   the expand→backfill→deploy→observe→contract discipline per step, rollback
+   boundary per step, downtime/lock analysis, the data backfill for tenant-zero
+   in production, verification queries per step, and the abort criteria.
+2. Staging remains the rehearsal surface: prove the whole sequence there,
+   from a production-shaped restore, before anything is proposed for prod.
+3. Stop after the plan. Propose the BOARD.md delta; do not self-accept.
+   Request "A8 plan approved."
 
 
 ## TRACK B: PRODUCT AND OPERATOR INTERFACE
@@ -456,6 +624,38 @@ Two items to fold into the plan text. Neither changes behavior.
   from the S1.5 picker: a capture-phase mousedown repaint destroyed the suggestion
   row before its click completed — same family as the S1.3 caret loss). Repaint
   only what actually changed, after the interaction settles.
+- **The operator is not the debugger** (2026-08-03). Before any evidence pass,
+  the builder runs the mandatory self-debug sweep (`tests/harness/selfdebug.js`)
+  on every touched surface: every input typed into with the live node
+  re-acquired per keystroke, every button clicked and checked for errors and for
+  changing something, every dialog proven dismissible, native popovers checked,
+  cards-off scanned per surface. Green or every failure explained BEFORE
+  scenarios begin. Basic brokenness — unclickable controls, reversed typing,
+  dead buttons, dead-end saves, undismissable dropdowns — is the builder's to
+  find, never the operator's. Protocol §6a.
+- **Evidence production is never single-homed** (2026-08-01, after a wedged
+  preview blocked a whole track). The five evidence classes are independently
+  satisfiable; only render needs a renderer. Canonical tool:
+  `tests/harness/e10_harness.js` (node + jsdom, real DOM events, exit 0/1,
+  CI-usable) — any agent runs the same tool on the same build. A renderer
+  outage degrades the render class only, disclosed by scenario id; it never
+  blocks a gate. See protocol §8a.
+- **Canonical harness delivery pattern** (proven 2026-08-03): a builder whose
+  sandbox lacks node, or lacks write access to the shared folder, delivers a
+  DROP ZIP (build + frozen css + BUILD.txt) alongside its package; the CPI
+  unpacks it and runs `tests/harness/e10_harness.js` — the canonical tool —
+  against the delivered build. A ported harness is acceptable for the builder's
+  own passes IF the port is disclosed, but only the canonical run counts as
+  independent verification. This closed the loop on S2.3 and is the standing
+  pattern.
+- **A build must be reachable before it can be evidenced** (2026-08-01). Any
+  agent delivers its compiled build to the shared folder as soon as it
+  compiles — before evidence, before packaging. A build living only inside one
+  workspace is unverifiable and unauditable by anyone else.
+- **Every mutator on a vertical surface fails closed on the module entitlement
+  itself** (2026-07-27, from S2.1 adversarial F2): `cardsOn()`-class checks live
+  in the mutator, independent of the UI being unreachable — alongside
+  capability, organization, and archived-state checks.
 - **Every dropdown, picker and transient panel dismisses on outside click,
   Escape, and focus departure** (Trent, 2026-07-26: they "consistently don't go
   away"). A no-result state is still a dropdown and additionally offers an
@@ -517,6 +717,23 @@ Two items to fold into the plan text. Neither changes behavior.
   independently administered businesses may still be separate organizations,
   with a future reporting-group concept for cross-org rollup — not designed
   now.
+- **The double-sale guard lives at the sale commitment, never at publication**
+  (PF-M3, approved 2026-08-03). Listings are advertisements, not holds — an
+  instance listed on N channels stays active and on-hand. At most one sale
+  commitment per CardInstance ever, serialized at the instance boundary with a
+  post-guard reread and an idempotency key; siblings auto-end `superseded`
+  inside the same atomic commit and carry delist obligations. Concurrent channel
+  sale claims are ordered by ARRIVAL AT THE AUTHORITATIVE BOUNDARY, never by
+  channel clocks; the loser is refused with zero mutation and produces a
+  SaleConflict for evidenced operator resolution — never an auto-refund, never a
+  second Disposition.
+- **Two writable numbers describing one truth will diverge; a derived total
+  cannot disagree with its parts** (ratified from `PFCS2_3-PREFLIGHT-1`,
+  2026-07-31). Where a total and its breakdown both exist, the components are
+  the stored facts and the total is derived, with exactly one writer of any
+  cache. Track A design input: `cost_components` + org-scoped
+  `acquisition_channel` vocabulary persistence (org-scoped RLS, CAS on
+  component writes, money as integer cents).
 - **Costing method is lot-level actual cost** (Trent, 2026-07-21). A received
   case or box becomes a lot carrying what was actually paid. Consuming the lot
   charges that lot's cost. Cost is never derived through the nesting chain: if no
@@ -572,6 +789,10 @@ These survive every future pass. Any change that violates one is rejected on sig
   shared rows are impossible before then.
 
 ## OPEN ITEMS
+
+- **W1 (carried from S2.3, cosmetic):** three user-facing strings still read
+  "total paid" where the vocabulary is now "landed total"; values are correct.
+  Fold into the next Track B implementation gate — do not spawn a gate for it.
 
 - **ROADMAP (outside UI/UX review, 2026-07-26, dispositioned by CPI):**
   S1.6 (immediate): lock cost basis on the card form; require Name; refuse

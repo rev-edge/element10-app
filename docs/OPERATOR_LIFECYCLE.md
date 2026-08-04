@@ -312,6 +312,10 @@ A gate fails workflow acceptance if:
 - Cancel, Back, or close produces a phantom record;
 - a future checkpoint is used as justification for a present dead end;
 - the report proves controls individually but not the complete task loop;
+- **the mandatory self-debug sweep was not run, or was red without every
+  failure explained** (protocol §6a — basic brokenness is the builder's to
+  find, never the operator's);
+- **a build was delivered that no one but the builder could reach** (§8a);
 - only one walkthrough pass was run;
 - static starting-state coverage stands in for mid-operation transitions;
 - a finding was not expanded across its sibling mutators and transitions;

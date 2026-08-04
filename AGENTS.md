@@ -14,6 +14,51 @@ These project instructions supplement the global engineering brief.
 4. Inspect the current implementation and nearest equivalent pattern.
 5. Separate planning from implementation.
 
+## Working model (2026-08-03)
+
+- Work runs in **CHECKPOINTS, not per-gate stop/start.** A dispatch is a
+  **charter**: a batch of gates with a purpose and boundaries. Self-review each
+  gate, record the result, and continue without waiting for external
+  acceptance.
+- **Self-recorded gate results are PROVISIONAL.** Only the CPI writes ledger
+  rows, and only at the checkpoint, for the batch.
+- **HARD STOPS halt the batch immediately**: a schema/capability/tenancy/
+  financial/channel/lifecycle contract is needed · a commercial ruling is
+  needed (how the business operates) · a finding you cannot disposition ·
+  baseline verification or a regression fails · the charter boundary is reached
+  · you are about to touch anything frozen or out of scope. A CPI ruling
+  (technical, consistency, or modelling) is asked and answered without ending
+  the batch.
+- **Acceptance authority:** the operator accepts anything operator-facing (UI,
+  UX, workflow, walkthroughs) and rules on commercial judgment; the CPI accepts
+  engine gates, model documents, non-operator-visible correctives, and process.
+  Production cutover execution needs the operator's explicit go.
+
+## Debug your own work — the operator is not the debugger
+
+**Before any evidence pass, on every touched surface:**
+
+    cd tests/harness && npm install        # once
+    node e10_harness.js <build.html> selfdebug.js
+
+Green — or every failure explained — BEFORE scenario evidence begins. The sweep
+types into every input (re-acquiring the live node per keystroke so a
+self-rerendering field's caret is genuinely tested), clicks every enabled button
+checking for thrown errors and for actually changing something, proves dialogs
+dismiss on Escape, checks the native-popover ban, and scans cards-off per
+surface. Extend it when a gate adds a surface or control class it does not
+reach. A sweep finding is a finding: defect-family expansion applies and it is
+reported even when self-fixed.
+
+Unclickable controls, reversed typing, dead buttons, dead-end saves and
+undismissable dropdowns are **yours to find**. See protocol §6a.
+
+**Evidence is never single-homed** (§8a): four of five evidence classes need no
+browser. A renderer outage degrades the render class only — disclosed by
+scenario id — and never blocks a gate. Deliver your build to the shared folder
+(or a drop zip) as soon as it compiles: a build only you can reach cannot be
+independently verified.
+
 ## Workflow responsibility
 
 - Own the operator task, not only the named component or screen.

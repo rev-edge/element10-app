@@ -209,6 +209,137 @@ No evidence class substitutes for another:
 Screenshots prove settled pixels. They do not prove that a mutator refused, that
 the correct row persisted, or that a workflow can resume.
 
+## 6a. MANDATORY self-debug sweep — before any evidence pass (2026-08-03)
+
+**The operator is not the debugger.** Every one of these reached Trent because
+the builder tested the scenarios it chose — which naturally exercised what it
+had just built — and never simply drove the thing like a person:
+
+- picker rows that could not be clicked at all;
+- typing that rendered backwards ("eulb" for "blue");
+- a count field that displayed 5 and then refused to save;
+- saves that dead-ended with no next step;
+- dropdowns that would not dismiss;
+- an OS-native dropdown appearing mid-form;
+- blank records created by a convenience path.
+
+None of that is subtle domain judgment. It is "the app does not work when a
+person uses it," and it is the builder's to find.
+
+**Before any scenario evidence, run the sweep on every touched surface:**
+
+    cd tests/harness && node e10_harness.js <build.html> selfdebug.js
+
+It drives controls the way a person does rather than asserting a script:
+every text input typed into (re-acquiring the live node each keystroke, so a
+self-rerendering input's caret is genuinely tested); every enabled button
+clicked and checked for a thrown error and for actually changing something;
+every dialog it opens proven dismissible by Escape; the native-popover ban
+checked mechanically; and the cards-off scan run on every surface.
+
+**Rules for the sweep:**
+- It must be green, or every failure explained, BEFORE evidence begins. A gate
+  whose sweep is red is not ready for a scenario pass.
+- Every `NO — inert control?` record needs an explanation in the report
+  ("chip already in its default state" is fine; silence is not).
+- Extend it: if a gate adds a surface or a control class the sweep does not
+  reach, add coverage in the same gate. The sweep grows with the app.
+- **A finding from the sweep is a finding** — it triggers defect-family
+  expansion like any other, and it is reported even when self-fixed.
+- It does not replace scenario evidence, the adversarial pass, or the operator
+  walkthrough. It is the floor beneath them.
+
+## 7a. Checkpoint working model (2026-08-03 — supersedes per-gate stop/start)
+
+**Why this changed.** Per-gate external review was correct while agents were
+still learning the evidence discipline. They have it now: recent gates saw
+agents find their own adversarial findings, escalate rather than fix outside
+authorization, refuse a hash-mismatched relay, leave a failing assertion in the
+log unedited, and correct their own layer attributions. External review moves
+to CHECKPOINTS; agents work continuously between them.
+
+**Definitions.**
+- A **gate** remains the unit of work, evidence, and self-review. Nothing about
+  the standing rules, the two-pass walkthrough, evidence classes, baseline
+  verification, or regression discipline relaxes.
+- A **checkpoint** is a batch of gates delivering one operator-meaningful
+  capability. Checkpoints are where CPI audit, operator walkthrough, and
+  outside review happen.
+
+**Between checkpoints, the agent runs continuously.** For each gate it:
+1. verifies the baseline hash of what it is building on;
+2. implements within the authorized checkpoint charter;
+3. runs BOTH passes (baseline + materially different adversarial) and the full
+   regression set;
+4. **self-reviews against its own gate criteria and records the result** in a
+   running checkpoint log — PASS with evidence, or the finding and its
+   defect-family expansion;
+5. dispositions its own findings: fixes what is inside the charter, records what
+   is not; and
+6. **continues to the next gate without waiting**, carrying its own accepted
+   artifact forward as the next baseline.
+
+**A self-recorded gate result is PROVISIONAL.** It is not a ledger row. Only the
+CPI records acceptance, and only at the checkpoint, for the batch.
+
+**HARD STOPS — the agent halts mid-checkpoint and reports, regardless of
+remaining charter:**
+- a schema, capability, tenancy, financial, channel, or lifecycle contract is
+  required (escalate — never silently create);
+- an operator ruling is required (a product decision, not a technical one);
+- a finding it cannot disposition inside the charter;
+- baseline verification fails, or a regression it cannot fix within scope;
+- the charter's stated boundary is reached;
+- it is about to touch anything the charter names as frozen or out of scope.
+
+**Checkpoint acceptance requires all three:** CPI audit of the whole batch
+(deeper than per-gate: the batch's cumulative invariants, not just the last
+build), operator walkthrough, and outside review. The checkpoint log is the
+audit's index — every provisional result must be independently reproducible
+from the delivered artifacts.
+
+**If a checkpoint audit finds a defect the intervening regressions should have
+caught, the batch size tightens.** The regression set carrying the batch is the
+assumption this model rests on; it is falsifiable and will be tested.
+
+## 8a. Evidence tooling and independence (added 2026-08-01)
+
+Evidence production must never be single-homed. A wedged preview environment
+once blocked an entire track; that is a process defect, not bad luck.
+
+**The five evidence classes are INDEPENDENTLY SATISFIABLE.** Four of them —
+interaction, mutator, persisted-state, boundary — require no renderer at all.
+Only the render class needs pixels.
+
+- A renderer outage degrades the RENDER CLASS ONLY. It does not block a gate,
+  a pass, or a package. Run the other four, package them, and disclose the
+  render gap explicitly and specifically ("render evidence for scenarios 3, 5
+  and 7 not captured — renderer unavailable; claims in those scenarios are
+  limited to state and mutator classes").
+- Never claim a render outcome you could not observe. Never substitute a
+  source read for a render claim. The disclosure IS the honest outcome.
+
+**Canonical tool: `tests/harness/e10_harness.js`.** Node + jsdom, no browser,
+exit 0/1, CI-usable. It drives REAL DOM events (mousedown → mouseup → click,
+input events) so in-flight-interaction defects — the caret-loss and
+click-target families — actually reproduce rather than being bypassed by
+synthetic function calls. Any agent (Design, Code, CPI, an outside reviewer)
+runs the same tool against the same build and gets the same result.
+
+    cd tests/harness && npm install
+    node e10_harness.js <path-to-build.html> [scenario.js]
+
+**Build reachability is a delivery requirement.** A build that exists only
+inside one agent's workspace cannot be independently verified, cannot be
+evidenced by anyone else, and cannot be audited. Deliver the build file to the
+shared folder (or the repo) as soon as it compiles — before evidence, before
+packaging. An unreachable build is an unverifiable build.
+
+**If blocked, report the blocker with its isolation test.** State what failed,
+what you did to prove it was environmental rather than your code (e.g. the
+same failure on a frozen untouched screen), and which evidence classes you
+CAN still produce. Then produce those.
+
 ## 9. Scenario record
 
 Every scenario receives a stable identifier and records:

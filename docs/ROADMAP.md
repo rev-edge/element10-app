@@ -8,6 +8,35 @@ Progress also requires a complete operator task loop: entry, commit, result,
 continuation, review/return, repeat, resume, recovery, and handoff. A screen or
 checkpoint-local control is not progress if the operator is stranded after using it.
 
+## Critical path and model gates (updated 2026-08-03)
+
+**Engine (Track A):** A6a → A6c.4 → A7 all ACCEPTED; the 97-policy census is
+closed and the multi-tenant model is proven against 11 hostile identity classes
+on staging. A8's cutover plan is accepted (plan only). Current work is the
+**C-REHEARSE** checkpoint: the full P0 rehearsal against a production-shaped
+restore. **Production is untouched and execution requires the operator's
+explicit go.**
+
+**Surface (Track B):** the singles supply arc — acquire → intake → identify →
+cost — is complete through PF-C-S2.3 (landed cost + acquisition channel).
+Current work is the **C-SELL** checkpoint: listings model revision, then
+selling, the listings surface, and the double-sale guard proven in the UI.
+
+**Model gates, in dependency order:**
+- **PF-M3.1** — listings; blocks S3 selling (in the C-SELL charter).
+- **PF-M4** — locations and transfers; **approved before PF-C4 physical
+  implementation and before PF-C5 receiving.**
+- **PF-M5** — checklist catalog: shared canonical + org-scoped overlays with a
+  curation workflow (operator ruling, 2026-07-31). **Now on the critical path
+  for production:** A8 phase P5 closes the catalog write hole, and the deployed
+  production client creates checklists and cards by direct table INSERT — so
+  P5 cannot run until the curation path ships and the client uses it. PF-M5
+  therefore gates the FINAL phase of the cutover.
+
+**Working model:** checkpoints, not per-gate stop/start. Agents self-review and
+continue between checkpoints; CPI audit, operator walkthrough, and outside
+review happen once per checkpoint. See `OPERATOR_WALKTHROUGH_PROTOCOL.md` §7a.
+
 ## PF-M4 — Locations and transfers (model gate)
 
 Multi-location businesses are one organization with organization-owned facility

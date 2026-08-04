@@ -1,0 +1,4 @@
+{ "name": "e10-evidence-harness", "version": "1.0.0", "private": true,
+  "description": "Headless evidence harness for the Element 10 prototype — interaction, mutator, persisted-state and boundary evidence classes without a browser.",
+  "scripts": { "smoke": "node e10_harness.js ../PFC2_walkthrough/08-product-workspace.html" },
+  "dependencies": { "jsdom": "^24.0.0" } }

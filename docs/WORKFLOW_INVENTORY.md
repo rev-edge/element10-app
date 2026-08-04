@@ -5,6 +5,12 @@ narratives. This remains observed workflow input. `OPERATOR_LIFECYCLE.md` is the
 current cross-workflow authority and extends this inventory through acquisition,
 singles intake, multi-channel listing/sale, fulfillment, and reconciliation._
 
+_Build status, 2026-08-03: acquire → intake → identify → cost are BUILT and
+accepted (through PF-C-S2.3). List → sell is in flight (checkpoint C-SELL).
+Repacks, margin reporting, sealed purchasing, schedule and the live hub remain
+sequenced later; the live surfaces are frozen pre-pivot evidence replaced at
+PF-C21._
+
 ## The operating spine
 
 One connected operating loop, every role enters at a different point:
