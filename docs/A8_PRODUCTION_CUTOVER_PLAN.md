@@ -113,7 +113,7 @@ Gate out of P0: a rehearsal transcript (durations, locks, verifications, rollbac
 - `SET NOT NULL` — normally an ACCESS EXCLUSIVE full scan, but PG 12+ **skips the scan** because the just-validated CHECK proves non-null. So the ACCESS EXCLUSIVE window is the catalog flip only (milliseconds).
 - `UNIQUE USING INDEX <t>_org_uq` — converts the **already-built CONCURRENTLY index** in place (same name); ACCESS EXCLUSIVE but instant (no build).
 
-**Downtime:** none of consequence — brief metadata-only ACCESS EXCLUSIVE flips per table. On 35/41/6 the VALIDATE scans are trivial.
+**Downtime:** none of consequence — brief metadata-only ACCESS EXCLUSIVE flips per table. On the real data the retrofit tables total ~6.5k rows (largest: `e10_obs_slots` 5,870; `e10_cards` 57,288 is NOT retrofit — global catalog, A6c.4 policy DDL only), and every VALIDATE/backfill/promote step measured <125 ms (total 1.8 s for all 36).
 
 **Abort A-P3:** if any `VALIDATE` fails, a NULL `organization_id` survived P2 (a live org-less write slipped in) → **abort P3, do not SET NOT NULL**, return to P2 (enroll the writer, re-backfill), re-verify zero NULLs, retry. Aborting P3 mid-table is safe: the CHECK-NOT-VALID and VALIDATE are reversible (`DROP CONSTRAINT`); nothing is lost.
 
@@ -180,7 +180,7 @@ Gate out of P0: a rehearsal transcript (durations, locks, verifications, rollbac
 ---
 
 ## 10. Idempotency & re-runnability
-Every migration is idempotent by construction (`create … if not exists`, `add column if not exists`, `where organization_id is null`, `on conflict do nothing`, `if not exists (select 1 from pg_constraint …)`). The CONCURRENTLY index steps are the only non-transactional ones; their INVALID-index recovery is documented in each migration and drilled in P0. A partial failure at any step is resumed by re-running from that step.
+Every migration is idempotent by construction — **verified per-file in A8-PREP** (see the 36-row audit below), after fixing `s1_composite_fks` (its 16 bare `ADD CONSTRAINT` are now guarded by `if not exists (select 1 from pg_constraint …)`; the plan's earlier blanket claim was false for that one file until fixed). The CONCURRENTLY index steps are the only non-transactional ones; their INVALID-index recovery is documented in each migration and drilled in P0. A partial failure at any step is resumed by re-running from that step.
 
 ---
 
@@ -194,3 +194,36 @@ Every migration is idempotent by construction (`create … if not exists`, `add 
 
 ## 12. What A8 is NOT
 A8 is the plan. It is not the migration set (that exists and is staging-proven), not authorization to touch production, and not a schedule. Execution — the backup, the rehearsal transcript review, the coordinated migration+deploy, and the observe/abort decisions — is a **separate gate** requiring CPI acceptance of this plan, outside review, and an explicit go. Until then, production stays exactly where it is: `20260716110000`, read-only, 35/41/6.
+
+---
+
+## 13. A8-PREP — rehearsal findings closed (2026-08-04)
+
+Rehearsed on a byte-faithful local scratch restore of real prod data (24.9 MB dump; ledger + 29-table count fingerprints matched prod). Production untouched.
+
+### F5 — canonical ledger-integrity check (reproducible by any auditor)
+The one canonical crown-jewels query. Run it on prod today and it returns the stated value; run it after any cutover step and it MUST be unchanged (organization_id is not in it — the cutover is additive to the ledger).
+```sql
+select md5(string_agg(
+  id::text||'|'||coalesce(on_hand_delta::text,'~')||'|'||coalesce(reserved_delta::text,'~')||'|'
+  ||coalesce(item_id,'~')||'|'||coalesce(movement_type,'~')||'|'||coalesce(idempotency_key,'~'),
+  chr(10) order by id)) as canonical_ledger_md5
+from public.e10_inventory_movements;
+```
+**Production value (2026-08-04): `f54a1fe978614e21cf2ffb8c63afb475`.** (The plan's earlier §2 formula `md5(string_agg(id::text||on_hand_delta::text||coalesce(item_id,''),',' order by id))` = `0df7a705c70a69120047c7adf35c9186`; it is fragile — a single null `on_hand_delta` would silently drop a row from the aggregate — so it is retired in favour of the null-safe delimited query above. The transcript's `e4cfa76d…` was yet a third variant; there is now ONE.)
+
+### F1 — idempotency fixed + full audit
+`s1_composite_fks` fixed (16 guarded `ADD` + 16 guarded `VALIDATE`; behaviour + resulting schema identical to the accepted A6b migration, only re-runnability added). The **re-run drill now passes: forward 0 failures, re-run 0 failures across all 36.** A deeper hazard was found and closed: on a full re-run, s1 would resurrect the movements/receipts composite FKs that `fk_ondelete_corrective` deliberately drops (ledger outlives items) — the guarded form + fk_corrective's own idempotent re-drop leave the end state correct (movements/receipts composite FKs absent; reservations kept; 14 org FKs validated; ledger md5 unchanged). Per-file audit: all 36 carry an idempotency mechanism (create-or-replace / if-not-exists / on-conflict / where-null / guarded-DO); **0 residual risk**.
+
+### F2 — committed, drilled recovery scripts (`supabase/recovery/a8_p*_down.sql`)
+- **P1/P2/P3 down: authored (enumerated from the migrations), committed, and DRILLED in sequence** — P3-down (drop NOT NULL only; the org_uq UNIQUE is left because the composite FKs depend on it and it is FK-equivalent to the Step-1 index), P2-down (bulk org-null with `session_replication_role=replica` because the backfill went parents-first so the reversal must go children-first), P1-down (full CASCADE teardown of the 9 added tables + org columns + e10 schema). The chain returns to the **exact pre-cutover fingerprint** (29 tables, e10 schema 0, org cols 0, ledger `f54a1fe9`). Authoring these surfaced real dependency traps (constraint-depends-on, FK ordering) — evidence that recovery scripts must be drilled, not assumed.
+- **P4/P5 down: `restore-from-backup`, not a forward script** (see F6). The committed `a8_p4_authz_down.sql` performs the DB-side functions-only revert (proven) and documents that the policy surface is restored from the pre-P4 backup; `a8_p5_catalog_down.sql` re-adds the 15 catalog mutation policies (the documented P5 abort) + notes the identity/SELECT reverts come from the backup.
+
+### F6 — the P4 rollback: **P4 is effectively irreversible in live operation.** (drilled, stated plainly)
+- **DB-side RPC bodies ARE restorable:** dropping the A6c delegates and re-applying the legacy `CREATE OR REPLACE` bodies (with `check_function_bodies=off`) returned `pg_get_functiondef` fingerprint **exactly** to post-P3 (`b9e6a467…`) on the scratch.
+- **DB-side POLICIES are NOT reliably restorable by forward script:** the 55 org-table + 4 workspace policies are not isolated named `CREATE POLICY` statements (they originate in `20260716100000_rls_initplan`); a reconstructed DROP+CREATE from `pg_policies` decompiled text failed on a complex predicate. The authoritative recovery is **restore from the pre-P4 backup**.
+- **The live reversal also requires reverting the deployed client + `e10_schema_version()` in lockstep** through the schema-gate Pages deploy.
+- **Conclusion:** P4 is the point of no return. Operationally, **forward-fix is the default; a true P4 rollback = restore the pre-P4 backup + coordinated client/SCHEMA_VERSION revert, as an incident-level, operator-authorized event.** This must be understood before the execution go, not discovered during an incident.
+
+### F4 — lock-contention gap (scope limitation; proposed, not run)
+The rehearsal is single-connection: it measures per-step DURATION (<125 ms each), not lock waits under concurrent live traffic. The lock *types* are fixed by the DDL and are the lock-minimizing forms (`CONCURRENTLY`, `NOT VALID`→`VALIDATE`, CHECK-validated `SET NOT NULL`, `UNIQUE USING INDEX` on a pre-built index), so contention risk is low but untested. **Proposed (do not run without authorization):** during the execution rehearsal, drive a background writer against the retrofit tables (the m31/m32 RPC workload at a modest rate) while P1–P3 apply, and record `pg_stat_activity` lock waits + any statement-timeout events per step; abort if any P1–P3 step blocks a writer beyond a set threshold.
