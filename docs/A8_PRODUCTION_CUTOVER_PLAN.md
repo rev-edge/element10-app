@@ -167,6 +167,8 @@ Gate out of P0: a rehearsal transcript (durations, locks, verifications, rollbac
 
 "Abort once a step has committed" means, for the additive phases (P1–P3), **stop and forward-fix or run the phase's down-recovery**; the true irreversible commitment is **P4** (contract + client), which is why P4 is gated on a rehearsed coordinated revert and P5 is held behind the curation-path dependency.
 
+**Measured contention (A8-DRILL2, D2 — replaces the earlier estimate):** under 3 concurrent writers committing continuously against the retrofit tables (1,017 commits during P1; 729 during P2+P3; 0 errors), the **maximum observed stall of a live writer was 12 ms**, and no migration step escalated beyond its predicted lock or blocked a writer materially. P1 ran 2.63 s under load (1.8 s idle); P2+P3 0.52 s. The ACCESS-EXCLUSIVE steps (ADD COLUMN, SET NOT NULL) are metadata-only so their lock window does not grow with row count. **Caveat / required mitigation:** the rehearsal used only short (autocommit) writer transactions. A *long-running* writer transaction held across a P1/P3 ACCESS-EXCLUSIVE step would make that step queue behind it and, in turn, queue every subsequent writer behind the step (the classic "ALTER TABLE behind a long query stalls the table" foot-gun). **Therefore each ACCESS-EXCLUSIVE migration step must set a short `lock_timeout` (e.g. 3 s) and be retry-wrapped**, so it fails fast and releases rather than head-of-line-blocking live traffic. This is a new execution-gate requirement (D2 finding).
+
 ---
 
 ## 9. Verification queries (per phase, run on scratch in P0 and on prod at execution)
@@ -227,3 +229,32 @@ from public.e10_inventory_movements;
 
 ### F4 — lock-contention gap (scope limitation; proposed, not run)
 The rehearsal is single-connection: it measures per-step DURATION (<125 ms each), not lock waits under concurrent live traffic. The lock *types* are fixed by the DDL and are the lock-minimizing forms (`CONCURRENTLY`, `NOT VALID`→`VALIDATE`, CHECK-validated `SET NOT NULL`, `UNIQUE USING INDEX` on a pre-built index), so contention risk is low but untested. **Proposed (do not run without authorization):** during the execution rehearsal, drive a background writer against the retrofit tables (the m31/m32 RPC workload at a modest rate) while P1–P3 apply, and record `pg_stat_activity` lock waits + any statement-timeout events per step; abort if any P1–P3 step blocks a writer beyond a set threshold.
+
+---
+
+## 14. A8-DRILL2 — the last two rehearsals (2026-08-07)
+
+Drilled on the byte-faithful scratch restore (real prod data). Production untouched (`20260716110000`, 35/41/6, canonical ledger `f54a1fe9…`).
+
+### D1 — P4/P5 recovery drilled end-to-end as restore-from-backup (with wall-clock)
+Sequence: capture pre-P4 backup → apply P4 (A6c.0–A6c.3) + P5 (A6c.4) → recover from the backup → prove exact return to the post-P3 fingerprint.
+
+**Result: exact return proven** — all five fingerprints match post-P3 after recovery: ledger `f54a1fe9…`, counts `af98b7cb…`, **fn_bodies `b9e6a467…`**, **policy_defs `77a3e5d0…`**, 97 policies. So the P4 authorization surface (RPC bodies AND policies — the part F6 flagged as not forward-scriptable) *is* recoverable via backup restore.
+
+**Wall-clock (this data size, local):** backup **0.35 s** (4.9 MB custom-format); faithful recovery **~1.4 s**. These are the data/schema-restore floor; **production recovery is Supabase PITR / backup-restore to a target endpoint, which is provisioning-bound (minutes), not ~1.4 s** — the number the operator needs at incident time is "minutes to a restored endpoint," dominated by provisioning, not data volume at this scale.
+
+**D1 findings (method matters — three ways to get recovery subtly wrong, all found by doing it):**
+1. **Version-matched dump/restore is mandatory.** `pg_dump` 16 against the PG 17 server produced a **0-byte dump** (then a broken restore). Use the platform/server-matched binary (here: the container's 17.6). A version mismatch is a silent recovery failure.
+2. **`pg_restore --clean` is the WRONG method** into a live cluster: it only drops objects *present in the dump*, so the **14 A6c delegates created during P4 survived** the "recovery" (49 functions vs the 35 target). Recovery must be **clean-slate** (drop schemas / restore to a fresh target), not `--clean`.
+3. **Recovery is full-cluster / multi-schema and privilege-sensitive.** A `-n public`-scoped restore dropped the `e10` predicate schema's functions, cascading 8 policy failures; and `pg_restore` replays ownership / `ALTER DEFAULT PRIVILEGES` / cross-schema (`auth`) statements that require the cluster superuser. A faithful restore is the **full multi-schema dump restored as superuser** — which is exactly what a platform-native PITR does, and why hand-rolled `pg_restore` into a live DB is not the recovery path.
+
+**Client-side revert (stated in the same terms):** a P4 recovery is not complete at the database. The deployed client's `SCHEMA_VERSION` and the live `e10_schema_version()` must be reverted in lockstep through the `schema-gate` Pages deploy (the client fails closed on mismatch). So the true recovery wall-clock = **PITR-to-restored-endpoint (minutes) + a client redeploy of the prior build (minutes)**, coordinated — an incident-level, operator-authorized event, not a script.
+
+### D2 — lock contention under a live writer
+3 concurrent writers committing continuously (short autocommit UPDATEs on the retrofit tables) while each phase applied; `pg_stat_activity` sampled ~every 15 ms for `wait_event_type='Lock'`.
+
+**Result: the phases hold under contention.** Max live-writer stall **12 ms** (P1) / **10 ms** (P2+P3); **0 writer errors** across 1,746 commits; no step escalated beyond its predicted lock. Most observed waits were writer-vs-writer (multiple writers on one hot row), not migration-induced; with distinct-row writers the migration-vs-writer waits were ≤10 ms (a writer briefly queued behind the backfill UPDATE-all). The ACCESS-EXCLUSIVE steps are metadata-only, so this does not worsen at prod row counts. See §8 for the numbers folded into the plan.
+
+**D2 finding (folded into §8): short `lock_timeout` + retry on the ACCESS-EXCLUSIVE steps.** The rehearsal used only short writer transactions. A long-running writer transaction across a P1/P3 ACCESS-EXCLUSIVE step would head-of-line-block the table. Each such step must set a short `lock_timeout` (~3 s) and retry, failing fast rather than stalling live traffic. New execution-gate requirement.
+
+**Honest bottom line:** zero-downtime is supported by the measured numbers at this load and data scale; the two conditions that keep it true in production are (a) the `lock_timeout`+retry guard on ACCESS-EXCLUSIVE steps, and (b) no long-running writer transaction deliberately held across the promote — both are execution-gate items, not code changes to the migrations.
