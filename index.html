@@ -2578,7 +2578,7 @@ let SHARED={},SCOPED={},SCOPED_ID='',REVS={},MEMBERS=[];
 let SCOPE=localStorage.getItem('e10_scope')||'mine';         // 'mine' | 'universal' | '<uid>'
 let invFilter=localStorage.getItem('e10_invfilter')||'mine'; // 'mine' | 'all'
 const SCOPED_KEYS=['shows','breaks','copySets','dashCfg','sales','chaseLists'];
-/* M4: `inventory` is NO LONGER a blob section — it is sourced from e10_inventory_items via e10_inv_list
+/* M4: `inventory` is NO LONGER a blob section — it is sourced from e10_inventory_items via e10_inv_page (keyset-paginated)
    and patched per-row by realtime. Removed from SHARED_KEYS so splitLegacy/mergeWorkspace/_keysFor never
    touch it and a blob write never carries an inventory section. S.inventory/SHARED.inventory live on,
    populated by loadInventoryRows() + _applyInvItem, and preserved across blob re-splits in _applyPayload. */
@@ -2586,7 +2586,7 @@ const SHARED_KEYS=['comments','todos','streamers','lists','attachments','checkli
 
 function blankShared(){return{comments:[],todos:[],streamers:['Trent'],lists:JSON.parse(JSON.stringify(DEF_LISTS)),attachments:[],checklists:[],repacks:[]};}
 function blankScoped(){return{shows:{},breaks:[],copySets:[],dashCfg:{catValue:true,costMarket:true,movement:true},sales:null,chaseLists:[]};}
-function normShared(o){o=o||{};if(!o.comments)o.comments=[];if(!o.todos)o.todos=[];o.todos.forEach(t=>{if(t.desc==null)t.desc='';if(!t.comments)t.comments=[];});if(!o.streamers)o.streamers=['Trent'];if(!o.lists)o.lists=JSON.parse(JSON.stringify(DEF_LISTS));['characters','sets','formats','diff','invcats','grading','conditions'].forEach(k=>{if(!o.lists[k])o.lists[k]=(DEF_LISTS[k]||[]).slice();});['attachments','checklists','inventory','repacks'].forEach(k=>{if(!o[k])o[k]=[];});/* M4: inventory is row-sourced (e10_inv_list) + already canonical — no per-item blob normalization here; the array guard above just keeps S.inventory defined. */o.repacks.forEach(p=>{if(!p.cards)p.cards=[];if(!p.pool)p.pool=[];});o.checklists.forEach(clNormalize);return o;}
+function normShared(o){o=o||{};if(!o.comments)o.comments=[];if(!o.todos)o.todos=[];o.todos.forEach(t=>{if(t.desc==null)t.desc='';if(!t.comments)t.comments=[];});if(!o.streamers)o.streamers=['Trent'];if(!o.lists)o.lists=JSON.parse(JSON.stringify(DEF_LISTS));['characters','sets','formats','diff','invcats','grading','conditions'].forEach(k=>{if(!o.lists[k])o.lists[k]=(DEF_LISTS[k]||[]).slice();});['attachments','checklists','inventory','repacks'].forEach(k=>{if(!o[k])o[k]=[];});/* M4: inventory is row-sourced (e10_inv_page) + already canonical — no per-item blob normalization here; the array guard above just keeps S.inventory defined. */o.repacks.forEach(p=>{if(!p.cards)p.cards=[];if(!p.pool)p.pool=[];});o.checklists.forEach(clNormalize);return o;}
 function normScoped(o){o=o||{};if(!o.shows)o.shows={};if(!o.breaks)o.breaks=[];if(!o.copySets)o.copySets=[];if(!o.dashCfg)o.dashCfg={catValue:true,costMarket:true,movement:true};if(!('sales'in o))o.sales=null;
  Object.keys(o.shows).forEach(k=>{(o.shows[k]||[]).forEach(s=>{if(!s.id)s.id='sh'+Math.random().toString(36).slice(2);if(s.notes==null)s.notes='';if(!('titleSet'in s))s.titleSet=null;if(!('breakModel'in s))s.breakModel=null;if(!Array.isArray(s.inventoryAlloc))s.inventoryAlloc=[];if(!('repackRef'in s))s.repackRef=null;if(!Array.isArray(s.needs))s.needs=[];});});
  o.breaks.forEach(b=>{if(!b.id)b.id='bk'+Math.random().toString(36).slice(2);if(!('ts'in b))b.ts=null;});
@@ -2622,7 +2622,7 @@ document.addEventListener('focusout',()=>{setTimeout(()=>{if(_pendingRender&&!is
    section-level three-way merge against the last-synced base; mergeable → retry once at the new rev;
    a true section conflict is surfaced (Keep mine / Take theirs), never silently resolved. ===== */
 /* Chain M / M4 — inventory is fully off the blob. The client reads it from e10_inventory_items via
-   e10_inv_list() and patches per-row via realtime + the e10_inv_* RPC results (_applyInvItem). It is NOT
+   e10_inv_page() paging and patches per-row via realtime + the e10_inv_* RPC results (_applyInvItem). It is NOT
    a blob section: absent from SHARED_KEYS, blankShared, _sharedPayload and the H2 merge — so a shared
    write never carries an inventory section, and the blob's inventory copy is dropped by the M4 migration. */
 const _sharedPayload=()=>({comments:S.comments,todos:S.todos,streamers:S.streamers,lists:S.lists,attachments:S.attachments,checklists:S.checklists,repacks:S.repacks});
@@ -2765,9 +2765,12 @@ async function loadAll(){
  if(!sh||!sh.data||!Object.keys(sh.data).length)await writeRow('shared',null,SHARED);
  if(SCOPE!=='mine'&&SCOPE!=='universal'&&ROLE!=='admin')SCOPE='mine';
  await loadScopedFor(SCOPE);await loadOpShows();await loadInventoryRows();rebuildS();subscribeRealtime();}
-/* M4: inventory READ source = e10_inventory_items (projected by e10_inv_list, the canonical shape the blob
-   held). Populates SHARED.inventory; realtime patches it per-row thereafter. Failure leaves the last array. */
-async function loadInventoryRows(){if(!sb)return;try{const{data,error}=await sb.rpc('e10_inv_list');if(error)throw error;if(Array.isArray(data))SHARED.inventory=data;}catch(e){console.warn('inv load',e.message||e);if(!Array.isArray(SHARED.inventory))SHARED.inventory=[];}}
+/* STEP8: inventory READ source = e10_inv_page (bounded, keyset-paginated; the unbounded e10_inv_list is RETIRED).
+   Pages through the org catalog via the id keyset (each call is an indexed, bounded read — no whole-catalog scan/agg
+   on the server) and accumulates into SHARED.inventory; realtime patches it per-row thereafter. Server-side filters
+   {q,cat,set,year,grade} are available on e10_inv_page for on-demand grid pagination (follow-on client work); this
+   loader keeps the existing in-memory grid by walking every page. Failure leaves the last array. */
+async function loadInventoryRows(){if(!sb)return;try{const rows=[];let cursor=null,guard=0;while(true){const{data,error}=await sb.rpc('e10_inv_page',{p_after:cursor,p_limit:500,p_filters:{}});if(error)throw error;const items=(data&&data.items)||[];rows.push(...items);if(!data||!data.has_more||!data.next_cursor||++guard>1000)break;cursor=data.next_cursor;}SHARED.inventory=rows;}catch(e){console.warn('inv load',e.message||e);if(!Array.isArray(SHARED.inventory))SHARED.inventory=[];}}
 /* Per-row realtime: any change to an item or its reservations re-fetches that item's canonical projection
    (e10_inv_get) and upserts it by id — RE-FETCH-LATEST so out-of-order/duplicate events converge and can't
    corrupt the array. An item delete drops it. Reuses the same _applyInvItem/_removeInvItem the RPCs use. */

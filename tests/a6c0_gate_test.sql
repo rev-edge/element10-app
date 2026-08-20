@@ -12,13 +12,13 @@ begin
     where n.nspname='public' and p.prosecdef and has_function_privilege('authenticated',p.oid,'EXECUTE')
       and p.proname like 'e10_org_inv_%' or (n.nspname='public' and has_function_privilege('authenticated',p.oid,'EXECUTE')
       and p.proname in ('e10_org_buyer_suggest','e10_org_redeem_code'));
-  -- the 13 client delegates must all be authenticated-executable
+  -- the 14 client delegates must all be authenticated-executable
   if (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public'
        and has_function_privilege('authenticated',p.oid,'EXECUTE')
        and p.proname in ('e10_org_inv_add_item','e10_org_inv_edit_item','e10_org_inv_delete_item','e10_org_inv_reserve',
          'e10_org_inv_release','e10_org_inv_consume','e10_org_inv_mark_sold','e10_org_inv_set_reservations',
-         'e10_org_inv_reverse_consumption','e10_org_inv_get','e10_org_inv_list','e10_org_buyer_suggest','e10_org_redeem_code')) <> 13 then
-    raise exception 'A6c.0 ACL: the 13 client delegates are not all authenticated-executable';
+         'e10_org_inv_reverse_consumption','e10_org_inv_get','e10_org_inv_page','e10_org_inv_history','e10_org_buyer_suggest','e10_org_redeem_code')) <> 14 then
+    raise exception 'A6c.0 ACL: the 14 client delegates are not all authenticated-executable';
   end if;
   -- internal helpers + emit must NOT be authenticated-executable
   select count(*) into v_internal_auth from pg_proc p join pg_namespace n on n.oid=p.pronamespace
@@ -30,7 +30,7 @@ begin
     where n.nspname in ('public','e10') and (has_function_privilege('anon',p.oid,'EXECUTE') or has_function_privilege('public',p.oid,'EXECUTE'))
       and (p.proname like 'e10_org_%' or (p.proname like '\_e10_inv_%' and pg_get_function_identity_arguments(p.oid) like 'p_org uuid%') or p.proname='owns_session');
   if v_anon <> 0 then raise exception 'A6c.0 ACL: % A6c function(s) are anon/PUBLIC-executable', v_anon; end if;
-  raise notice 'A6c.0 ACL: PASS (13 delegates authenticated; internals service_role-only; zero anon/PUBLIC)';
+  raise notice 'A6c.0 ACL: PASS (14 delegates authenticated; internals service_role-only; zero anon/PUBLIC)';
 end $$;
 
 -- ---- (b) + (c) spectate proof + per-delegate positive/adversarial (rolled back) ----
@@ -65,7 +65,7 @@ begin
   r := public.e10_org_inv_add_item(v_org, jsonb_build_object('id','__a6c0_a','name','A','qty',5,'cat','Box'), '__a6c0_add');
   if (r->>'ok')::boolean then ok:=ok+1; else bad:=bad||' add'; end if;
   if public.e10_org_inv_get(v_org,'__a6c0_a') is not null then ok:=ok+1; else bad:=bad||' get'; end if;
-  if jsonb_array_length(public.e10_org_inv_list(v_org)) >= 1 then ok:=ok+1; else bad:=bad||' list'; end if;
+  if jsonb_array_length(public.e10_org_inv_page(v_org,null,100,'{}'::jsonb)->'items') >= 1 then ok:=ok+1; else bad:=bad||' page'; end if;
   if public.e10_org_buyer_suggest(v_sess,'') is not null then ok:=ok+1; else bad:=bad||' buyer'; end if;
   -- NOTE: redeem_code has an INSERT side effect, so it must be called in its own statement before the visibility
   -- check (a single `if redeem()=v_sess and exists(...)` would evaluate exists() on the pre-insert snapshot).
@@ -75,7 +75,7 @@ begin
     if v_rr=v_sess and v_rc=1 then ok:=ok+1; else bad:=bad||' redeem'; end if;
   end;
   -- (c) adversarial
-  begin perform public.e10_org_inv_list(v_orgb); bad:=bad||' xorg_member'; exception when sqlstate '42501' then ok:=ok+1; end;
+  begin perform public.e10_org_inv_page(v_orgb,null,100,'{}'::jsonb); bad:=bad||' xorg_member'; exception when sqlstate '42501' then ok:=ok+1; end;
   begin perform public.e10_org_inv_edit_item(v_org,'__a6c0_bitem',jsonb_build_object('name','x'),'__a6c0_xedit',null); bad:=bad||' xorg_entity'; exception when sqlstate '42501' then ok:=ok+1; end;
   if public.e10_org_redeem_code('__a6c0_bogus') is null then ok:=ok+1; else bad:=bad||' invalidcode'; end if;
   perform set_config('request.jwt.claims', json_build_object('sub',v_nocap::text,'role','authenticated')::text, true);

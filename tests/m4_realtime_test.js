@@ -1,7 +1,7 @@
-// Element 10 — M4 realtime cutover test. The inventory read source is now relational (e10_inv_list) and
+// Element 10 — M4 realtime cutover test. The inventory read source is now relational (e10_inv_page, keyset-paginated) and
 // a second session must see per-row changes via realtime WITHOUT a reload. Session B = a headless browser
 // running the M4 client (local file:// unless E10_APP_URL is set); Session A = a supabase-js client issuing
-// the authoritative RPCs. Asserts: initial load from e10_inv_list; add/edit(qty)/reserve/delete each patch
+// the authoritative RPCs. Asserts: initial load via e10_inv_page paging; add/edit(qty)/reserve/delete each patch
 // B's in-memory S.inventory via realtime; out-of-order + duplicate events converge (re-fetch-latest, no
 // dupes/corruption). Service-role teardown. Credentials from env ONLY:
 //   E10_MEMBER_EMAIL/PW (session B page) + E10_ADMIN_EMAIL/PW (session A mutations)
@@ -50,7 +50,7 @@ const rpc = (c, fn, a) => c.rpc(fn, a).then(r => r.error ? { ok: false, msg: r.e
     const waitB = async (pred, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (pred(await bItem())) return true; await sleep(400); } return false; };
 
     const initCount = await bCount();
-    T('session B loaded inventory from rows (e10_inv_list, >0 items)', initCount >= 1, initCount);
+    T('session B loaded inventory from rows (e10_inv_page paging, >0 items)', initCount >= 1, initCount);
     T('session B does not yet have the test item', (await bItem()) === null);
 
     // ── ADD (session A) → realtime INSERT on e10_inventory_items → B sees it, no reload ──

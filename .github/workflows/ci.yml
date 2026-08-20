@@ -121,6 +121,11 @@ jobs:
         # ledger outlives items under a hostile identity; receipts server-only (no authenticated grant); anon zero access;
         # delegate authority census 0. Proofs only — a gap would be a FINDING, not an in-gate fix.
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a7_hostile_matrix_test.sql
+      - name: STEP8 bounded-reads gate (keyset pagination, server-side filters, retired e10_inv_list, bounded history)
+        # e10_inv_list/e10_org_inv_list RETIRED; e10_org_inv_page keyset-paginates with no skip/dup + server-side filters
+        # + clamped limit + cross-org 42501; e10_org_inv_history org-scoped, newest-first, reads a hard-deleted item's
+        # movement (ledger outlives items, no FK); the 55 A6c.1 policy predicates + mutation delegate bodies untouched.
+        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/step8_bounded_reads_test.sql
       - name: Schema reproducibility (re-apply migrations cleanly)
         run: supabase db reset
       - name: Default-privileges regression probe (born-locked; zero anon-executable functions)
