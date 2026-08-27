@@ -43,7 +43,8 @@ module.exports = async ({w,d,pf,S,$,setVal,clickReal,tick,ok,info})=>{
       const id=el.id||el.getAttribute('placeholder')||'(anon input)';
       let typed=''; let replaced=false; let cur=el;
       try{
-        for(const ch of 'blue'){
+        const SMP=(el.type==='number')?'1234':'blue';
+        for(const ch of SMP){
           cur = (el.id && d.getElementById(el.id)) || cur;   // RE-ACQUIRE: the node may have been replaced
           if(cur!==el) replaced=true;
           cur.focus();
@@ -55,7 +56,8 @@ module.exports = async ({w,d,pf,S,$,setVal,clickReal,tick,ok,info})=>{
       }catch(e){ ok(`[${s.name}] input "${id}" accepts typing`, false, e.message); continue; }
       const live=(el.id && d.getElementById(el.id))||cur;
       const val=live.value;
-      ok(`[${s.name}] "${id}" types forward (not reversed)`, val==='blue'||val.endsWith('blue'), 'got "'+val+'"');
+      const SMPX=(el.type==='number')?'1234':'blue';
+      ok(`[${s.name}] "${id}" types forward (not reversed)`, (val||'').endsWith(SMPX), 'expected …'+SMPX+' got "'+val+'"');
       // caret: only meaningful if the node was REPLACED during typing (the real defect class).
       if(replaced){
         ok(`[${s.name}] "${id}" survives self-rerender with caret intact`,
@@ -89,6 +91,60 @@ module.exports = async ({w,d,pf,S,$,setVal,clickReal,tick,ok,info})=>{
     }
   }
 
+  // ---------- 2b. DIALOG / OPENER SURFACES (page routes are not enough) ----------
+  // Openers live behind buttons and were invisible to a route-only sweep. Every
+  // exported opener is invoked directly, then its dialog is swept and dismissed.
+  const openers=Object.keys(pf).filter(k=>/^(open|draw)[A-Z]/.test(k) && typeof pf[k]==='function');
+  info('openers discovered', openers.join(', ')||'none');
+  for(const k of openers){
+    const ov=$('#ovhost'); if(ov) ov.innerHTML='';
+    let threw=null;
+    try{ pf[k](); }catch(e){ threw=e.message; }
+    await tick(30);
+    const host=$('#ovhost'); const opened=!!(host&&host.innerHTML);
+    if(threw) info(`opener ${k}`, 'threw (may need args): '+threw.slice(0,50));
+    if(!opened) continue;
+    // every dialog input types forward; every dialog button is clickable
+    const ins=[...host.querySelectorAll('input[type=text],input:not([type]),input[type=number]')].slice(0,6);
+    for(const el of ins){
+      let cur=el, typed='';
+      const SAMPLE=(el.type==='number')?'1234':'blue';
+      try{ for(const ch of SAMPLE){ cur=(el.id&&d.getElementById(el.id))||cur; cur.focus(); typed+=ch; cur.value=typed;
+             try{cur.setSelectionRange(typed.length,typed.length);}catch(_){}
+             cur.dispatchEvent(new w.Event('input',{bubbles:true})); await tick(6); } }catch(e){}
+      const live=(el.id&&d.getElementById(el.id))||cur;
+      ok(`[dialog ${k}] "${el.id||'input'}" types forward`, (live.value||'').endsWith(SAMPLE), 'expected …'+SAMPLE+' got "'+live.value+'"');
+    }
+    d.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Escape',bubbles:true})); await tick(25);
+    const stuck=!!($('#ovhost')||{innerHTML:''}).innerHTML && !d.querySelector('#confirmscrim');
+    ok(`[dialog ${k}] dismisses on Escape`, !stuck, stuck?'still open':'');
+    const ov2=$('#ovhost'); if(ov2) ov2.innerHTML='';
+  }
+
+  // ---------- 2c. ENTITLEMENT: EVERY opener and mutator must fail closed ----------
+  if(w.setEnt){
+    w.setEnt(false); await tick(30);
+    const c0=d.querySelector('#confirmscrim');
+    if(c0){ const dd=[...c0.querySelectorAll('button')].find(b=>/discard/i.test(b.textContent)); dd&&clickReal(dd); await tick(25); }
+    // Only CARDS-VERTICAL openers must refuse; core surfaces (products, vendors,
+    // product setup) legitimately open in a core org. A build may declare
+    // pf.VERTICAL_OPENERS; otherwise this name heuristic applies and is labelled.
+    const declared=Array.isArray(pf.VERTICAL_OPENERS)?pf.VERTICAL_OPENERS:null;
+    const isVertical=k=>declared? declared.includes(k)
+      : (/instance|card|listing|sell|sale|conflict|attest|checklist|costassign|acq/i.test(k)
+         && !/^openForm$|vendor|import|config|ladder/i.test(k));
+    if(!declared) info('vertical-opener detection','NAME HEURISTIC — a build should export pf.VERTICAL_OPENERS to make this exact');
+    for(const k of openers.filter(isVertical)){
+      const ov=$('#ovhost'); if(ov) ov.innerHTML='';
+      try{ pf[k](); }catch(e){}
+      await tick(25);
+      const opened=!!(($('#ovhost')||{innerHTML:''}).innerHTML);
+      ok(`[cards-off] vertical opener ${k} refuses to open`, !opened, opened?'OPENED with entitlement off':'');
+      const ov2=$('#ovhost'); if(ov2) ov2.innerHTML='';
+    }
+    w.setEnt(true); await tick(25);
+  }
+
   // ---------- 3. CARDS-OFF SWEEP ON EVERY SURFACE ----------
   if(w.setEnt){
     w.setEnt(false); await tick(40);
@@ -98,6 +154,25 @@ module.exports = async ({w,d,pf,S,$,setVal,clickReal,tick,ok,info})=>{
       const scan=pf.scanCardsOff&&pf.scanCardsOff();
       ok(`[cards-off @ ${s.name}] scan clean`, !scan||scan.hits.length===0, scan?JSON.stringify(scan.hits):'n/a'); }
     w.setEnt(true); await tick(30);
+  }
+
+  // ---------- 3b. CARDS-OFF *DATA* (the term scan cannot see this) ----------
+  // A core org holding cards-vertical ROWS is a leak even when no forbidden WORD
+  // renders — e.g. seeded sales venues named "Whatnot"/"eBay". Check the data,
+  // not just the vocabulary.
+  const beforeOrg=S.org;
+  const coreOrg=(pf.ORGS&&Object.keys(pf.ORGS).find(o=>o!==beforeOrg))||'B';
+  if(w.setOrg){ w.setOrg(coreOrg); await tick(40);
+    const cc=d.querySelector('#confirmscrim');
+    if(cc){ const dd=[...cc.querySelectorAll('button')].find(b=>/discard/i.test(b.textContent)); dd&&clickReal(dd); await tick(25); }
+    const verticalAccessors=['cardInstances','acquisitions','salesChannels','listings','dispositions','saleConflicts','channelSaleReports'];
+    for(const a of verticalAccessors){
+      if(typeof pf[a]!=='function') continue;
+      let rows=[]; try{ rows=pf[a]()||[]; }catch(e){ continue; }
+      ok(`[cards-off DATA] ${a}() is empty in a core org`, rows.length===0,
+         rows.length? rows.length+' rows: '+JSON.stringify(rows.slice(0,2)).slice(0,90) : '');
+    }
+    w.setOrg(beforeOrg); await tick(30);
   }
 
   // ---------- 4. UNCAUGHT ERRORS OVERALL ----------

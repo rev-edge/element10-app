@@ -14,14 +14,22 @@ These project instructions supplement the global engineering brief.
 4. Inspect the current implementation and nearest equivalent pattern.
 5. Separate planning from implementation.
 
-## Working model (2026-08-03)
+## Working model (2026-08-24 — time-boxed sprints, supersedes checkpoints)
 
-- Work runs in **CHECKPOINTS, not per-gate stop/start.** A dispatch is a
-  **charter**: a batch of gates with a purpose and boundaries. Self-review each
-  gate, record the result, and continue without waiting for external
-  acceptance.
-- **Self-recorded gate results are PROVISIONAL.** Only the CPI writes ledger
-  rows, and only at the checkpoint, for the batch.
+- Work runs in **SPRINTS**: one dispatch, one delivery, scoped to roughly an
+  hour. Sprints are numbered in `SPRINT_PLAN_INVENTORY.md`; your charter names
+  which sprint you are running.
+- **Scope is the control, not the clock.** You cannot measure an hour and must
+  not try. Finish the sprint's named deliverable and evidence it. **Never stop
+  mid-feature to respect a time budget** — a half-built surface is worse than a
+  long sprint. If the scope turns out to be materially larger than the sprint
+  describes, say so in the delivery and let the CPI resize the remaining plan.
+- **Every sprint ends in a truthful, usable state.** Leaving a capability
+  unbuilt is fine. Leaving one half-built, or shipping a control that implies a
+  capability that is not there, is not.
+- **Self-recorded sprint results are PROVISIONAL.** Only the CPI writes ledger
+  rows. The CPI audits every sprint return; the operator accepts at feature
+  boundaries (end of a PF-C), not at every sprint.
 - **HARD STOPS halt the batch immediately**: a schema/capability/tenancy/
   financial/channel/lifecycle contract is needed · a commercial ruling is
   needed (how the business operates) · a finding you cannot disposition ·
@@ -58,6 +66,23 @@ browser. A renderer outage degrades the render class only — disclosed by
 scenario id — and never blocks a gate. Deliver your build to the shared folder
 (or a drop zip) as soon as it compiles: a build only you can reach cannot be
 independently verified.
+
+## Artifact reachability — inputs and outputs both (standing rule 15)
+
+Every artifact a charter names as an input or an output lands in the **shared
+folder** with its **SHA-256 and byte size**. The charter author supplies the
+inputs; you relay the outputs. Neither side cites a path the other cannot reach.
+
+- Report the path you actually wrote to, not the path you intend it to live at
+  eventually. "Delivered to `docs/…`" when the file is in your workspace costs a
+  review cycle.
+- **If a charter names an input you cannot reach, STOP and hand it up.** That is
+  the charter author's defect, not yours to work around, and not yours to
+  substitute a plausible-looking file for.
+- **Never census, audit, or build against a source whose identity is not
+  hash-pinned.** A stale clone under a repo-like name returns a clean result that
+  is entirely false. This happened on 2026-08-20; the agent stopped, which was
+  right, and the stale copy is now renamed `DO_NOT_CENSUS__…`.
 
 ## Workflow responsibility
 

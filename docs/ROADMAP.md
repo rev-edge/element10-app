@@ -12,15 +12,22 @@ checkpoint-local control is not progress if the operator is stranded after using
 
 **Engine (Track A):** A6a → A6c.4 → A7 all ACCEPTED; the 97-policy census is
 closed and the multi-tenant model is proven against 11 hostile identity classes
-on staging. A8's cutover plan is accepted (plan only). Current work is the
-**C-REHEARSE** checkpoint: the full P0 rehearsal against a production-shaped
-restore. **Production is untouched and execution requires the operator's
-explicit go.**
+on staging. A8's cutover plan, C-REHEARSE, and A8-PREP are all ACCEPTED. Current
+work is **A8-DRILL2**: P4/P5 recovery rehearsed as a backup-restore drill with
+real recovery time, plus lock contention under concurrent writers. **Production
+is untouched and execution requires the operator's explicit go** — with F6 on
+the table: P4 is effectively irreversible, recovery is backup-restore plus a
+coordinated client revert.
 
-**Surface (Track B):** the singles supply arc — acquire → intake → identify →
-cost — is complete through PF-C-S2.3 (landed cost + acquisition channel).
-Current work is the **C-SELL** checkpoint: listings model revision, then
-selling, the listings surface, and the double-sale guard proven in the UI.
+**Surface (Track B):** the singles arc — acquire → intake → identify → cost →
+list → sell — is complete through C-SELL.1. Current work is **C-POLISH**
+(friction fixes, connective links, duplicate/archive, bulk management,
+pagination): CPI audit passed 2026-08-11, awaiting operator acceptance. Then S4
+repack and S5 margin reporting close the arc.
+
+**Stale-status note (2026-08-11):** the two paragraphs above were four
+checkpoints out of date. Track status lives in BOARD.md; this file summarizes it
+and must be re-read against the board whenever a ledger row is written.
 
 **Model gates, in dependency order:**
 - **PF-M3.1** — listings; blocks S3 selling (in the C-SELL charter).
