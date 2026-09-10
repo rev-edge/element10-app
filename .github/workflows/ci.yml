@@ -149,6 +149,8 @@ jobs:
         run: |
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x4d_receipt_posting_test.sql
           node tests/ta_x4d_receipt_reverse_concurrent_test.js
+      - name: TA-X5a typed intake and lifecycle foundation
+        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x5a_typed_intake_lifecycle_test.sql
       - name: Schema reproducibility (re-apply migrations cleanly)
         run: supabase db reset
       - name: Default-privileges regression probe (born-locked; zero anon-executable functions)
