@@ -12,12 +12,16 @@ This proposal separates five permissions that must not be inferred from one anot
 | Read actual invoice, receipt cost, credits, and allocations | `act.view_financial_estimates` permits estimates. It is not approval for actual commercial-document disclosure. | Approve a distinct actual-cost or financial-document read capability and its role defaults, or explicitly broaden the existing capability. | Actual-cost relations are server-only. PO estimate lines retain their existing capability gate. |
 | Use a receiving location | `e10.can_receive_at(org, location)` requires an active location and either org-admin status or an explicit role-location `can_receive` grant. | Decide only whether org admins should retain the implicit all-location override. | Inactive, missing, and foreign-org locations are denied. |
 
-Recommended minimal vocabulary:
+Recommended configurable vocabulary:
 
-- `purchase_order.create`: admin and manager.
-- `purchase_order.approve`: admin only.
-- `act.create_receiving`: retain for admin and manager.
-- `financial.actual_cost.read`: admin by default; add other roles only by explicit owner choice.
-- Keep location grants independent from all four capabilities.
+- `purchase_order.create` and `purchase_order.amend`: independent organization-scoped grants.
+- `purchase_order.approve`: independent from create/amend so separation of duty can be configured.
+- `act.create_receiving`: retain as the existing receipt capability unless renamed by the later namespace reconciliation.
+- `financial.actual_cost.read`: independent from estimate access.
+- Location grants remain action-specific and independent from the organization capabilities. Receiving at a location does not imply PO creation, approval, or financial visibility.
+- Custom roles use the existing tenant role-permission engine. Suggested admin, manager, streamer, and ops mappings are templates, not hardcoded business rules.
+- Approval thresholds and maker-checker requirements belong to organization policy and may narrow capability grants. They must not be bypassed merely because a user has create/amend authority.
+
+Safe defaults preserve all existing grants and add no new grant automatically. The owner decision is the capability vocabulary and policy shape, not a blanket assignment to role names. Organizations can then configure supported combinations without weakening tenant isolation or fail-closed behavior.
 
 Additional decisions remain separate: over-receipt authority, landed-cost allocation method, payment/accounting recognition, and vendor-output publication. None is implied by this proposal.
