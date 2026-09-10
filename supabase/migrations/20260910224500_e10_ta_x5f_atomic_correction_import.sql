@@ -113,7 +113,7 @@ begin
   if existing.request_fingerprint<>fp then raise exception using errcode='22023',message='idempotency_key_mismatch'; end if;
   return public._e10_org_commit_intake_x5d(p_org,p_batch_id,p_expected_review_revision,'corrected:'||p_idempotency_key)||jsonb_build_object('corrected',true);
  end if;
- select id,status,review_revision,supersedes_intake_batch_id into batch_state from public.e10_intake_batches
+ select id,status,review_revision,supersedes_intake_batch_id,source_kind,source_connection_id into batch_state from public.e10_intake_batches
   where organization_id=p_org and id=p_batch_id for update;
  if not found then raise exception using errcode='42501',message='intake_batch_access_denied'; end if;
  if batch_state.supersedes_intake_batch_id is null then raise exception using errcode='55000',message='corrected_commit_requires_changed_source'; end if;
@@ -133,10 +133,13 @@ begin
     on r.organization_id=p_org and r.batch_id=p_batch_id and r.source_row_number=(e->>'source_row_number')::bigint
     where r.id is null or r.match_status<>'matched' or r.observation_kind not in ('acquisition_cost','asking_price','completed_sale','estimated_value'))
  then raise exception using errcode='22023',message='classification_coverage_invalid'; end if;
+ perform pg_advisory_xact_lock(hashtextextended(p_org::text||'|observation-lineage-graph',0));
  if exists(select 1 from jsonb_array_elements(p_classifications) e
    join public.e10_intake_rows current_row on current_row.organization_id=p_org and current_row.batch_id=p_batch_id
     and current_row.source_row_number=(e->>'source_row_number')::bigint
    join public.e10_market_observations prior_observation on prior_observation.organization_id=p_org
+    and prior_observation.source_kind=batch_state.source_kind
+    and prior_observation.source_connection_id is not distinct from batch_state.source_connection_id
    where e->>'classification'='new' and nullif(current_row.raw_payload->>'source_event_id','') is not null
     and prior_observation.raw_payload_snapshot->>'source_event_id'=current_row.raw_payload->>'source_event_id')
  then raise exception using errcode='22023',message='stable_source_event_requires_replacement'; end if;
@@ -149,7 +152,6 @@ begin
     and nullif(prior_observation.raw_payload_snapshot->>'source_event_id','') is not null
     and current_row.raw_payload->>'source_event_id'<>prior_observation.raw_payload_snapshot->>'source_event_id')
  then raise exception using errcode='22023',message='stable_source_event_mismatch'; end if;
- perform pg_advisory_xact_lock(hashtextextended(p_org::text||'|observation-lineage-graph',0));
  if exists(select 1 from jsonb_array_elements(p_classifications) e
    left join public.e10_market_observations o on o.organization_id=p_org and o.id=(e->>'superseded_observation_id')::uuid
    left join public.e10_market_observation_supersessions s on s.organization_id=p_org and s.superseded_observation_id=o.id
