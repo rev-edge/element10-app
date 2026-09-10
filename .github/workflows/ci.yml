@@ -133,6 +133,8 @@ jobs:
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x1_identity_foundation_test.sql
       - name: TA-X2 location and supplier foundation (authorized destinations, offerings, hostile tenant boundary)
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x2_location_supplier_test.sql
+      - name: TA-X3a purchasing documents (separate objects, allocations, comments, source dedup)
+        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3a_purchasing_documents_test.sql
       - name: Schema reproducibility (re-apply migrations cleanly)
         run: supabase db reset
       - name: Default-privileges regression probe (born-locked; zero anon-executable functions)

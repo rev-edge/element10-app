@@ -4,15 +4,16 @@ begin;
 do $$
 declare
   org_a uuid := 'e1000000-0000-4000-8000-0000000000a6';
-  org_b uuid := 'e1000000-0000-4000-8000-00000000e2b0';
   role_b uuid;
   user_member uuid := 'a7000000-0000-4000-8000-00000000e2a1';
   user_admin uuid := 'a7000000-0000-4000-8000-00000000e2a2';
   user_nogrant uuid := 'a7000000-0000-4000-8000-00000000e2a3';
   user_b uuid := 'a7000000-0000-4000-8000-00000000e2b1';
+  org_b uuid := 'e1000000-0000-4000-8000-00000000e2b0';
   loc_a uuid := 'a7000000-0000-4000-8000-00000000e211';
   loc_b uuid := 'a7000000-0000-4000-8000-00000000e212';
   loc_inactive uuid := 'a7000000-0000-4000-8000-00000000e213';
+  loc_foreign uuid := 'a7000000-0000-4000-8000-00000000e214';
   product_a uuid := 'a7000000-0000-4000-8000-00000000e221';
   config_a uuid := 'a7000000-0000-4000-8000-00000000e222';
   version_a uuid := 'a7000000-0000-4000-8000-00000000e223';
@@ -37,7 +38,8 @@ begin
   insert into public.e10_locations(id,organization_id,code,name,status) values
     (loc_a,org_a,'A','Alpha Receiving','active'),
     (loc_b,org_a,'B','Beta Receiving','active'),
-    (loc_inactive,org_a,'C','Closed Receiving','inactive');
+    (loc_inactive,org_a,'C','Closed Receiving','inactive'),
+    (loc_foreign,org_b,'D','Foreign Receiving','active');
   insert into public.e10_location_role_permissions(organization_id,location_id,role_id,can_receive) values
     (org_a,loc_a,'e1000000-0000-4000-8000-000000000003',true),
     (org_a,loc_inactive,'e1000000-0000-4000-8000-000000000003',true);
@@ -78,6 +80,10 @@ begin
   if c=0 then ok:=ok+1; else bad:=bad||' cross_supplier='||c; end if;
 
   perform set_config('request.jwt.claims',json_build_object('sub',user_admin::text,'role','authenticated')::text,true);
+  if e10.can_receive_at(org_a,'a7000000-0000-4000-8000-00000000e211') then ok:=ok+1; else bad:=bad||' admin_valid_false'; end if;
+  if not e10.can_receive_at(org_a,'a7000000-0000-4000-8000-00000000e213') then ok:=ok+1; else bad:=bad||' admin_inactive_true'; end if;
+  if not e10.can_receive_at(org_a,'a7000000-0000-4000-8000-00000000efff') then ok:=ok+1; else bad:=bad||' admin_missing_true'; end if;
+  if not e10.can_receive_at(org_a,'a7000000-0000-4000-8000-00000000e214') then ok:=ok+1; else bad:=bad||' admin_foreign_true'; end if;
   select count(*),bool_and(not sole_eligible and eligible_count=2) into c,only_flag
     from public.e10_org_purchase_destinations(org_a);
   if c=2 and only_flag then ok:=ok+1; else bad:=bad||' admin_dest='||c; end if;
@@ -96,8 +102,8 @@ begin
   exception when insufficient_privilege then ok:=ok+1;
   when others then bad:=bad||' cross_org_rpc_wrong='||sqlstate; end;
 
-  if ok=8 then raise notice 'TA-X2 location/supplier gate: PASS (8/8)';
-  else raise exception 'TA-X2 location/supplier gate: FAIL passed=%/8 failures=[%]',ok,bad; end if;
+  if ok=12 then raise notice 'TA-X2 location/supplier gate: PASS (12/12)';
+  else raise exception 'TA-X2 location/supplier gate: FAIL passed=%/12 failures=[%]',ok,bad; end if;
 end $$;
 reset role;
 
