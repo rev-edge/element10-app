@@ -13,6 +13,7 @@
 // Usage from a test:  const { serviceCleanup } = require('./cleanup');  await serviceCleanup(manifest);
 // Standalone:         node tests/cleanup.js path/to/manifest.json   (exit non-zero unless residue is 0)
 const { createClient } = require('@supabase/supabase-js');
+const { Client } = require('pg');
 
 const TEST_NS = /^zz/;                                  // items / shows / idempotency keys live in the zz namespace
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -45,6 +46,36 @@ async function serviceCleanup(manifest) {
   if (workspaceId && workspaceId !== 'shared' && !/^user:/.test(workspaceId)) throw new Error('refuse workspace id: ' + workspaceId);
 
   const svc = createClient(URL, KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+
+  // Native-action lifecycle events now retain movement FKs. For the local stack only, remove the exact
+  // manifested event rows before the old REST cleanup removes their movements. Production is already
+  // refused above, and a non-local URL is refused here rather than receiving privileged test teardown.
+  if (itemIds.length) {
+    const parsed = new globalThis.URL(URL);
+    if (!['127.0.0.1', 'localhost'].includes(parsed.hostname)) {
+      throw new Error('serviceCleanup: lifecycle-event teardown is local-only; refusing non-local target');
+    }
+    const db = new Client({ connectionString: 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' });
+    await db.connect();
+    try {
+      await db.query('begin');
+      await db.query('alter table public.e10_commercial_events disable trigger e10_commercial_events_append_only_trg');
+      await db.query(`delete from public.e10_integration_outbox
+        where commercial_event_id in (
+          select id from public.e10_commercial_events
+          where subject_type='inventory_item' and subject_id=any($1::text[])
+        )`, [itemIds]);
+      await db.query(`delete from public.e10_commercial_events
+        where subject_type='inventory_item' and subject_id=any($1::text[])`, [itemIds]);
+      await db.query('alter table public.e10_commercial_events enable trigger e10_commercial_events_append_only_trg');
+      await db.query('commit');
+    } catch (e) {
+      await db.query('rollback').catch(() => {});
+      throw e;
+    } finally {
+      await db.end();
+    }
+  }
 
   // Children first (movements / receipts / reservations reference item_id), then items, then sessions.
   if (itemIds.length) {
