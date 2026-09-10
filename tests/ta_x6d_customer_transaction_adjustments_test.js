@@ -24,11 +24,11 @@ async function main() {
   let tx; let line; let line2; let otherTx; let otherLine; let secondTx; let secondLine;
   const draftIds = [];
   try {
-    const baselineGrants = (await admin.query("select count(*)::int n from public.e10_organization_role_permissions where capability='act.adjust_customer_transactions'")).rows[0].n;
+    const baselineGrants = (await admin.query("select count(*)::int n from public.e10_organization_role_permissions where capability in ('act.adjust_customer_transactions','act.reconcile_customer_transactions')")).rows[0].n;
     if (Number(baselineGrants) !== 0) throw new Error(`adjust capability received ${baselineGrants} default grants`);
     await admin.query("insert into auth.users(id,instance_id,aud,role,email,created_at,updated_at) values($1,'00000000-0000-0000-0000-000000000000','authenticated','authenticated',$2,now(),now())", [ids.user, `${run}@x.invalid`]);
     await admin.query("insert into public.e10_organization_roles(id,organization_id,key,name,is_system) values($1,$2,$3,'X6d test',false)", [ids.role, org, run]);
-    await admin.query("insert into public.e10_organization_role_permissions values($1,$2,'act.prepare_customer_transactions',true),($1,$2,'act.approve_customer_transactions',true),($1,$2,'act.post_customer_transactions',true),($1,$2,'act.adjust_customer_transactions',true),($1,$2,'act.manage_customers',true)", [org, ids.role]);
+    await admin.query("insert into public.e10_organization_role_permissions values($1,$2,'act.prepare_customer_transactions',true),($1,$2,'act.approve_customer_transactions',true),($1,$2,'act.post_customer_transactions',true),($1,$2,'act.adjust_customer_transactions',true),($1,$2,'act.reconcile_customer_transactions',true),($1,$2,'act.manage_customers',true)", [org, ids.role]);
     await admin.query("insert into public.e10_organization_memberships(organization_id,user_id,role_id,status) values($1,$2,$3,'active')", [org, ids.user, ids.role]);
     await admin.query("insert into public.e10_customers(id,organization_id,display_name) values($1,$2,'X6d Customer')", [ids.customer, org]);
     for (const c of [a, b]) {
@@ -72,6 +72,8 @@ async function main() {
     await b.query('set role authenticated');
 
     const call = 'select public.e10_org_adjust_customer_transaction($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19) r';
+    const finalizeCall = 'select public.e10_org_finalize_customer_transaction_component($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13) r';
+    const finalizeArgs = (theTx, theLine, component, amount, suffix) => [org,theTx,theLine,component,amount,'CAD',`reviewed ${suffix}`,'manual',null,`${run}-${suffix}`,`${run}-${suffix}`,JSON.stringify({review:suffix}),`${run}-${suffix}`];
     const first = (await a.query(call, args(tx, line, 'partial', 'refund', 'decrease', 10, null, null))).rows[0].r;
     if (first.paid_changed || first.settlement_changed || first.inventory_returned) throw new Error('adjustment asserted payment, settlement, or inventory return');
     const replay = (await a.query(call, args(tx, line, 'partial', 'refund', 'decrease', 10, null, null))).rows[0].r;
@@ -87,6 +89,12 @@ async function main() {
     denied = false;
     try { await a.query(call, args(tx, line2, 'unknown-component', 'refund', 'decrease', null, 1, null)); } catch (e) { denied = e.code === '22023' && e.message === 'adjustment_component_unknown'; }
     if (!denied) throw new Error('unknown monetary component was adjusted');
+    const zeroFinal = (await a.query(finalizeCall, finalizeArgs(tx,line2,'shipping',0,'finalize-shipping-zero'))).rows[0].r;
+    const zeroReplay = (await a.query(finalizeCall, finalizeArgs(tx,line2,'shipping',0,'finalize-shipping-zero'))).rows[0].r;
+    const zeroBalanceRaw=await awaitBalance(admin,line2,'shipping');const zeroBalance=Number(zeroBalanceRaw);
+    if (!zeroReplay.replay || zeroReplay.finalization_id!==zeroFinal.finalization_id || zeroBalance!==0) throw new Error(`zero finalization or replay failed ${JSON.stringify({zeroFinal,zeroReplay,zeroBalanceRaw,zeroBalance})}`);
+    await a.query(call,args(tx,line2,'post-finalization-increase','correction','increase',null,2,null));
+    if (Number(await awaitBalance(admin,line2,'shipping'))!==2) throw new Error('delta after zero finalization did not reconstruct');
     denied = false;
     try { await a.query(call, args(tx, line, 'bad-currency', 'refund', 'decrease', 1, null, null, 'bad-currency', 'USD')); } catch (e) { denied = e.code === '22023' && e.message === 'adjustment_currency_mismatch'; }
     if (!denied) throw new Error('currency mismatch was accepted');
@@ -126,6 +134,34 @@ async function main() {
     denied = false;
     try { await a.query(call, args(tx, secondLine, 'wrong-transaction-line-pair', 'refund', 'decrease', 1, null, null)); } catch (e) { denied = e.code === '42501' && e.message === 'adjustment_line_denied'; }
     if (!denied) throw new Error('same-org mismatched transaction and line were accepted');
+
+    const staleFinalizations = await bounded(Promise.allSettled([
+      a.query(finalizeCall,finalizeArgs(secondTx,secondLine,'merchandise',2,'finalize-merch-a')),
+      b.query(finalizeCall,finalizeArgs(secondTx,secondLine,'merchandise',3,'finalize-merch-b')),
+    ]));
+    if (staleFinalizations.filter(x=>x.status==='fulfilled').length!==1 || staleFinalizations.filter(x=>x.status==='rejected' && x.reason.code==='40001').length!==1) throw new Error(`stale finalization race failed ${JSON.stringify(staleFinalizations)}`);
+    const finalVsRefund = await bounded(Promise.allSettled([
+      a.query(finalizeCall,finalizeArgs(secondTx,secondLine,'shipping',4,'finalize-v-refund')),
+      b.query(call,args(secondTx,secondLine,'refund-v-finalize','refund','decrease',null,1,null)),
+    ]));
+    if (finalVsRefund[0].status!=='fulfilled' || !((finalVsRefund[1].status==='fulfilled') || (finalVsRefund[1].status==='rejected' && finalVsRefund[1].reason.code==='22023'))) throw new Error(`finalization/refund race unsafe ${JSON.stringify(finalVsRefund)}`);
+    const shipBalance=Number(await awaitBalance(admin,secondLine,'shipping'));
+    if (![3,4].includes(shipBalance)) throw new Error(`finalization/refund balance ${shipBalance}`);
+    const collisionA=args(secondTx,secondLine,'tuple-a','correction','increase',null,1,null);collisionA[14]=`${run}-a#b`;collisionA[15]='c';
+    const collisionB=args(secondTx,secondLine,'tuple-b','correction','increase',null,1,null);collisionB[14]=`${run}-a`;collisionB[15]='b#c';
+    await a.query(call,collisionA);await a.query(call,collisionB);
+    const duplicateTuple=[...collisionA];duplicateTuple[11]='reviewed duplicate tuple';duplicateTuple[17]=JSON.stringify({review:'duplicate tuple'});duplicateTuple[18]=`${run}-tuple-duplicate`;
+    denied=false;try{await a.query(call,duplicateTuple);}catch(e){denied=e.code==='23505'&&e.message==='adjustment_source_component_already_recorded';}
+    if(!denied) throw new Error('exact source tuple duplicate was accepted');
+    const invalidCases=[
+      args(secondTx,secondLine,'invalid-negative','correction','increase',-1,null,null),
+      args(secondTx,secondLine,'invalid-empty','correction','increase',null,null,null),
+      args(secondTx,secondLine,'invalid-source','correction','increase',1,null,null),
+    ];invalidCases[2][12]='native';
+    for(const invalid of invalidCases){denied=false;try{await a.query(call,invalid);}catch(e){denied=e.code==='22023';}if(!denied)throw new Error('replacement delta writer lost amount/provenance validation');}
+    await admin.query("delete from public.e10_organization_role_permissions where organization_id=$1 and role_id=$2 and capability='act.reconcile_customer_transactions'",[org,ids.role]);
+    denied=false;try{await a.query(finalizeCall,finalizeArgs(tx,line2,'tax',0,'missing-reconcile-cap'));}catch(e){denied=e.code==='42501'&&e.message==='finalize_customer_component_denied';}
+    if(!denied)throw new Error('missing reconciliation capability finalized a component');
     await admin.query("delete from public.e10_organization_role_permissions where organization_id=$1 and role_id=$2 and capability='act.adjust_customer_transactions'", [org, ids.role]);
     denied = false;
     try { await a.query(call, args(tx, line, 'missing-cap', 'correction', 'increase', 1, null, null)); } catch (e) { denied = e.code === '42501' && e.message === 'adjust_customer_transaction_denied'; }
@@ -136,12 +172,15 @@ async function main() {
     if (proof.linked !== proof.adjustments || proof.adjustments !== proof.idem) throw new Error(`atomic adjustment/event proof failed ${JSON.stringify(proof)}`);
     const acl = (await admin.query("select has_function_privilege('anon',p.oid,'execute') anon,has_function_privilege('authenticated',p.oid,'execute') auth from pg_proc p where p.oid='public.e10_org_adjust_customer_transaction(uuid,uuid,uuid,text,text,text,numeric,numeric,numeric,timestamptz,text,text,text,text,text,text,uuid,jsonb,text)'::regprocedure")).rows[0];
     if (acl.anon || !acl.auth) throw new Error(`wrong RPC ACL ${JSON.stringify(acl)}`);
-    console.log('TA-X6d.1 customer adjustments: PASS (reviewed semantics, exact retry, unknown/currency denial, atomic history, over-refund and double-cancel serialization)');
+    const finalizeAcl=(await admin.query("select has_function_privilege('anon',p.oid,'execute') anon,has_function_privilege('authenticated',p.oid,'execute') auth from pg_proc p where p.oid='public.e10_org_finalize_customer_transaction_component(uuid,uuid,uuid,text,numeric,text,text,text,text,text,text,jsonb,text)'::regprocedure")).rows[0];
+    if(finalizeAcl.anon||!finalizeAcl.auth)throw new Error(`wrong finalization RPC ACL ${JSON.stringify(finalizeAcl)}`);
+    console.log('TA-X6d.2 customer adjustments/finalization: PASS (known-zero baseline, later deltas, stale/finalize-refund races, tuple-safe source identity, hostile tenant, cancellation state)');
   } finally {
     await Promise.all([a.query('rollback').catch(() => {}), b.query('rollback').catch(() => {})]);
     await admin.query('begin').catch(() => {});
     await admin.query('set local session_replication_role=replica').catch(() => {});
-    await admin.query("delete from public.e10_commercial_events where idempotency_key like $1 or idempotency_key like $2", [`customer-adjustment:${run}%`, `transaction-post:${run}%`]).catch(() => {});
+    await admin.query("delete from public.e10_commercial_events where idempotency_key like $1 or idempotency_key like $2 or idempotency_key like $3", [`customer-adjustment:${run}%`, `transaction-post:${run}%`, `customer-component-finalization:${run}%`]).catch(() => {});
+    await admin.query('delete from public.e10_customer_transaction_component_finalizations where transaction_id=any($1::uuid[])', [[tx, secondTx, otherTx].filter(Boolean)]).catch(() => {});
     await admin.query('delete from public.e10_customer_transaction_adjustments where transaction_id=any($1::uuid[])', [[tx, secondTx, otherTx].filter(Boolean)]).catch(() => {});
     await admin.query("delete from public.e10_customer_transaction_lines where source_line_id like $1", [`${run}%`]).catch(() => {});
     await admin.query('delete from public.e10_customer_transactions where id=any($1::uuid[])', [[tx, secondTx, otherTx].filter(Boolean)]).catch(() => {});
@@ -163,11 +202,16 @@ async function main() {
       (select count(*) from public.e10_organization_memberships where user_id=any($1::uuid[]))+
       (select count(*) from public.e10_customers where id=any($3::uuid[]))+
       (select count(*) from public.e10_customer_commercial_receipts where idempotency_key like $4)+
+      (select count(*) from public.e10_customer_transaction_component_finalizations where idempotency_key like $4)+
       (select count(*) from public.e10_customer_transaction_lines where source_line_id like $4)+
       (select count(*) from public.e10_organizations where id=$5) n`, [[ids.user, ids.otherUser], [ids.role, ids.otherRole], [ids.customer, ids.otherCustomer], `${run}%`, ids.otherOrg])).rows[0].n;
     await Promise.all([admin.end(), a.end(), b.end()]);
     if (Number(residue) !== 0) throw new Error(`X6d teardown residue ${residue}`);
   }
+}
+
+async function awaitBalance(client,line,component) {
+  return (await client.query('select e10.customer_transaction_component_balance($1,$2,$3) balance',[org,line,component])).rows[0].balance;
 }
 
 main().catch(e => { console.error(e.stack); process.exit(1); });

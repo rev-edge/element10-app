@@ -116,7 +116,7 @@ jobs:
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6c4_disclosures_test.sql
       - name: A6c.4 two-connection workspace CAS race (concurrent optimistic-concurrency proof)
         run: bash tests/a6c4_cas_race.sh
-      - name: TA-X6d.1 reviewed customer adjustment and concurrency gate
+      - name: TA-X6d.2 reviewed adjustment, unknown-component finalization and concurrency gate
         run: node tests/ta_x6d_customer_transaction_adjustments_test.js
       - name: A7 hostile two-org matrix (every identity class x both orgs x every census family, real JWTs, specific refusals)
         # docs/A7_HOSTILE_MATRIX.md proven: F1-F8 cross-org denials + legitimate positives under real authenticated JWTs;
