@@ -156,6 +156,9 @@ jobs:
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x5b_intake_lifecycle_writers_test.sql
           node tests/ta_x5b_writers_concurrent_test.js
       - name: TA-X5c native action lifecycle linkage
+        # Receipt occurred_at comes from received_at while created_at remains ingestion time. A pre-X5c receipt
+        # reversed post-X5c gains a provenance-marked origin event and correction lineage in the same transaction.
+        # sale_committed/fulfillment remain operational evidence only, never official customer spend.
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x5c_native_movement_events_test.sql
       - name: Schema reproducibility (re-apply migrations cleanly)
         run: supabase db reset
