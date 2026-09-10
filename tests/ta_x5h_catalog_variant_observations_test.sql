@@ -29,6 +29,11 @@ begin
   replacement_a:=(result->>'observation_id')::uuid;
 
   perform set_config('request.jwt.claims',jsonb_build_object('sub',user_b,'role','authenticated')::text,true);
+  perform set_config('role','authenticated',true);
+  begin perform public.e10_org_resolve_intake_row(org_a,row_a,'match_catalog_variant',variant_id,'hostile cross-org resolution',null,'x5h-hostile-resolve'); raise exception 'cross-org row resolution allowed'; exception when insufficient_privilege then null; end;
+  begin perform public.e10_org_correct_market_observation(org_a,replacement_a,'asking_price','catalog_variant',variant_id,now(),'CAD',999,1,'hostile','{}','hostile correction','x5h-hostile-correct'); raise exception 'cross-org observation correction allowed'; exception when insufficient_privilege then null; end;
+  begin perform 1 from public.e10_current_market_observations where id=replacement_a; raise exception 'authenticated direct current-observation SELECT allowed'; exception when insufficient_privilege then null; end;
+  perform set_config('role','postgres',true);
   result:=public.e10_org_stage_intake(org_b,'api','x5h-source-b','same shared variant',null,'x5h-b',jsonb_build_array(jsonb_build_object('raw_payload','{}'::jsonb,'observation_kind','asking_price','occurred_at','2026-01-02T00:00:00Z','currency','CAD','amount',120)),'x5h-stage-b');
   batch_b:=(result->>'batch_id')::uuid; select id into row_b from public.e10_intake_rows where batch_id=batch_b;
   perform public.e10_org_resolve_intake_row(org_b,row_b,'match_catalog_variant',variant_id,'shared catalog target',null,'x5h-resolve-b');
