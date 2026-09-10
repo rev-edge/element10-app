@@ -58,6 +58,7 @@ async function main() {
     await s.query('set session_replication_role=replica').catch(() => {});
     await s.query("delete from public.e10_commercial_events where idempotency_key like $1 or idempotency_key like $2", [`transaction-post:${x.run}%`, `activity:${x.run}-activity%`]).catch(() => {});
     await s.query("delete from public.e10_customer_activity_attribution_decisions where idempotency_key like $1", [`${x.run}%`]).catch(() => {});
+    await s.query("delete from public.e10_customer_transaction_source_claims where source_line_id like $1", [`${x.run}%`]).catch(() => {});
     await s.query("delete from public.e10_customer_transaction_lines where source_line_id like $1", [`${x.run}%`]).catch(() => {});
     await s.query("delete from public.e10_customer_transactions where source_draft_id in(select id from public.e10_customer_transaction_drafts where id in(select draft_id from public.e10_customer_transaction_draft_revisions where review_note='race'))").catch(() => {});
     await s.query("delete from public.e10_customer_transaction_draft_decisions where idempotency_key like $1", [`${x.run}%`]).catch(() => {});
