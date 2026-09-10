@@ -48,6 +48,21 @@ Status: execution plan and evidence matrix for the owner-authorized September 10
 7. **TA-X7, reporting contracts.** Add bounded permission-scoped queries with explicit scope/grain, full-dataset filtering, grouping, sorting, cursor pagination, source drill-down and metric definitions. Add grading/population/valuation provenance where the underlying facts exist.
 8. **TA-X8, future integration seams.** Add read-only query contracts and reviewable action-draft records. Wishlist may be added independently. Live integrations, scheduled monitors, chatbot behavior and collector showcase remain outside scope.
 
+## Execution evidence, current at `9431eb9`
+
+| Batch | State | Evidence now present | Required remainder |
+|---|---|---|---|
+| TA-X1 | Implemented, CI/staging verified | Stable org product/configuration/version identity, release variants and subjects, provider mappings, generic physical copies; Cards-off and hostile-tenant proofs | Later provider licensing and governed affiliation history remain escalation/design work |
+| TA-X2 | Implemented, CI/staging verified | Org locations and grants, suppliers, configuration-specific offerings, bounded eligible-destination read, predicate hardening | None for the approved foundation slice |
+| TA-X3 | Implemented, CI/staging verified | Separate purchasing headers/lines/allocations/comments, source deduplication, immutable document revisions, fail-closed actual-cost evidence | Original direct receiving without a fabricated PO remains required; unresolved accounting recognition/payment rules remain out of scope |
+| TA-X4 | Implemented, CI/staging verified | Lots, expected allocations, confirmed lot reservations, atomic reserve/consume/release, receipt posting/reversal, concurrency and no-overcommit proofs | Owner rulings still required for over-receipt authority and landed-cost allocation method |
+| TA-X5 | Partial, through X5e CI/staging verified | Typed intake and resolver lifecycle; reviewed evidence commit; native receipt/movement event links; immutable manual correction and reviewed re-import supersession lineage; catalog-only observations; kind/identity correction; stable idempotency and hostile-tenant proofs | **Required before TA-X5 is complete:** atomic corrected-import eligibility so a changed file never exposes old and replacement as simultaneously eligible; explicit same-external-ID changed-file behavior; a current-observation interpretation that excludes superseded evidence; sequential and concurrent cycle/reverse-link acceptance coverage; complete the remaining lifecycle event families required by the framework |
+| TA-X6 | Not started | None | Provisional customer/break observations, reviewed posted transactions, refunds, source reconciliation and double-count prevention |
+| TA-X7 | Not started | Existing bounded inventory reads only | Permission-scoped reporting/screener contracts, full-set filtering before aggregation, explicit grain, cursor, drill-down, definitions and source lineage |
+| TA-X8 | Not started | None | Bounded read-only AI query contracts and reviewable action drafts; no chatbot or silent execution |
+
+TA-X5e commit `9431eb941e5c910f727163dc4544c33f1c5f1464` passed exact-head CI run `34525759880`, clean local replay, A7 hostile matrix 29/29, default-privilege checks, and explicit staging verification. Staging contains migration `20260910223000`; production remains pre-tenant with 12 migrations through `20260716110000`. The observation supersession relation is immutable and preserves both prior evidence and a reviewed re-import's intake row/commit provenance. It does not, by itself, close the acceptance case for an atomic corrected-file import or reporting eligibility during the interval between commit and reconciliation.
+
 ## Verification required for every batch
 
 - New additive migration files only; never edit an applied migration.
