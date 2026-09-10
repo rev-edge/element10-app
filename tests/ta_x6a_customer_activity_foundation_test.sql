@@ -3,7 +3,7 @@ begin;
 do $$
 declare
   a uuid:='e1000000-0000-4000-8000-0000000000a6'; b uuid:=gen_random_uuid(); ua uuid:=gen_random_uuid(); ub uuid:=gen_random_uuid(); ra uuid:=gen_random_uuid(); rb uuid:=gen_random_uuid();
-  ca uuid:=gen_random_uuid(); cb uuid:=gen_random_uuid(); session_a uuid:=gen_random_uuid(); slot_a uuid:=gen_random_uuid(); result jsonb; activity uuid; event_id uuid;
+  ca uuid:=gen_random_uuid(); cb uuid:=gen_random_uuid(); claim_a uuid:=gen_random_uuid(); session_a uuid:=gen_random_uuid(); slot_a uuid:=gen_random_uuid(); result jsonb; activity uuid; event_id uuid;
 begin
   insert into public.e10_organizations(id,name,slug) values(b,'X6a B','x6a-'||replace(b::text,'-',''));
   insert into auth.users(id,instance_id,aud,role,email,created_at,updated_at) values
@@ -13,6 +13,10 @@ begin
   insert into public.e10_organization_role_permissions values(a,ra,'act.record_commercial_events',true),(b,rb,'act.record_commercial_events',true);
   insert into public.e10_organization_memberships(organization_id,user_id,role_id,status) values(a,ua,ra,'active'),(b,ub,rb,'active');
   insert into public.e10_customers(id,organization_id,auth_user_id,display_name,status) values(ca,a,ua,'Customer A','active'),(cb,b,ub,'Customer B','active');
+  insert into public.e10_viewer_handle_claims(id,user_id,whatnot_handle,status,evidence,verified_at,expires_at)
+    values(claim_a,ua,'buyer-a','verified','{}',now(),now()+interval '1 day');
+  insert into public.e10_customer_identity_decisions(organization_id,customer_id,identity_kind,channel,external_account_id,identity_action,verification_basis,verified_user_id,viewer_handle_claim_id,reason,evidence,idempotency_key,request_fingerprint)
+    values(a,ca,'channel_account','whatnot','buyer-a','attach','verified_handle',ua,claim_a,'X6a verified fixture','{}','x6a-verified-fixture','x6a-verified-fixture');
   insert into public.e10_break_sessions(id,organization_id,name,streamer_uid,share_code) values(session_a,a,'X6a Session',ua,'x6a-'||substr(session_a::text,1,8));
   insert into public.e10_break_slots(id,organization_id,session_id,label,price,state,buyer_uid,buyer_handle,position) values(slot_a,a,session_a,'Slot',30,'held',ua,'buyer-a',1);
   perform set_config('request.jwt.claims',jsonb_build_object('sub',ua,'role','authenticated')::text,true);
