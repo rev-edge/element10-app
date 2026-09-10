@@ -33,6 +33,10 @@ begin
      or (select count(*) from public.e10_commercial_events where organization_id=o and subject_id='x5c-item' and event_type='release')<>1 then
     raise exception 'native event types wrong';
   end if;
+  if exists(select 1 from public.e10_commercial_events where organization_id=o and subject_id='x5c-item'
+    and (evidence_quality<>'native_system' or source_connection_id<>'inventory-ledger' or source_event_id is null or correlation_id is null)) then
+    raise exception 'native event envelope incomplete';
+  end if;
   raise notice 'TA-X5c native action linkage: PASS (reserve/release atomic events, rollback atomicity, unknown correction not guessed)';
 end $$;
 rollback;
@@ -97,6 +101,11 @@ begin
   select count(*) into c from public.e10_commercial_events where organization_id=o
     and inventory_movement_id in (original_movement,(reversal->>'movement_id')::uuid);
   if c<>2 then raise exception 'legacy receipt reversal must produce exactly two linked events, got %',c; end if;
+  if exists(select 1 from public.e10_commercial_events where organization_id=o
+    and inventory_movement_id in (original_movement,(reversal->>'movement_id')::uuid)
+    and (evidence_quality<>'native_system' or source_connection_id<>'inventory-ledger' or source_event_id is null)) then
+    raise exception 'legacy/native envelope backfill incomplete';
+  end if;
   raise notice 'TA-X5c.1 source time + legacy reversal linkage: PASS';
 end $$;
 rollback;

@@ -181,6 +181,10 @@ jobs:
       - name: TA-X5h catalog-variant observations
         # A shared catalog target scopes evidence without asserting an owned copy.
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x5h_catalog_variant_observations_test.sql
+      - name: TA-X5i versioned commercial-event envelope
+        run: |
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x5i_versioned_event_envelope_test.sql
+          node tests/ta_x5i_event_concurrent_test.js
       - name: Schema reproducibility (re-apply migrations cleanly)
         run: supabase db reset
       - name: Default-privileges regression probe (born-locked; zero anon-executable functions)
