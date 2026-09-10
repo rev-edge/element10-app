@@ -145,6 +145,10 @@ jobs:
           node tests/ta_x4b_lot_reserve_concurrent_test.js
       - name: TA-X4c lot reservation consume and release
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x4c_lot_transition_test.sql
+      - name: TA-X4d receipt posting and reversal
+        run: |
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x4d_receipt_posting_test.sql
+          node tests/ta_x4d_receipt_reverse_concurrent_test.js
       - name: Schema reproducibility (re-apply migrations cleanly)
         run: supabase db reset
       - name: Default-privileges regression probe (born-locked; zero anon-executable functions)
