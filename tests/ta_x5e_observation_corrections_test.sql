@@ -26,6 +26,12 @@ begin
  result:=public.e10_org_reconcile_market_observation_reimport(o,manual_obs,imported_obs,'reviewed replacement','x5e-reimport'); result:=public.e10_org_reconcile_market_observation_reimport(o,manual_obs,imported_obs,'reviewed replacement','x5e-reimport'); if not (result->>'replay')::boolean then raise exception 'reimport replay failed'; end if;
  if not exists(select 1 from public.e10_market_observation_supersessions s join public.e10_market_observations n on n.id=s.replacement_observation_id where s.superseded_observation_id=manual_obs and s.lineage_kind='reviewed_reimport' and n.intake_row_id=r2 and n.intake_commit_id is not null) then raise exception 'reimport provenance absent'; end if;
  if (select amount from public.e10_market_observations where id=old_obs)<>100 then raise exception 'prior evidence mutated'; end if;
+ begin
+  perform public.e10_org_reconcile_market_observation_reimport(o,imported_obs,old_obs,'must reject multi-hop cycle','x5e-cycle');
+  raise exception 'multi-hop lineage cycle accepted';
+ exception when sqlstate '22023' then
+  if sqlerrm<>'observation_lineage_cycle' then raise; end if;
+ end;
  begin perform public.e10_org_reconcile_market_observation_reimport(o,old_obs,imported_obs,'branch','x5e-branch'); raise exception 'branch accepted'; exception when sqlstate '55000' then null; end;
  raise notice 'TA-X5e observation lineage: PASS';
 end $$;
