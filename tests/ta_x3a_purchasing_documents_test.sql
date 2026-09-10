@@ -1,14 +1,18 @@
 -- TA-X3a purchasing document model gate. Self-failing and rolled back.
 begin;
 do $$
-declare o uuid:='e1000000-0000-4000-8000-0000000000a6'; l uuid:=gen_random_uuid(); s uuid:=gen_random_uuid(); p uuid:=gen_random_uuid(); c uuid:=gen_random_uuid(); v uuid:=gen_random_uuid(); po uuid:=gen_random_uuid(); pol uuid:=gen_random_uuid(); inv uuid:=gen_random_uuid(); il uuid:=gen_random_uuid(); r uuid:=gen_random_uuid(); rl uuid:=gen_random_uuid(); cr uuid:=gen_random_uuid(); cl uuid:=gen_random_uuid(); ci uuid:=gen_random_uuid(); cv uuid:=gen_random_uuid(); before_items bigint;
+declare o uuid:='e1000000-0000-4000-8000-0000000000a6'; ob uuid:='e1000000-0000-4000-8000-00000000e3b0'; rb uuid; l uuid:=gen_random_uuid(); s uuid:=gen_random_uuid(); p uuid:=gen_random_uuid(); c uuid:=gen_random_uuid(); v uuid:=gen_random_uuid(); po uuid:=gen_random_uuid(); pol uuid:=gen_random_uuid(); inv uuid:=gen_random_uuid(); il uuid:=gen_random_uuid(); r uuid:=gen_random_uuid(); rl uuid:=gen_random_uuid(); cr uuid:=gen_random_uuid(); cl uuid:=gen_random_uuid(); ci uuid:=gen_random_uuid(); cv uuid:=gen_random_uuid(); before_items bigint;
 begin
+ insert into public.e10_organizations(id,name,slug) values(ob,'X3 Org B','x3-org-b');
+ insert into public.e10_organization_roles(organization_id,key,name) values(ob,'admin','Admin') returning id into rb;
  insert into auth.users(id,instance_id,aud,role,email,created_at,updated_at) values
  ('a7000000-0000-4000-8000-00000000e3a1','00000000-0000-0000-0000-000000000000','authenticated','authenticated','x3low@x.invalid',now(),now()),
- ('a7000000-0000-4000-8000-00000000e3a2','00000000-0000-0000-0000-000000000000','authenticated','authenticated','x3admin@x.invalid',now(),now());
+ ('a7000000-0000-4000-8000-00000000e3a2','00000000-0000-0000-0000-000000000000','authenticated','authenticated','x3admin@x.invalid',now(),now()),
+ ('a7000000-0000-4000-8000-00000000e3b1','00000000-0000-0000-0000-000000000000','authenticated','authenticated','x3foreignadmin@x.invalid',now(),now());
  insert into public.e10_organization_memberships(organization_id,user_id,role_id,status) values
  (o,'a7000000-0000-4000-8000-00000000e3a1','e1000000-0000-4000-8000-000000000003','active'),
- (o,'a7000000-0000-4000-8000-00000000e3a2','e1000000-0000-4000-8000-000000000001','active');
+ (o,'a7000000-0000-4000-8000-00000000e3a2','e1000000-0000-4000-8000-000000000001','active'),
+ (ob,'a7000000-0000-4000-8000-00000000e3b1',rb,'active');
  insert into public.e10_locations(id,organization_id,name) values(l,o,'X3 Receiving');
  insert into public.e10_suppliers(id,organization_id,name) values(s,o,'X3 Supplier');
  insert into public.e10_product_masters(id,organization_id,name) values(p,o,'X3 Product');
@@ -37,15 +41,29 @@ begin
 end $$;
 
 set local role authenticated;
-do $$ declare c int; begin
+do $$ declare c int; t text; begin
  perform set_config('request.jwt.claims',json_build_object('sub','a7000000-0000-4000-8000-00000000e3a1','role','authenticated')::text,true);
  select count(*) into c from public.e10_purchase_orders where order_number='X3-PO'; if c<>1 then raise exception 'low role cannot read operational header'; end if;
  select count(*) into c from public.e10_purchase_order_lines; if c<>0 then raise exception 'low role can read estimated costs'; end if;
  select count(*) into c from public.e10_supplier_invoices; if c<>0 then raise exception 'low role can read invoices'; end if;
+ foreach t in array array['e10_purchase_order_lines','e10_supplier_invoices','e10_supplier_invoice_lines','e10_stock_receipt_lines','e10_supplier_credits','e10_supplier_credit_lines','e10_invoice_po_allocations','e10_receipt_po_allocations','e10_receipt_invoice_allocations','e10_credit_invoice_allocations'] loop
+   execute format('select count(*) from public.%I',t) into c; if c<>0 then raise exception 'low role can read cost table %',t; end if;
+ end loop;
  begin perform 1 from public.e10_commercial_comments; raise exception 'low role can read comments'; exception when insufficient_privilege then null; end;
  perform set_config('request.jwt.claims',json_build_object('sub','a7000000-0000-4000-8000-00000000e3a2','role','authenticated')::text,true);
  select count(*) into c from public.e10_supplier_invoices; if c<>1 then raise exception 'financial admin cannot read invoice'; end if;
- raise notice 'TA-X3a same-org financial privacy: PASS';
+ perform set_config('request.jwt.claims',json_build_object('sub','a7000000-0000-4000-8000-00000000e3b1','role','authenticated')::text,true);
+ foreach t in array array['e10_purchase_orders','e10_purchase_order_lines','e10_supplier_invoices','e10_supplier_invoice_lines','e10_stock_receipts','e10_stock_receipt_lines','e10_supplier_credits','e10_supplier_credit_lines','e10_invoice_po_allocations','e10_receipt_po_allocations','e10_receipt_invoice_allocations','e10_credit_invoice_allocations'] loop
+   execute format('select count(*) from public.%I',t) into c; if c<>0 then raise exception 'foreign org can read %',t; end if;
+ end loop;
+ begin perform 1 from public.e10_commercial_comments; raise exception 'foreign org can read comments'; exception when insufficient_privilege then null; end;
+ select count(*) into c from (select unnest(array['e10_purchase_orders','e10_purchase_order_lines','e10_supplier_invoices','e10_supplier_invoice_lines','e10_stock_receipts','e10_stock_receipt_lines','e10_supplier_credits','e10_supplier_credit_lines','e10_invoice_po_allocations','e10_receipt_po_allocations','e10_receipt_invoice_allocations','e10_credit_invoice_allocations','e10_commercial_comments']) t) q
+   where has_table_privilege('authenticated','public.'||q.t,'insert') or has_table_privilege('authenticated','public.'||q.t,'update') or has_table_privilege('authenticated','public.'||q.t,'delete');
+ if c<>0 then raise exception 'authenticated has direct mutation privileges on % tables',c; end if;
+ begin insert into public.e10_purchase_orders(organization_id,supplier_id,destination_location_id,currency) values('e1000000-0000-4000-8000-0000000000a6',gen_random_uuid(),gen_random_uuid(),'CAD'); raise exception 'direct insert allowed'; exception when insufficient_privilege then null; end;
+ begin update public.e10_purchase_orders set status='closed'; raise exception 'direct update allowed'; exception when insufficient_privilege then null; end;
+ begin delete from public.e10_purchase_orders; raise exception 'direct delete allowed'; exception when insufficient_privilege then null; end;
+ raise notice 'TA-X3a privacy/hostile/write gate: PASS (all 13 relations)';
 end $$;
 reset role;
 rollback;
