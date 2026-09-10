@@ -30,9 +30,16 @@ begin
   begin perform public.e10_org_record_customer_activity(a,'break',cb,ua,'buyer-a',session_a,slot_a,1,30,0,0,0,'CAD','auction',now(),'exact','manual',null,'operator','sale-cross-customer','{}','operator_asserted','x6a-cross-customer'); raise exception 'foreign customer accepted'; exception when insufficient_privilege then null; end;
   begin perform public.e10_org_record_customer_activity(b,'break',cb,ub,'buyer-b',session_a,slot_a,1,30,0,0,0,'CAD','auction',now(),'exact','manual',null,'operator','sale-cross-session','{}','operator_asserted','x6a-cross-session'); raise exception 'foreign session accepted'; exception when insufficient_privilege then null; end;
   if exists(select 1 from public.e10_customer_activity_observations where organization_id=a and break_slot_id=slot_a and id<>activity) then raise exception 'held slot or retry fabricated activity'; end if;
+  update public.e10_customers set status='archived',updated_at=now() where id=ca;
+  result:=public.e10_org_record_customer_activity(a,'break',ca,ua,'buyer-a',session_a,slot_a,1,30,0,0,0,'CAD','auction','2026-01-01T00:00:00Z','exact','manual',null,'operator','sale-a','{"slot":"a"}','operator_asserted','x6a-a');
+  if not (result->>'replay')::boolean or (result->>'activity_id')::uuid<>activity or (result->>'event_id')::uuid<>event_id then raise exception 'retry depended on mutable customer state'; end if;
   perform set_config('request.jwt.claims',jsonb_build_object('sub',ub,'role','authenticated')::text,true); perform set_config('role','authenticated',true);
   begin perform public.e10_org_record_customer_activity(a,'break',ca,ua,'buyer-a',session_a,slot_a,1,30,0,0,0,'CAD','auction',now(),'exact','manual',null,'operator','hostile','{}','operator_asserted','x6a-hostile'); raise exception 'cross-org writer accepted'; exception when insufficient_privilege then null; end;
   begin perform 1 from public.e10_customer_activity_observations where id=activity; raise exception 'direct activity select allowed'; exception when insufficient_privilege then null; end;
+  perform set_config('role','postgres',true);
+  update public.e10_organization_memberships set status='suspended' where organization_id=a and user_id=ua;
+  perform set_config('request.jwt.claims',jsonb_build_object('sub',ua,'role','authenticated')::text,true); perform set_config('role','authenticated',true);
+  begin perform public.e10_org_record_customer_activity(a,'break',ca,ua,'buyer-a',session_a,slot_a,1,30,0,0,0,'CAD','auction','2026-01-01T00:00:00Z','exact','manual',null,'operator','sale-a','{"slot":"a"}','operator_asserted','x6a-a'); raise exception 'revoked caller replay allowed'; exception when insufficient_privilege then null; end;
   perform set_config('role','postgres',true);
   raise notice 'TA-X6a customer activity: PASS (provisional, atomic event, replay, no hold spend, hostile tenant denial)';
 end $$;
