@@ -118,7 +118,7 @@ create function public.e10_org_decide_customer_transaction_reconciliation(
   p_org uuid,p_case uuid,p_expected_revision integer,p_action text,p_match_basis text,p_transaction_id uuid,p_transaction_line_id uuid,
   p_reason text,p_evidence jsonb,p_idempotency_key text
 ) returns jsonb language plpgsql security definer set search_path=public as $$
-declare v_fp text;v_old record;v_case record;v_line record;v_latest record;v_current integer;v_id uuid:=gen_random_uuid();v_result jsonb;
+declare v_fp text;v_old record;v_case record;v_line record;v_latest record;v_claim record;v_current integer;v_id uuid:=gen_random_uuid();v_result jsonb;
 begin
   if not e10.is_org_member(p_org) or not e10.has_org_cap(p_org,'act.reconcile_customer_transactions') then raise exception using errcode='42501',message='decide_customer_reconciliation_denied';end if;
   if p_expected_revision is null or p_expected_revision<0 or p_action not in ('ambiguous','link','unlink','reject','new_transaction') or p_reason is null or btrim(p_reason)='' or p_evidence is null or jsonb_typeof(p_evidence)<>'object' or octet_length(p_evidence::text)>65536 or p_idempotency_key is null or btrim(p_idempotency_key)='' then raise exception using errcode='22023',message='customer_reconciliation_decision_invalid';end if;
@@ -130,12 +130,14 @@ begin
   perform pg_advisory_xact_lock(hashtextextended(p_org::text||'|customer-reconciliation|'||p_case::text,0));
   select * into v_case from public.e10_customer_transaction_reconciliation_cases where organization_id=p_org and id=p_case;
   if not found then raise exception using errcode='42501',message='customer_reconciliation_case_denied';end if;
+  select * into v_claim from public.e10_customer_transaction_source_claims where organization_id=p_org and reconciliation_case_id=p_case for update;
   select * into v_latest from public.e10_customer_transaction_reconciliation_decisions where organization_id=p_org and case_id=p_case order by revision desc limit 1;
   v_current:=coalesce(v_latest.revision,0);
   if v_current<>p_expected_revision then raise exception using errcode='40001',message='customer_reconciliation_stale_revision';end if;
   if p_action='unlink' and v_latest.action is distinct from 'link' then raise exception using errcode='22023',message='customer_reconciliation_not_linked';end if;
   if v_latest.action='link' and p_action<>'unlink' then raise exception using errcode='40001',message='customer_reconciliation_requires_unlink';end if;
-  if v_latest.action='new_transaction' then raise exception using errcode='40001',message='customer_reconciliation_new_transaction_already_approved';end if;
+  if p_action='new_transaction' and (v_case.claimed_posted_line_id is not null or v_claim.reconciliation_case_id is null) then raise exception using errcode='22023',message='customer_reconciliation_source_already_posted';end if;
+  if v_latest.action='new_transaction' and (v_claim.posted_line_id is not null or p_action not in ('ambiguous','reject')) then raise exception using errcode='40001',message='customer_reconciliation_new_transaction_already_posted_or_requires_revocation';end if;
   if p_action='link' then
     perform pg_advisory_xact_lock(hashtextextended(p_org::text||'|customer-adjustment|'||p_transaction_line_id::text,0));
     select l.id,l.capture_source,l.source_connection_id,l.source_line_id,t.currency into v_line from public.e10_customer_transaction_lines l join public.e10_customer_transactions t on t.organization_id=l.organization_id and t.id=l.transaction_id where l.organization_id=p_org and l.id=p_transaction_line_id and l.transaction_id=p_transaction_id;
@@ -155,13 +157,16 @@ returns jsonb language plpgsql stable security definer set search_path=public as
 declare v_rows jsonb;
 begin
   if not e10.is_org_member(p_org) or not e10.has_org_cap(p_org,'act.reconcile_customer_transactions') then raise exception using errcode='42501',message='list_customer_reconciliation_denied';end if;
-  if p_state is not null and p_state not in ('unresolved','ambiguous','linked','unlinked','rejected','approved_new_transaction') then raise exception using errcode='22023',message='customer_reconciliation_state_invalid';end if;
+  if p_state is not null and p_state not in ('unresolved','ambiguous','linked','unlinked','rejected','approved_new_transaction','posted_new_transaction') then raise exception using errcode='22023',message='customer_reconciliation_state_invalid';end if;
   if p_limit is null or p_limit<1 or p_limit>100 or ((p_before_created_at is null)<>(p_before_id is null)) then raise exception using errcode='22023',message='customer_reconciliation_page_invalid';end if;
   select coalesce(jsonb_agg(to_jsonb(q) order by q.created_at desc,q.id desc),'[]'::jsonb) into v_rows from (
     select c.id,c.source_kind,c.source_connection_id,c.source_event_id,c.source_component_id,c.currency,c.observed_merchandise_amount,c.observed_shipping_amount,c.observed_tax_amount,c.created_at,
-      coalesce(case d.action when 'link' then 'linked' when 'unlink' then 'unlinked' when 'reject' then 'rejected' when 'new_transaction' then 'approved_new_transaction' when 'ambiguous' then 'ambiguous' end,'unresolved') state,d.revision,d.match_basis,d.transaction_id,d.transaction_line_id
-    from public.e10_customer_transaction_reconciliation_cases c left join lateral(select * from public.e10_customer_transaction_reconciliation_decisions x where x.organization_id=c.organization_id and x.case_id=c.id order by x.revision desc limit 1)d on true
-    where c.organization_id=p_org and (p_state is null or coalesce(case d.action when 'link' then 'linked' when 'unlink' then 'unlinked' when 'reject' then 'rejected' when 'new_transaction' then 'approved_new_transaction' when 'ambiguous' then 'ambiguous' end,'unresolved')=p_state)
+      coalesce(case d.action when 'link' then 'linked' when 'unlink' then 'unlinked' when 'reject' then 'rejected' when 'new_transaction' then case when sc.posted_line_id is null then 'approved_new_transaction' else 'posted_new_transaction' end when 'ambiguous' then 'ambiguous' end,'unresolved') state,d.revision,d.match_basis,coalesce(d.transaction_id,pl.transaction_id) transaction_id,coalesce(d.transaction_line_id,sc.posted_line_id) transaction_line_id
+    from public.e10_customer_transaction_reconciliation_cases c
+    left join lateral(select * from public.e10_customer_transaction_reconciliation_decisions x where x.organization_id=c.organization_id and x.case_id=c.id order by x.revision desc limit 1)d on true
+    left join public.e10_customer_transaction_source_claims sc on sc.organization_id=c.organization_id and sc.reconciliation_case_id=c.id
+    left join public.e10_customer_transaction_lines pl on pl.organization_id=sc.organization_id and pl.id=sc.posted_line_id
+    where c.organization_id=p_org and (p_state is null or coalesce(case d.action when 'link' then 'linked' when 'unlink' then 'unlinked' when 'reject' then 'rejected' when 'new_transaction' then case when sc.posted_line_id is null then 'approved_new_transaction' else 'posted_new_transaction' end when 'ambiguous' then 'ambiguous' end,'unresolved')=p_state)
       and (p_before_created_at is null or (c.created_at,c.id)<(p_before_created_at,p_before_id)) order by c.created_at desc,c.id desc limit p_limit
   )q;
   return jsonb_build_object('items',v_rows,'limit',p_limit);

@@ -181,6 +181,20 @@ async function main() {
     const newPosted=(await a.query('select public.e10_org_post_customer_transaction_draft($1,$2,1,$3) r',[org,newDraft,`${run}-reviewed-new-post`])).rows[0].r;
     const promotedClaim=(await admin.query('select posted_line_id,reconciliation_case_id from public.e10_customer_transaction_source_claims where organization_id=$1 and source_kind=$2 and source_connection_id=$3 and source_line_id=$4',[org,'import','reviewed-new-file',newSource])).rows[0];
     if(!promotedClaim.posted_line_id||promotedClaim.reconciliation_case_id!==newCase.case_id||!newPosted.transaction_id)throw new Error(`reviewed case-to-post source promotion failed ${JSON.stringify(promotedClaim)}`);
+    const postedNewList=(await a.query("select public.e10_org_list_customer_transaction_reconciliation($1,'posted_new_transaction',10,null,null) r",[org])).rows[0].r.items.find(x=>x.id===newCase.case_id);
+    if(!postedNewList||postedNewList.transaction_id!==newPosted.transaction_id||postedNewList.transaction_line_id!==promotedClaim.posted_line_id)throw new Error(`posted reconciliation status/linkage missing ${JSON.stringify(postedNewList)}`);
+    const revokeSource=`${run}-revoke-race-source`;
+    const revokeDraft=(await a.query("select public.e10_org_create_customer_transaction_draft($1,$2,'CAD','2026-01-02T00:00:00Z','exact',$3,$4,$5) r",[org,ids.customer,`X6d revoke race ${run}`,JSON.stringify([{purchase_kind:'retail',capture_source:'import',source_connection_id:'revoke-race-file',source_line_id:revokeSource,quantity:1,merchandise_gross:12,merchandise_discount:0}]),`${run}-revoke-race-draft`])).rows[0].r.draft_id;draftIds.push(revokeDraft);
+    await a.query('select public.e10_org_approve_customer_transaction_draft($1,$2,1,$3)',[org,revokeDraft,`${run}-revoke-race-approve`]);
+    const revokeCase=(await a.query(openRecon,[org,'import','revoke-race-file',`${run}-revoke-race-event`,revokeSource,'CAD',12,null,null,'{}',`${run}-revoke-race-open`])).rows[0].r;
+    await a.query(decideRecon,[org,revokeCase.case_id,0,'new_transaction',null,null,null,'initial review says new sale','{}',`${run}-revoke-race-new`]);
+    const revokeRace=await bounded(Promise.allSettled([
+      a.query(decideRecon,[org,revokeCase.case_id,1,'reject',null,null,null,'second review revokes approval','{}',`${run}-revoke-race-reject`]),
+      b.query('select public.e10_org_post_customer_transaction_draft($1,$2,1,$3)',[org,revokeDraft,`${run}-revoke-race-post`]),
+    ]));
+    if(revokeRace.filter(x=>x.status==='fulfilled').length!==1||revokeRace.filter(x=>x.status==='rejected'&&['23505','40001'].includes(x.reason.code)).length!==1)throw new Error(`revoke-vs-post race failed ${JSON.stringify(revokeRace)}`);
+    const revokeProof=(await admin.query("select sc.posted_line_id,(select action from public.e10_customer_transaction_reconciliation_decisions d where d.organization_id=sc.organization_id and d.case_id=sc.reconciliation_case_id order by revision desc limit 1) action from public.e10_customer_transaction_source_claims sc where sc.organization_id=$1 and sc.source_kind='import' and sc.source_connection_id='revoke-race-file' and sc.source_line_id=$2",[org,revokeSource])).rows[0];
+    if((revokeRace[0].status==='fulfilled'&&(revokeProof.action!=='reject'||revokeProof.posted_line_id!==null))||(revokeRace[1].status==='fulfilled'&&(!revokeProof.posted_line_id||revokeProof.action!=='new_transaction')))throw new Error(`revoke-vs-post outcome not serialized ${JSON.stringify(revokeProof)}`);
     const eventLocalA=JSON.stringify([`${run}-event-a`,'line1']);const eventLocalB=JSON.stringify([`${run}-event-b`,'line1']);
     await a.query(openRecon,[org,'import','event-local-file',`${run}-event-a`,eventLocalA,'CAD',1,null,null,'{}',`${run}-event-local-a`]);
     await a.query(openRecon,[org,'import','event-local-file',`${run}-event-b`,eventLocalB,'CAD',1,null,null,'{}',`${run}-event-local-b`]);
