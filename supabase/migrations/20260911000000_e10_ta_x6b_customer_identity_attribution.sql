@@ -76,6 +76,25 @@ where not exists(select 1 from public.e10_customer_activity_attribution_decision
 revoke all on public.e10_current_customer_identities,public.e10_current_customer_activity_attributions from public,anon,authenticated;
 grant select on public.e10_current_customer_identities,public.e10_current_customer_activity_attributions to service_role;
 
+-- The customer auth_user_id column is a searchable projection, never verification authority. Recheck
+-- the immutable identity decision and canonical claim on every new activity so later claim revocation
+-- cannot leave cached verified status. Per ADR 0005, expires_at governs pending verification only.
+create function e10.enforce_customer_activity_identity() returns trigger language plpgsql security definer set search_path=public as $$
+begin
+  if new.customer_id is null then new.buyer_identity_status:='unresolved';
+  elsif new.buyer_user_id is not null and exists(
+    select 1 from public.e10_current_customer_identities i join public.e10_viewer_handle_claims h on h.id=i.viewer_handle_claim_id
+    where i.organization_id=new.organization_id and i.customer_id=new.customer_id and i.identity_action='attach'
+      and i.verification_basis='verified_handle' and i.verified_user_id=new.buyer_user_id and h.user_id=new.buyer_user_id and h.status='verified'
+  ) then new.buyer_identity_status:='verified_auth';
+  else new.buyer_identity_status:='reviewed_attributed'; end if;
+  return new;
+end $$;
+revoke all on function e10.enforce_customer_activity_identity() from public,anon,authenticated;
+grant execute on function e10.enforce_customer_activity_identity() to service_role;
+create trigger e10_customer_activity_identity_trg before insert on public.e10_customer_activity_observations
+  for each row execute function e10.enforce_customer_activity_identity();
+
 create function public.e10_org_create_customer(p_org uuid,p_display_name text,p_idempotency_key text)
 returns jsonb language plpgsql security definer set search_path=public as $$
 declare v_fp text; v_id uuid:=gen_random_uuid(); v_receipt record; v_result jsonb;
@@ -132,7 +151,8 @@ begin
   perform pg_advisory_xact_lock(hashtextextended(p_org::text||'|customer-identity|'||v_key,0));
   select request_fingerprint,result into v_receipt from public.e10_customer_mutation_receipts where organization_id=p_org and idempotency_key=p_idempotency_key;
   if found then if v_receipt.request_fingerprint<>v_fp then raise exception using errcode='22023',message='idempotency_key_mismatch'; end if; return v_receipt.result||'{"replay":true}'::jsonb; end if;
-  if not exists(select 1 from public.e10_customers where organization_id=p_org and id=p_customer_id and status='active') then raise exception using errcode='42501',message='identity_customer_denied'; end if;
+  perform 1 from public.e10_customers where organization_id=p_org and id=p_customer_id and status='active' for update;
+  if not found then raise exception using errcode='42501',message='identity_customer_denied'; end if;
   select * into v_prior from public.e10_current_customer_identities where organization_id=p_org and identity_stream_key=v_key;
   if p_identity_action='attach' and found and v_prior.identity_action='attach' then raise exception using errcode='22023',message='identity_already_attached'; end if;
   if p_identity_action='detach' and (not found or v_prior.identity_action='detach' or v_prior.customer_id<>p_customer_id) then raise exception using errcode='22023',message='identity_not_attached_to_customer'; end if;

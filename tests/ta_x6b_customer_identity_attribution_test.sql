@@ -43,6 +43,10 @@ begin
   if (select auth_user_id is not null from public.e10_customers where id=ca) then raise exception 'detached verified identity left stale auth link'; end if;
   begin perform public.e10_org_record_customer_activity(a,'retail',ca,ua,'alicecards',null,null,1,1,null,null,null,'CAD','manual','2026-01-01T00:00:00Z','exact','manual',null,'operator','x6b-stale-source','{}','operator_asserted','x6b-stale-activity'); exception when sqlstate '22023' then denied:=true; end;
   if not denied then raise exception 'detached identity still produced verified attribution'; end if; denied:=false;
+  perform public.e10_org_decide_customer_identity(a,ca,'channel_account','whatnot','alicecards',null,'attach',claim,'verified link restored','{}','x6b-handle-reattach');
+  update public.e10_viewer_handle_claims set status='rejected' where id=claim;
+  r:=public.e10_org_record_customer_activity(a,'retail',ca,ua,'alicecards',null,null,1,1,null,null,null,'CAD','manual','2026-01-01T00:00:00Z','exact','manual',null,'operator','x6b-revoked-source','{}','operator_asserted','x6b-revoked-activity');
+  if (select buyer_identity_status<>'reviewed_attributed' from public.e10_customer_activity_observations where id=(r->>'activity_id')::uuid) then raise exception 'revoked claim retained verified attribution'; end if;
 
   r:=public.e10_org_record_customer_activity(a,'retail',null,ua,'alicecards',null,null,1,20,null,null,null,'CAD','manual','2026-01-01T00:00:00Z','exact','manual',null,'operator','x6b-source','{}','operator_asserted','x6b-activity');
   activity:=(r->>'activity_id')::uuid;

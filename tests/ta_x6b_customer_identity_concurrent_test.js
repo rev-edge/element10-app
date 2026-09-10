@@ -2,7 +2,7 @@ const { Client } = require('pg');
 const { randomUUID } = require('crypto');
 const db = process.env.E10_DB_URL || 'postgresql://postgres:postgres@127.0.0.1:54322/postgres';
 const org = 'e1000000-0000-4000-8000-0000000000a6';
-const x = { run: randomUUID(), user: randomUUID(), role: randomUUID(), c1: randomUUID(), c2: randomUUID() };
+const x = { run: randomUUID(), user: randomUUID(), role: randomUUID(), c1: randomUUID(), c2: randomUUID(), h1: randomUUID(), h2: randomUUID() };
 
 async function main() {
   const s = new Client({ connectionString: db }), a = new Client({ connectionString: db }), b = new Client({ connectionString: db });
@@ -23,10 +23,18 @@ async function main() {
     if (createResults.filter(v => v.replay).length !== 1 || createResults[0].customer_id !== createResults[1].customer_id) throw new Error(`create race ${JSON.stringify(createResults)}`);
     x.c1 = createResults[0].customer_id;
     await s.query('insert into public.e10_customers(id,organization_id,display_name) values($1,$2,\'Race Other\')', [x.c2, org]);
+    await s.query("insert into public.e10_viewer_handle_claims(id,user_id,whatnot_handle,status,evidence,verified_at,expires_at) values($1,$3,'race-one','verified','{}',now(),now()+interval '1 day'),($2,$3,'race-two','verified','{}',now(),now()+interval '1 day')", [x.h1, x.h2, x.user]);
+    await a.query("select public.e10_org_decide_customer_identity($1,$2,'channel_account','whatnot','race-one',null,'attach',$3,'initial','{}',$4)", [org, x.c1, x.h1, `${x.run}-handle-initial`]);
+    await Promise.all([
+      a.query("select public.e10_org_decide_customer_identity($1,$2,'channel_account','whatnot','race-one',null,'detach',null,'detach race','{}',$3)", [org, x.c1, `${x.run}-handle-detach`]),
+      b.query("select public.e10_org_decide_customer_identity($1,$2,'channel_account','whatnot','race-two',null,'attach',$3,'attach race','{}',$4)", [org, x.c1, x.h2, `${x.run}-handle-attach`])
+    ]);
+    const projection = (await s.query("select c.auth_user_id,c.revision,(select count(*)::int from public.e10_current_customer_identities i join public.e10_viewer_handle_claims h on h.id=i.viewer_handle_claim_id where i.organization_id=c.organization_id and i.customer_id=c.id and i.identity_action='attach' and i.verification_basis='verified_handle' and h.status='verified') active_links from public.e10_customers c where c.id=$1", [x.c1])).rows[0];
+    if (projection.auth_user_id !== x.user || projection.active_links !== 1) throw new Error(`verified projection race ${JSON.stringify(projection)}`);
 
     const updates = await Promise.allSettled([
-      a.query('select public.e10_org_update_customer($1,$2,0,\'Winner A\',\'active\',$3)', [org, x.c1, `${x.run}-update-a`]),
-      b.query('select public.e10_org_update_customer($1,$2,0,\'Winner B\',\'active\',$3)', [org, x.c1, `${x.run}-update-b`])
+      a.query('select public.e10_org_update_customer($1,$2,$3,\'Winner A\',\'active\',$4)', [org, x.c1, projection.revision, `${x.run}-update-a`]),
+      b.query('select public.e10_org_update_customer($1,$2,$3,\'Winner B\',\'active\',$4)', [org, x.c1, projection.revision, `${x.run}-update-b`])
     ]);
     if (updates.filter(v => v.status === 'fulfilled').length !== 1 || updates.filter(v => v.status === 'rejected' && v.reason.code === '40001').length !== 1) throw new Error(`update race ${JSON.stringify(updates)}`);
 
@@ -54,6 +62,7 @@ async function main() {
     await s.query('delete from public.e10_customer_identity_decisions where idempotency_key like $1', [`${x.run}%`]).catch(() => {});
     await s.query('delete from public.e10_customer_mutation_receipts where idempotency_key like $1', [`${x.run}%`]).catch(() => {});
     await s.query('delete from public.e10_customers where id=any($1::uuid[])', [[x.c1, x.c2]]).catch(() => {});
+    await s.query('delete from public.e10_viewer_handle_claims where id=any($1::uuid[])', [[x.h1, x.h2]]).catch(() => {});
     await s.query('set session_replication_role=origin').catch(() => {});
     await s.query('delete from public.e10_organization_memberships where user_id=$1', [x.user]).catch(() => {});
     await s.query('delete from public.e10_organization_roles where id=$1', [x.role]).catch(() => {});
