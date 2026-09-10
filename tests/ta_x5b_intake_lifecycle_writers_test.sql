@@ -17,14 +17,19 @@ begin
   r:=public.e10_org_stage_intake(o,'csv','source-a','doc-1','storage://x5b.csv','payload-a',jsonb_build_array(
     jsonb_build_object('raw_payload',jsonb_build_object('kind','ask'),'observation_kind','asking_price','occurred_at','2026-09-10T20:00:00Z','currency','CAD','amount',25),
     jsonb_build_object('raw_payload',jsonb_build_object('kind','unknown')),
-    jsonb_build_object('raw_payload',jsonb_build_object('kind','broken'),'observation_kind','completed_sale','occurred_at','not-a-date','currency','','amount','not-a-number')),'x5b-stage-1');
+    jsonb_build_object('raw_payload',jsonb_build_object('kind','broken'),'observation_kind','completed_sale','occurred_at','not-a-date','currency','','amount','not-a-number'),
+    jsonb_build_object('raw_payload',jsonb_build_object('kind','nonfinite'),'observation_kind','bogus','occurred_at','today','currency','CAD','amount','NaN','quantity',0)),'x5b-stage-1');
   perform set_config('role','postgres',true);
   batch:=(r->>'batch_id')::uuid;
-  if (r->>'row_count')::int<>3 or (r->>'invalid_row_count')::int<>2 or r->>'status'<>'staged' then raise exception 'stage result wrong: %',r; end if;
+  if (r->>'row_count')::int<>4 or (r->>'invalid_row_count')::int<>3 or r->>'status'<>'staged' then raise exception 'stage result wrong: %',r; end if;
+  select count(*) into c from public.e10_intake_rows where organization_id=o and batch_id=batch and source_row_number=4
+    and observation_kind is null and occurred_at is null and amount is null and quantity is null and jsonb_array_length(validation_errors)>=3;
+  if c<>1 then raise exception 'invalid typed values were not retained safely'; end if;
   r:=public.e10_org_stage_intake(o,'csv','source-a','doc-1','storage://x5b.csv','payload-a',jsonb_build_array(
     jsonb_build_object('raw_payload',jsonb_build_object('kind','ask'),'observation_kind','asking_price','occurred_at','2026-09-10T20:00:00Z','currency','CAD','amount',25),
     jsonb_build_object('raw_payload',jsonb_build_object('kind','unknown')),
-    jsonb_build_object('raw_payload',jsonb_build_object('kind','broken'),'observation_kind','completed_sale','occurred_at','not-a-date','currency','','amount','not-a-number')),'x5b-stage-1');
+    jsonb_build_object('raw_payload',jsonb_build_object('kind','broken'),'observation_kind','completed_sale','occurred_at','not-a-date','currency','','amount','not-a-number'),
+    jsonb_build_object('raw_payload',jsonb_build_object('kind','nonfinite'),'observation_kind','bogus','occurred_at','today','currency','CAD','amount','NaN','quantity',0)),'x5b-stage-1');
   if not (r->>'replay')::boolean then raise exception 'stage replay missing'; end if;
   begin perform public.e10_org_stage_intake(o,'manual',null,null,null,'different','[{"raw_payload":{}}]','x5b-stage-1'); raise exception 'stage mismatch accepted';
   exception when sqlstate '22023' then null; end;
