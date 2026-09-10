@@ -126,6 +126,11 @@ jobs:
         # + clamped limit + cross-org 42501; e10_org_inv_history org-scoped, newest-first, reads a hard-deleted item's
         # movement (ledger outlives items, no FK); the 55 A6c.1 policy predicates + mutation delegate bodies untouched.
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/step8_bounded_reads_test.sql
+      - name: TA-X1 identity foundation (tenant products, release variants, physical copies, provider mappings)
+        # Proves org isolation, Cards-off generic items, release-variant versus copy serial separation,
+        # multi-subject cards, revisioned provider mappings, active-version barcode reuse, and physical
+        # identity survival after the linked legacy inventory row is deleted.
+        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x1_identity_foundation_test.sql
       - name: Schema reproducibility (re-apply migrations cleanly)
         run: supabase db reset
       - name: Default-privileges regression probe (born-locked; zero anon-executable functions)
