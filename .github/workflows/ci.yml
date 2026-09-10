@@ -175,7 +175,9 @@ jobs:
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x5f_atomic_correction_import_test.sql
           node tests/ta_x5f_atomic_correction_import_concurrent_test.js
       - name: TA-X5g explicit source-less corrected intake
-        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x5g_explicit_correction_source_test.sql
+        run: |
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x5g_explicit_correction_source_test.sql
+          node tests/ta_x5g_explicit_correction_source_concurrent_test.js
       - name: Schema reproducibility (re-apply migrations cleanly)
         run: supabase db reset
       - name: Default-privileges regression probe (born-locked; zero anon-executable functions)
