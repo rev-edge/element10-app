@@ -16,7 +16,7 @@ begin
   insert into public.e10_purchase_order_lines(id,organization_id,purchase_order_id,configuration_version_id,line_no,ordered_quantity) values(pol,o,po,config,1,10);
   insert into public.e10_inventory_lots(id,organization_id,configuration_version_id,location_id,supplier_id,lot_code,status,accepted_quantity) values(lot,o,config,location,supplier,'X4-LOT','available',10);
   insert into public.e10_lot_cost_evidence(organization_id,lot_id,evidence_kind,amount,currency,source_note,occurred_at) values(o,lot,'freight',20,'CAD','carrier invoice pending match',now());
-  insert into public.e10_expected_inventory_allocations(organization_id,purchase_order_line_id,destination_location_id,expected_quantity) values(o,pol,location,10);
+  insert into public.e10_expected_inventory_allocations(organization_id,purchase_order_line_id,destination_location_id,expected_quantity,planning_reference) values(o,pol,location,10,'fixture-demand');
   insert into public.e10_lot_reservations(organization_id,lot_id,quantity,source_type,source_id,idempotency_key) values(o,lot,2,'manual','fixture','x4-reserve-1');
   select count(*) into c from public.e10_inventory_lots where id=lot; if c<>1 then raise exception 'lot missing'; end if;
   begin insert into public.e10_inventory_lots(organization_id,configuration_version_id,location_id,status,accepted_quantity) values(ob,config,location,'available',1); raise exception 'cross-org lot allowed'; exception when foreign_key_violation then null; end;
