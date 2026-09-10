@@ -81,6 +81,11 @@ begin
   if st<>'cancelled' then raise exception 'reversal resurrected cancelled allocation: %',st; end if;
   select coalesce(sum(on_hand_delta),0) into q from public.e10_inventory_movements where organization_id=o and item_id='x4d-item';
   if q<>4 then raise exception 'receipt movement ledger wrong: %',q; end if;
+  select count(*) into c from public.e10_commercial_events correction
+    join public.e10_commercial_events original on original.organization_id=correction.organization_id and original.id=correction.corrects_event_id
+    where correction.organization_id=o and correction.event_type='correction' and original.event_type='receipt'
+      and correction.subject_id='x4d-item' and original.subject_id='x4d-item';
+  if c<>1 then raise exception 'receipt reversal event lineage wrong: %',c; end if;
   select count(*) into c from public.e10_lot_cost_evidence where organization_id=o and lot_id in
     (select inventory_lot_id from public.e10_stock_receipt_lines where organization_id=o and stock_receipt_id in ((r1->>'receipt_id')::uuid,receipt2));
   if c<>0 then raise exception 'receipt invented landed-cost allocation'; end if;
