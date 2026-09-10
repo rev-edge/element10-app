@@ -184,7 +184,10 @@ async function main() {
       b.query(decideRecon,[org,recon.case_id,1,'link','reviewed_match',tx,line,'operator compared provider row',JSON.stringify({matched_by:'provider order review'}),`${run}-recon-link-b`]),
     ]));
     if(linkRace.filter(x=>x.status==='fulfilled').length!==1||linkRace.filter(x=>x.status==='rejected'&&x.reason.code==='40001').length!==1)throw new Error(`reconciliation decision race ${JSON.stringify(linkRace)}`);
-    const durable=(await a.query(openRecon,[org,'import','provider-file',`${run}-durable-event`,`${run}-durable-line`,'CAD',30,null,null,JSON.stringify({provider_order_id:'durable-1'}),`${run}-durable-open`])).rows[0].r;
+    denied=false;try{await a.query(decideRecon,[org,recon.case_id,2,'link',null,tx,line,'missing basis','{}',`${run}-null-basis`]);}catch(e){denied=e.code==='22023'&&e.message==='customer_reconciliation_link_semantics_invalid';}if(!denied)throw new Error('NULL link basis accepted');
+    await a.query(decideRecon,[org,recon.case_id,2,'unlink',null,null,null,'review found prior match wrong',JSON.stringify({supersedes:'prior link'}),`${run}-recon-unlink`]);
+    await a.query(decideRecon,[org,recon.case_id,3,'link','reviewed_match',tx,line2,'corrected reviewed match',JSON.stringify({supersedes:'unlink'}),`${run}-recon-relink`]);
+    const durable=(await a.query(openRecon,[org,'manual',null,`${run}-durable-event`,`${run}-known`,'CAD',30,null,null,JSON.stringify({provider_order_id:'durable-1'}),`${run}-durable-open`])).rows[0].r;
     await a.query(decideRecon,[org,durable.case_id,0,'link','durable_external_id',tx,line,'exact provider order id',JSON.stringify({provider_order_id:'durable-1'}),`${run}-durable-link`]);
     const unresolved=(await a.query(openRecon,[org,'manual',null,`${run}-unresolved-event`,`${run}-unresolved-line`,'CAD',30,null,null,JSON.stringify({name_price_date_only:true}),`${run}-unresolved-open`])).rows[0].r;
     const wrongCurrency=(await a.query(openRecon,[org,'import','provider-file',`${run}-usd-event`,`${run}-usd-line`,'USD',30,null,null,JSON.stringify({currency:'USD'}),`${run}-usd-open`])).rows[0].r;
@@ -194,8 +197,18 @@ async function main() {
     await admin.query('set role service_role');const native=(await admin.query(openRecon,[org,'native','native-feed',`${run}-native`,`${run}-native`,'CAD',30,null,null,'{}',`${run}-native-service`])).rows[0].r;await admin.query('reset role');
     const listed=(await a.query("select public.e10_org_list_customer_transaction_reconciliation($1,'unresolved',10,null,null) r",[org])).rows[0].r;
     if(!listed.items.some(x=>x.id===unresolved.case_id)||listed.items.some(x=>x.id===recon.case_id))throw new Error('bounded reconciliation state list incorrect');
+    denied=false;try{await a.query('select public.e10_org_list_customer_transaction_reconciliation($1,null,$2,null,null)',[org,null]);}catch(e){denied=e.code==='22023'&&e.message==='customer_reconciliation_page_invalid';}if(!denied)throw new Error('NULL reconciliation limit became unbounded');
+    const contestedLines=[{purchase_kind:'retail',capture_source:'import',source_connection_id:'claim-file',source_line_id:`${run}-contested-source`,quantity:1,merchandise_gross:9,merchandise_discount:0}];
+    const contestedDraft=(await a.query("select public.e10_org_create_customer_transaction_draft($1,$2,'CAD','2026-01-02T00:00:00Z','exact',$3,$4,$5) r",[org,ids.customer,`X6d ${run}`,JSON.stringify(contestedLines),`${run}-contested-draft`])).rows[0].r.draft_id;draftIds.push(contestedDraft);
+    await a.query('select public.e10_org_approve_customer_transaction_draft($1,$2,1,$3)',[org,contestedDraft,`${run}-contested-approve`]);
+    const contestedCase=(await a.query(openRecon,[org,'import','claim-file',`${run}-contested-event`,`${run}-contested-source`,'CAD',9,null,null,JSON.stringify({source:'same as pending post'}),`${run}-contested-open`])).rows[0].r;
+    const claimRace=await bounded(Promise.allSettled([
+      a.query(decideRecon,[org,contestedCase.case_id,0,'link','reviewed_match',tx,line,'reviewed same contribution','{}',`${run}-contested-link`]),
+      b.query('select public.e10_org_post_customer_transaction_draft($1,$2,1,$3)',[org,contestedDraft,`${run}-contested-post`]),
+    ]));
+    if(claimRace.filter(x=>x.status==='fulfilled').length!==1||claimRace.filter(x=>x.status==='rejected'&&x.reason.code==='23505').length!==1)throw new Error(`link-vs-post source claim race ${JSON.stringify(claimRace)}`);
     const reconProof=(await admin.query('select (select count(*)::int from public.e10_customer_transaction_evidence_links where transaction_line_id=$1) links,(select observed_merchandise_amount from public.e10_customer_transaction_reconciliation_cases where id=$2) observed,(select count(*)::int from public.e10_customer_transactions where organization_id=$3) tx_count',[line,recon.case_id,org])).rows[0];
-    if(reconProof.links!==2||Number(reconProof.observed)!==31||reconProof.tx_count!==txCountBefore)throw new Error(`reconciliation changed contribution or lost discrepancy ${JSON.stringify(reconProof)}`);
+    if(reconProof.links!==3||Number(reconProof.observed)!==31||reconProof.tx_count!==txCountBefore)throw new Error(`reconciliation changed contribution or lost discrepancy ${JSON.stringify(reconProof)}`);
     const reconSigs=['public.e10_org_open_customer_transaction_reconciliation(uuid,text,text,text,text,text,numeric,numeric,numeric,jsonb,text)','public.e10_org_decide_customer_transaction_reconciliation(uuid,uuid,integer,text,text,uuid,uuid,text,jsonb,text)','public.e10_org_list_customer_transaction_reconciliation(uuid,text,integer,timestamptz,uuid)'];
     for(const sig of reconSigs){const x=(await admin.query("select has_function_privilege('anon',$1,'execute') anon,has_function_privilege('authenticated',$1,'execute') auth",[sig])).rows[0];if(x.anon||!x.auth)throw new Error(`reconciliation ACL ${sig} ${JSON.stringify(x)}`);}
     await a.query('reset role');await a.query('set role authenticated');denied=false;try{await a.query('select * from public.e10_customer_transaction_reconciliation_cases where id=$1',[recon.case_id]);}catch(e){denied=e.code==='42501';}if(!denied)throw new Error('authenticated direct reconciliation table access allowed');
@@ -223,6 +236,7 @@ async function main() {
     await admin.query('delete from public.e10_customer_transaction_component_finalizations where transaction_id=any($1::uuid[])', [[tx, secondTx, otherTx].filter(Boolean)]).catch(() => {});
     await admin.query("delete from public.e10_customer_transaction_evidence_links where case_id in(select id from public.e10_customer_transaction_reconciliation_cases where idempotency_key like $1)",[`${run}%`]).catch(()=>{});
     await admin.query("delete from public.e10_customer_transaction_reconciliation_decisions where case_id in(select id from public.e10_customer_transaction_reconciliation_cases where idempotency_key like $1)",[`${run}%`]).catch(()=>{});
+    await admin.query("delete from public.e10_customer_transaction_source_claims where source_line_id like $1 or reconciliation_case_id in(select id from public.e10_customer_transaction_reconciliation_cases where idempotency_key like $2)",[`${run}%`,`${run}%`]).catch(()=>{});
     await admin.query("delete from public.e10_customer_transaction_reconciliation_cases where idempotency_key like $1",[`${run}%`]).catch(()=>{});
     await admin.query('delete from public.e10_customer_transaction_adjustments where transaction_id=any($1::uuid[])', [[tx, secondTx, otherTx].filter(Boolean)]).catch(() => {});
     await admin.query("delete from public.e10_customer_transaction_lines where source_line_id like $1", [`${run}%`]).catch(() => {});
@@ -247,6 +261,7 @@ async function main() {
       (select count(*) from public.e10_customer_commercial_receipts where idempotency_key like $4)+
       (select count(*) from public.e10_customer_transaction_component_finalizations where idempotency_key like $4)+
       (select count(*) from public.e10_customer_transaction_reconciliation_cases where idempotency_key like $4)+
+      (select count(*) from public.e10_customer_transaction_source_claims where source_line_id like $4)+
       (select count(*) from public.e10_customer_transaction_lines where source_line_id like $4)+
       (select count(*) from public.e10_organizations where id=$5) n`, [[ids.user, ids.otherUser], [ids.role, ids.otherRole], [ids.customer, ids.otherCustomer], `${run}%`, ids.otherOrg])).rows[0].n;
     await Promise.all([admin.end(), a.end(), b.end()]);
