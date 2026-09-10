@@ -8,10 +8,12 @@ begin
  insert into auth.users(id,instance_id,aud,role,email,created_at,updated_at) values
  ('a7000000-0000-4000-8000-00000000e3a1','00000000-0000-0000-0000-000000000000','authenticated','authenticated','x3low@x.invalid',now(),now()),
  ('a7000000-0000-4000-8000-00000000e3a2','00000000-0000-0000-0000-000000000000','authenticated','authenticated','x3admin@x.invalid',now(),now()),
+ ('a7000000-0000-4000-8000-00000000e3a3','00000000-0000-0000-0000-000000000000','authenticated','authenticated','x3manager@x.invalid',now(),now()),
  ('a7000000-0000-4000-8000-00000000e3b1','00000000-0000-0000-0000-000000000000','authenticated','authenticated','x3foreignadmin@x.invalid',now(),now());
  insert into public.e10_organization_memberships(organization_id,user_id,role_id,status) values
  (o,'a7000000-0000-4000-8000-00000000e3a1','e1000000-0000-4000-8000-000000000003','active'),
  (o,'a7000000-0000-4000-8000-00000000e3a2','e1000000-0000-4000-8000-000000000001','active'),
+ (o,'a7000000-0000-4000-8000-00000000e3a3','e1000000-0000-4000-8000-000000000002','active'),
  (ob,'a7000000-0000-4000-8000-00000000e3b1',rb,'active');
  insert into public.e10_locations(id,organization_id,name) values(l,o,'X3 Receiving');
  insert into public.e10_suppliers(id,organization_id,name) values(s,o,'X3 Supplier');
@@ -45,16 +47,23 @@ do $$ declare c int; t text; begin
  perform set_config('request.jwt.claims',json_build_object('sub','a7000000-0000-4000-8000-00000000e3a1','role','authenticated')::text,true);
  select count(*) into c from public.e10_purchase_orders where order_number='X3-PO'; if c<>1 then raise exception 'low role cannot read operational header'; end if;
  select count(*) into c from public.e10_purchase_order_lines; if c<>0 then raise exception 'low role can read estimated costs'; end if;
- select count(*) into c from public.e10_supplier_invoices; if c<>0 then raise exception 'low role can read invoices'; end if;
- foreach t in array array['e10_purchase_order_lines','e10_supplier_invoices','e10_supplier_invoice_lines','e10_stock_receipt_lines','e10_supplier_credits','e10_supplier_credit_lines','e10_invoice_po_allocations','e10_receipt_po_allocations','e10_receipt_invoice_allocations','e10_credit_invoice_allocations'] loop
-   execute format('select count(*) from public.%I',t) into c; if c<>0 then raise exception 'low role can read cost table %',t; end if;
+ foreach t in array array['e10_supplier_invoices','e10_supplier_invoice_lines','e10_stock_receipt_lines','e10_supplier_credits','e10_supplier_credit_lines','e10_invoice_po_allocations','e10_receipt_po_allocations','e10_receipt_invoice_allocations','e10_credit_invoice_allocations'] loop
+   begin execute format('select count(*) from public.%I',t) into c; raise exception 'low role can read actual-cost table %',t; exception when insufficient_privilege then null; end;
  end loop;
  begin perform 1 from public.e10_commercial_comments; raise exception 'low role can read comments'; exception when insufficient_privilege then null; end;
+ perform set_config('request.jwt.claims',json_build_object('sub','a7000000-0000-4000-8000-00000000e3a3','role','authenticated')::text,true);
+ select count(*) into c from public.e10_purchase_order_lines; if c<>1 then raise exception 'estimate-capable manager cannot read PO estimate'; end if;
+ foreach t in array array['e10_supplier_invoices','e10_supplier_invoice_lines','e10_stock_receipt_lines','e10_supplier_credits','e10_supplier_credit_lines','e10_invoice_po_allocations','e10_receipt_po_allocations','e10_receipt_invoice_allocations','e10_credit_invoice_allocations'] loop
+   begin execute format('select count(*) from public.%I',t) into c; raise exception 'estimate-capable manager can read actual-cost table %',t; exception when insufficient_privilege then null; end;
+ end loop;
  perform set_config('request.jwt.claims',json_build_object('sub','a7000000-0000-4000-8000-00000000e3a2','role','authenticated')::text,true);
- select count(*) into c from public.e10_supplier_invoices; if c<>1 then raise exception 'financial admin cannot read invoice'; end if;
+ begin perform 1 from public.e10_supplier_invoices; raise exception 'admin can directly read actual invoice without settled authority'; exception when insufficient_privilege then null; end;
  perform set_config('request.jwt.claims',json_build_object('sub','a7000000-0000-4000-8000-00000000e3b1','role','authenticated')::text,true);
- foreach t in array array['e10_purchase_orders','e10_purchase_order_lines','e10_supplier_invoices','e10_supplier_invoice_lines','e10_stock_receipts','e10_stock_receipt_lines','e10_supplier_credits','e10_supplier_credit_lines','e10_invoice_po_allocations','e10_receipt_po_allocations','e10_receipt_invoice_allocations','e10_credit_invoice_allocations'] loop
+ foreach t in array array['e10_purchase_orders','e10_purchase_order_lines','e10_stock_receipts'] loop
    execute format('select count(*) from public.%I',t) into c; if c<>0 then raise exception 'foreign org can read %',t; end if;
+ end loop;
+ foreach t in array array['e10_supplier_invoices','e10_supplier_invoice_lines','e10_stock_receipt_lines','e10_supplier_credits','e10_supplier_credit_lines','e10_invoice_po_allocations','e10_receipt_po_allocations','e10_receipt_invoice_allocations','e10_credit_invoice_allocations'] loop
+   begin execute format('select count(*) from public.%I',t) into c; raise exception 'foreign org can read actual-cost table %',t; exception when insufficient_privilege then null; end;
  end loop;
  begin perform 1 from public.e10_commercial_comments; raise exception 'foreign org can read comments'; exception when insufficient_privilege then null; end;
  select count(*) into c from (select unnest(array['e10_purchase_orders','e10_purchase_order_lines','e10_supplier_invoices','e10_supplier_invoice_lines','e10_stock_receipts','e10_stock_receipt_lines','e10_supplier_credits','e10_supplier_credit_lines','e10_invoice_po_allocations','e10_receipt_po_allocations','e10_receipt_invoice_allocations','e10_credit_invoice_allocations','e10_commercial_comments']) t) q
