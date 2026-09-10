@@ -28,6 +28,13 @@ create index e10_market_observations_variant_time_idx
   on public.e10_market_observations(catalog_variant_id,observation_kind,occurred_at desc,id)
   where catalog_variant_id is not null;
 
+create or replace view public.e10_current_market_observations with(security_invoker=true) as
+  select o.* from public.e10_market_observations o
+  where not exists(select 1 from public.e10_market_observation_supersessions s
+    where s.organization_id=o.organization_id and s.superseded_observation_id=o.id);
+revoke all on public.e10_current_market_observations from public,anon,authenticated;
+grant select on public.e10_current_market_observations to service_role;
+
 create or replace function public._e10_org_resolve_intake_row_x5b(
   p_org uuid,p_intake_row_id uuid,p_decision text,p_target_id uuid,p_reason text,p_corrects_decision_id uuid,p_idempotency_key text
 ) returns jsonb language plpgsql security definer set search_path=public as $$
