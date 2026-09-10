@@ -99,6 +99,7 @@ begin
        where lr.organization_id=old.organization_id and lr.legacy_reservation_id=old.id and lr.status='active') then
     raise exception using errcode='55000',message='lot_linked_reservation_requires_lot_writer';
   end if;
+  if tg_op='DELETE' then return old; end if;
   return new;
 end;
 $$;
