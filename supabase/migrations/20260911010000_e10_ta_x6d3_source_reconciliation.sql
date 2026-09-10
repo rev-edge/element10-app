@@ -19,14 +19,14 @@ create index e10_customer_reconciliation_time_idx on public.e10_customer_transac
 
 create table public.e10_customer_transaction_reconciliation_decisions (
   id uuid primary key default gen_random_uuid(),organization_id uuid not null,case_id uuid not null,revision integer not null,
-  action text not null check(action in ('ambiguous','link','unlink','reject')),match_basis text,
+  action text not null check(action in ('ambiguous','link','unlink','reject','new_transaction')),match_basis text,
   transaction_id uuid,transaction_line_id uuid,reason text not null check(btrim(reason)<>''),evidence jsonb not null check(jsonb_typeof(evidence)='object' and octet_length(evidence::text)<=65536),
   idempotency_key text not null,request_fingerprint text not null,decided_by uuid references auth.users(id),decided_at timestamptz not null default now(),
   unique(organization_id,id),unique(organization_id,case_id,revision),unique(organization_id,idempotency_key),
   foreign key(organization_id,case_id) references public.e10_customer_transaction_reconciliation_cases(organization_id,id),
   foreign key(organization_id,transaction_id) references public.e10_customer_transactions(organization_id,id),
   foreign key(organization_id,transaction_line_id) references public.e10_customer_transaction_lines(organization_id,id),
-  check((action='link' and match_basis is not null and match_basis in ('durable_external_id','reviewed_match') and transaction_id is not null and transaction_line_id is not null) or (action in ('ambiguous','unlink','reject') and match_basis is null and transaction_id is null and transaction_line_id is null))
+  check((action='link' and match_basis is not null and match_basis in ('durable_external_id','reviewed_match') and transaction_id is not null and transaction_line_id is not null) or (action in ('ambiguous','unlink','reject','new_transaction') and match_basis is null and transaction_id is null and transaction_line_id is null))
 );
 create index e10_customer_reconciliation_decision_latest_idx on public.e10_customer_transaction_reconciliation_decisions(organization_id,case_id,revision desc);
 
@@ -46,14 +46,26 @@ create table public.e10_customer_transaction_source_claims (
   unique(organization_id,id),
   foreign key(organization_id,posted_line_id) references public.e10_customer_transaction_lines(organization_id,id),
   foreign key(organization_id,reconciliation_case_id) references public.e10_customer_transaction_reconciliation_cases(organization_id,id),
-  check(num_nonnulls(posted_line_id,reconciliation_case_id)=1),check(btrim(source_line_id)<>''),check(source_connection_id is null or btrim(source_connection_id)<>'')
+  check(num_nonnulls(posted_line_id,reconciliation_case_id)>=1),check(btrim(source_line_id)<>''),check(source_connection_id is null or btrim(source_connection_id)<>'')
 );
+comment on column public.e10_customer_transaction_source_claims.source_line_id is 'Durable source component identity, globally unique within (organization_id, source_kind, source_connection_id). Event-local line identifiers must be collision-safely canonicalized with their event identity before calling the RPC.';
 create unique index e10_customer_transaction_source_claim_uq on public.e10_customer_transaction_source_claims(organization_id,source_kind,coalesce(source_connection_id,''),source_line_id);
 insert into public.e10_customer_transaction_source_claims(organization_id,source_kind,source_connection_id,source_line_id,posted_line_id)
 select organization_id,capture_source,source_connection_id,source_line_id,id from public.e10_customer_transaction_lines;
 
 create function e10.claim_customer_transaction_line_source() returns trigger language plpgsql security definer set search_path=public as $$
+declare v_claim record;v_latest_action text;
 begin
+  select * into v_claim from public.e10_customer_transaction_source_claims
+  where organization_id=new.organization_id and source_kind=new.capture_source and coalesce(source_connection_id,'')=coalesce(new.source_connection_id,'') and source_line_id=new.source_line_id for update;
+  if found then
+    if v_claim.posted_line_id is not null or v_claim.reconciliation_case_id is null then raise exception using errcode='23505',message='customer_transaction_source_already_claimed';end if;
+    select action into v_latest_action from public.e10_customer_transaction_reconciliation_decisions
+    where organization_id=new.organization_id and case_id=v_claim.reconciliation_case_id order by revision desc limit 1;
+    if v_latest_action is distinct from 'new_transaction' then raise exception using errcode='23505',message='customer_transaction_source_already_claimed';end if;
+    update public.e10_customer_transaction_source_claims set posted_line_id=new.id where id=v_claim.id;
+    return new;
+  end if;
   insert into public.e10_customer_transaction_source_claims(organization_id,source_kind,source_connection_id,source_line_id,posted_line_id)
   values(new.organization_id,new.capture_source,new.source_connection_id,new.source_line_id,new.id);
   return new;
@@ -75,7 +87,6 @@ grant all on public.e10_customer_transaction_reconciliation_cases,public.e10_cus
 create trigger e10_customer_reconciliation_case_append_only_trg before update or delete on public.e10_customer_transaction_reconciliation_cases for each row execute function e10.reject_append_only_change();
 create trigger e10_customer_reconciliation_decision_append_only_trg before update or delete on public.e10_customer_transaction_reconciliation_decisions for each row execute function e10.reject_append_only_change();
 create trigger e10_customer_evidence_link_append_only_trg before update or delete on public.e10_customer_transaction_evidence_links for each row execute function e10.reject_append_only_change();
-create trigger e10_customer_source_claim_append_only_trg before update or delete on public.e10_customer_transaction_source_claims for each row execute function e10.reject_append_only_change();
 
 create function public.e10_org_open_customer_transaction_reconciliation(
   p_org uuid,p_source_kind text,p_source_connection_id text,p_source_event_id text,p_source_component_id text,p_currency text,
@@ -110,7 +121,7 @@ create function public.e10_org_decide_customer_transaction_reconciliation(
 declare v_fp text;v_old record;v_case record;v_line record;v_latest record;v_current integer;v_id uuid:=gen_random_uuid();v_result jsonb;
 begin
   if not e10.is_org_member(p_org) or not e10.has_org_cap(p_org,'act.reconcile_customer_transactions') then raise exception using errcode='42501',message='decide_customer_reconciliation_denied';end if;
-  if p_expected_revision is null or p_expected_revision<0 or p_action not in ('ambiguous','link','unlink','reject') or p_reason is null or btrim(p_reason)='' or p_evidence is null or jsonb_typeof(p_evidence)<>'object' or octet_length(p_evidence::text)>65536 or p_idempotency_key is null or btrim(p_idempotency_key)='' then raise exception using errcode='22023',message='customer_reconciliation_decision_invalid';end if;
+  if p_expected_revision is null or p_expected_revision<0 or p_action not in ('ambiguous','link','unlink','reject','new_transaction') or p_reason is null or btrim(p_reason)='' or p_evidence is null or jsonb_typeof(p_evidence)<>'object' or octet_length(p_evidence::text)>65536 or p_idempotency_key is null or btrim(p_idempotency_key)='' then raise exception using errcode='22023',message='customer_reconciliation_decision_invalid';end if;
   if (p_action='link' and (p_match_basis is null or p_match_basis not in ('durable_external_id','reviewed_match') or p_transaction_id is null or p_transaction_line_id is null)) or (p_action<>'link' and (p_match_basis is not null or p_transaction_id is not null or p_transaction_line_id is not null)) then raise exception using errcode='22023',message='customer_reconciliation_link_semantics_invalid';end if;
   v_fp:=md5(jsonb_build_object('v','customer-reconciliation-decision-v1','case',p_case,'expected_revision',p_expected_revision,'action',p_action,'match_basis',p_match_basis,'transaction',p_transaction_id,'line',p_transaction_line_id,'reason',p_reason,'evidence',p_evidence)::text);
   perform pg_advisory_xact_lock(hashtextextended(p_org::text||'|customer-commercial|'||p_idempotency_key,0));
@@ -124,6 +135,7 @@ begin
   if v_current<>p_expected_revision then raise exception using errcode='40001',message='customer_reconciliation_stale_revision';end if;
   if p_action='unlink' and v_latest.action is distinct from 'link' then raise exception using errcode='22023',message='customer_reconciliation_not_linked';end if;
   if v_latest.action='link' and p_action<>'unlink' then raise exception using errcode='40001',message='customer_reconciliation_requires_unlink';end if;
+  if v_latest.action='new_transaction' then raise exception using errcode='40001',message='customer_reconciliation_new_transaction_already_approved';end if;
   if p_action='link' then
     perform pg_advisory_xact_lock(hashtextextended(p_org::text||'|customer-adjustment|'||p_transaction_line_id::text,0));
     select l.id,l.capture_source,l.source_connection_id,l.source_line_id,t.currency into v_line from public.e10_customer_transaction_lines l join public.e10_customer_transactions t on t.organization_id=l.organization_id and t.id=l.transaction_id where l.organization_id=p_org and l.id=p_transaction_line_id and l.transaction_id=p_transaction_id;
@@ -134,7 +146,7 @@ begin
   insert into public.e10_customer_transaction_reconciliation_decisions(id,organization_id,case_id,revision,action,match_basis,transaction_id,transaction_line_id,reason,evidence,idempotency_key,request_fingerprint,decided_by)
   values(v_id,p_org,p_case,p_expected_revision+1,p_action,p_match_basis,p_transaction_id,p_transaction_line_id,btrim(p_reason),p_evidence,p_idempotency_key,v_fp,auth.uid());
   if p_action='link' then insert into public.e10_customer_transaction_evidence_links(organization_id,case_id,decision_id,transaction_id,transaction_line_id,linked_by) values(p_org,p_case,v_id,p_transaction_id,p_transaction_line_id,auth.uid());end if;
-  v_result:=jsonb_build_object('ok',true,'replay',false,'case_id',p_case,'decision_id',v_id,'revision',p_expected_revision+1,'state',case p_action when 'link' then 'linked' when 'unlink' then 'unlinked' when 'reject' then 'rejected' else 'ambiguous' end,'contribution_created',false);
+  v_result:=jsonb_build_object('ok',true,'replay',false,'case_id',p_case,'decision_id',v_id,'revision',p_expected_revision+1,'state',case p_action when 'link' then 'linked' when 'unlink' then 'unlinked' when 'reject' then 'rejected' when 'new_transaction' then 'approved_new_transaction' else 'ambiguous' end,'contribution_created',false);
   insert into public.e10_customer_commercial_receipts values(p_org,p_idempotency_key,'decide_transaction_reconciliation',v_id,v_fp,v_result,auth.uid(),now());return v_result;
 end $$;
 
@@ -143,13 +155,13 @@ returns jsonb language plpgsql stable security definer set search_path=public as
 declare v_rows jsonb;
 begin
   if not e10.is_org_member(p_org) or not e10.has_org_cap(p_org,'act.reconcile_customer_transactions') then raise exception using errcode='42501',message='list_customer_reconciliation_denied';end if;
-  if p_state is not null and p_state not in ('unresolved','ambiguous','linked','unlinked','rejected') then raise exception using errcode='22023',message='customer_reconciliation_state_invalid';end if;
+  if p_state is not null and p_state not in ('unresolved','ambiguous','linked','unlinked','rejected','approved_new_transaction') then raise exception using errcode='22023',message='customer_reconciliation_state_invalid';end if;
   if p_limit is null or p_limit<1 or p_limit>100 or ((p_before_created_at is null)<>(p_before_id is null)) then raise exception using errcode='22023',message='customer_reconciliation_page_invalid';end if;
   select coalesce(jsonb_agg(to_jsonb(q) order by q.created_at desc,q.id desc),'[]'::jsonb) into v_rows from (
     select c.id,c.source_kind,c.source_connection_id,c.source_event_id,c.source_component_id,c.currency,c.observed_merchandise_amount,c.observed_shipping_amount,c.observed_tax_amount,c.created_at,
-      coalesce(case d.action when 'link' then 'linked' when 'unlink' then 'unlinked' when 'reject' then 'rejected' when 'ambiguous' then 'ambiguous' end,'unresolved') state,d.revision,d.match_basis,d.transaction_id,d.transaction_line_id
+      coalesce(case d.action when 'link' then 'linked' when 'unlink' then 'unlinked' when 'reject' then 'rejected' when 'new_transaction' then 'approved_new_transaction' when 'ambiguous' then 'ambiguous' end,'unresolved') state,d.revision,d.match_basis,d.transaction_id,d.transaction_line_id
     from public.e10_customer_transaction_reconciliation_cases c left join lateral(select * from public.e10_customer_transaction_reconciliation_decisions x where x.organization_id=c.organization_id and x.case_id=c.id order by x.revision desc limit 1)d on true
-    where c.organization_id=p_org and (p_state is null or coalesce(case d.action when 'link' then 'linked' when 'unlink' then 'unlinked' when 'reject' then 'rejected' when 'ambiguous' then 'ambiguous' end,'unresolved')=p_state)
+    where c.organization_id=p_org and (p_state is null or coalesce(case d.action when 'link' then 'linked' when 'unlink' then 'unlinked' when 'reject' then 'rejected' when 'new_transaction' then 'approved_new_transaction' when 'ambiguous' then 'ambiguous' end,'unresolved')=p_state)
       and (p_before_created_at is null or (c.created_at,c.id)<(p_before_created_at,p_before_id)) order by c.created_at desc,c.id desc limit p_limit
   )q;
   return jsonb_build_object('items',v_rows,'limit',p_limit);
