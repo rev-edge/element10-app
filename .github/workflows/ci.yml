@@ -193,6 +193,10 @@ jobs:
         run: |
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x6b_customer_identity_attribution_test.sql
           node tests/ta_x6b_customer_identity_concurrent_test.js
+      - name: TA-X6c reviewed customer transaction posting
+        run: |
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x6c_customer_transaction_posting_test.sql
+          node tests/ta_x6c_customer_transaction_posting_concurrent_test.js
       - name: Schema reproducibility (re-apply migrations cleanly)
         run: supabase db reset
       - name: Default-privileges regression probe (born-locked; zero anon-executable functions)
