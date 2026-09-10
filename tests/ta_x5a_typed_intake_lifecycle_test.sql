@@ -33,15 +33,17 @@ begin
   exception when check_violation then null; end;
   begin update public.e10_intake_resolver_decisions set reason='rewrite' where id=d1; raise exception 'resolver history mutated';
   exception when sqlstate '55000' then null; end;
-  insert into public.e10_commercial_events(id,organization_id,event_type,subject_type,subject_id,occurred_at,idempotency_key,source_kind,payload)
-    values(ev1,o,'listing_created','inventory_item','x5a-item',now(),'x5a-event-1','manual','{"ask":25}');
-  insert into public.e10_commercial_events(id,organization_id,event_type,subject_type,subject_id,occurred_at,idempotency_key,source_kind,payload,corrects_event_id)
-    values(ev2,o,'correction','inventory_item','x5a-item',now(),'x5a-event-2','manual','{"reason":"wrong ask"}',ev1);
+  insert into public.e10_commercial_events(id,organization_id,event_type,subject_type,subject_id,occurred_at,idempotency_key,source_kind,payload,request_fingerprint)
+    values(ev1,o,'listing_created','inventory_item','x5a-item',now(),'x5a-event-1','manual','{"ask":25}','fp1');
+  insert into public.e10_commercial_events(id,organization_id,event_type,subject_type,subject_id,occurred_at,idempotency_key,source_kind,payload,corrects_event_id,request_fingerprint)
+    values(ev2,o,'correction','inventory_item','x5a-item',now(),'x5a-event-2','manual','{"reason":"wrong ask"}',ev1,'fp2');
   begin insert into public.e10_commercial_events(organization_id,event_type,subject_type,subject_id,occurred_at,idempotency_key,source_kind,corrects_event_id)
     values(o,'correction','inventory_item','different-item',now(),'x5a-bad-subject','manual',ev1); raise exception 'cross-subject correction accepted';
   exception when check_violation then null; end;
   begin update public.e10_commercial_events set payload='{}' where id=ev1; raise exception 'commercial event mutated';
   exception when sqlstate '55000' then null; end;
+  insert into public.e10_commercial_events(organization_id,event_type,subject_type,subject_id,occurred_at,idempotency_key,source_kind,payload)
+    values(o,'hold','other','legacy-before-writer',now(),'x5a-legacy-event','system','{}');
   begin
     insert into public.e10_commercial_events(organization_id,event_type,subject_type,subject_id,occurred_at,idempotency_key,source_kind)
       values(o,'correction','other','x',now(),'x5a-bad-correction','manual'); raise exception 'lineage-free correction accepted';
