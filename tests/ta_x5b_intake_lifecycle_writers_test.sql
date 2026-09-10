@@ -43,11 +43,11 @@ begin
   r:=public.e10_org_resolve_intake_row(o,row_id,'clear_match',null,'correction',decision,'x5b-resolve-2');
   if r->>'match_status'<>'unresolved' then raise exception 'clear match failed: %',r; end if;
   r:=public.e10_org_record_commercial_event(o,'listing_created','inventory_item','x5b-item','2026-09-10T21:00:00Z',
-    'manual','operator-entry','{"ask":25}',null,array['dormant-ledger'],'x5b-event-1');
+    'manual','operator-entry','{"listing_id":"x5b-listing","channel":"manual","ask":25}',null,array['dormant-ledger'],'x5b-event-1');
   event_id:=(r->>'event_id')::uuid;
   if (r->>'outbox_count')::int<>1 then raise exception 'outbox not atomic: %',r; end if;
   r:=public.e10_org_record_commercial_event(o,'listing_created','inventory_item','x5b-item','2026-09-10T21:00:00Z',
-    'manual','operator-entry','{"ask":25}',null,array['dormant-ledger'],'x5b-event-1');
+    'manual','operator-entry','{"listing_id":"x5b-listing","channel":"manual","ask":25}',null,array['dormant-ledger'],'x5b-event-1');
   if not (r->>'replay')::boolean then raise exception 'event replay missing'; end if;
   r:=public.e10_org_record_commercial_event(o,'correction','inventory_item','x5b-item','2026-09-10T22:00:00Z',
     'manual','operator-correction','{"reason":"wrong ask"}',event_id,'{}','x5b-event-2');

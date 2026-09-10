@@ -40,7 +40,7 @@ async function main(){
     const [ra,rb]=await Promise.all([a.query(resolveSql,[org,row,x.product,`${x.run}-resolve`]),b.query(resolveSql,[org,row,x.product,`${x.run}-resolve`])]);
     const resolved=[ra.rows[0].r,rb.rows[0].r];if(resolved.filter(v=>!v.replay).length!==1||resolved[0].decision_id!==resolved[1].decision_id)throw new Error('resolve race not idempotent '+JSON.stringify(resolved));
     for(const c of[a,b])await c.query('select set_config($1,$2,false)',['request.jwt.claims',jwt]);
-    const eventSql="select public.e10_org_record_commercial_event($1,'listing_created','inventory_item',$2,'2026-09-10T21:00:00Z','manual',null,'{}',null,array['dormant'],$3) r";
+    const eventSql="select public.e10_org_record_commercial_event($1,'listing_created','inventory_item',$2,'2026-09-10T21:00:00Z','manual',null,'{\"listing_id\":\"race-listing\",\"channel\":\"race\"}',null,array['dormant'],$3) r";
     const [ea,eb]=await Promise.all([a.query(eventSql,[org,x.item,`${x.run}-event`]),b.query(eventSql,[org,x.item,`${x.run}-event`])]);
     const events=[ea.rows[0].r,eb.rows[0].r];if(events.filter(v=>!v.replay).length!==1||events[0].event_id!==events[1].event_id)throw new Error('event race not idempotent '+JSON.stringify(events));
     const proof=(await s.query("select (select count(*) from public.e10_intake_batches where idempotency_key=$1) batches,(select count(*) from public.e10_intake_resolver_decisions where idempotency_key=$2) decisions,(select count(*) from public.e10_commercial_events where idempotency_key=$3) events,(select count(*) from public.e10_integration_outbox o join public.e10_commercial_events e on e.id=o.commercial_event_id where e.idempotency_key=$3) outbox",[`${x.run}-stage`,`${x.run}-resolve`,`${x.run}-event`])).rows[0];
