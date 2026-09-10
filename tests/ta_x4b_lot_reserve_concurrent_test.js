@@ -12,6 +12,10 @@ const jwt = JSON.stringify({ sub: ids.user, role: 'authenticated' });
 const run = randomUUID();
 
 async function cleanup(c) {
+  // Superuser-only fixture teardown for the immutable audit table; production callers cannot do this.
+  await c.query("set session_replication_role=replica");
+  await c.query("delete from public.e10_lot_reservation_transitions where lot_reservation_id in (select id from public.e10_lot_reservations where lot_id=any($1::uuid[]))", [[ids.lot, ids.lot2]]);
+  await c.query("set session_replication_role=origin");
   await c.query("delete from public.e10_lot_reservations where lot_id=any($1::uuid[])", [[ids.lot, ids.lot2]]);
   await c.query("delete from public.e10_inventory_reservations where item_id=any($1::text[])", [[ids.item, ids.item2]]);
   await c.query("delete from public.e10_inventory_movements where item_id=any($1::text[])", [[ids.item, ids.item2]]);
@@ -33,7 +37,7 @@ async function main() {
   await setup.connect(); await A.connect(); await B.connect();
   try {
     await cleanup(setup);
-    await setup.query(`insert into auth.users(id,instance_id,aud,role,email,created_at,updated_at) values($1,'00000000-0000-0000-0000-000000000000','authenticated','authenticated','x4c@x.invalid',now(),now())`, [ids.user]);
+    await setup.query(`insert into auth.users(id,instance_id,aud,role,email,created_at,updated_at) values($1,'00000000-0000-0000-0000-000000000000','authenticated','authenticated',$2,now(),now())`, [ids.user, `x4c-${run}@x.invalid`]);
     await setup.query(`insert into public.e10_organization_roles(id,organization_id,key,name,is_system) values($1,$2,$3,'X4c Test Role',false)`, [ids.role, org, `x4c-${run}`]);
     await setup.query(`insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed) values($1,$2,'act.reserve_inventory',true),($1,$2,'act.inventory_edit',true)`, [org, ids.role]);
     await setup.query(`insert into public.e10_organization_memberships(organization_id,user_id,role_id,status) values($1,$2,$3,'active')`, [org, ids.user, ids.role]);
@@ -62,6 +66,21 @@ async function main() {
     if (!a.ok || !bError || bError.code !== '23514') throw new Error(`unexpected outcomes A=${JSON.stringify(a)} B=${bError && bError.code}`);
     const proof = (await setup.query(`select coalesce(sum(quantity),0) lot_reserved,(select coalesce(sum(qty),0) from public.e10_inventory_reservations where organization_id=$1 and item_id=$2 and status='active') legacy_reserved,(select count(*) from public.e10_inventory_movements where organization_id=$1 and item_id=$2) movements from public.e10_lot_reservations where organization_id=$1 and lot_id=$3 and status='active'`, [org, ids.item, ids.lot])).rows[0];
     if (Number(proof.lot_reserved) !== 4 || Number(proof.legacy_reserved) !== 4 || Number(proof.movements) !== 1) throw new Error('reservation ledgers diverged: ' + JSON.stringify(proof));
+    // Serialize consume versus release on the same reservation. Consume wins first; release must then release only the remainder.
+    const reservationId = a.reservation_id;
+    await A.query('begin'); await A.query('select set_config($1,$2,true)', ['request.jwt.claims', jwt]);
+    await A.query('select id from public.e10_lot_reservations where organization_id=$1 and id=$2 for update', [org, reservationId]);
+    await B.query('begin'); await B.query('select set_config($1,$2,true)', ['request.jwt.claims', jwt]);
+    const releaseCall = B.query('select public.e10_org_lot_release($1,$2,$3) result', [org, reservationId, `x4c-release-${run}`]);
+    let transitionWaiting = false;
+    for (let i = 0; i < 400; i++) { const q = await setup.query("select wait_event_type='Lock' waiting from pg_stat_activity where pid=$1", [bpid]); if (q.rows[0]?.waiting) { transitionWaiting = true; break; } await sleep(10); }
+    if (!transitionWaiting) throw new Error('release never waited on consume-held reservation lock');
+    const consume = (await A.query('select public.e10_org_lot_consume($1,$2,1,$3) result', [org, reservationId, `x4c-consume-${run}`])).rows[0].result;
+    await A.query('commit');
+    const release = (await releaseCall).rows[0].result; await B.query('commit');
+    if (!consume.ok || !release.ok || Number(release.released_quantity) !== 3 || Number(release.consumed_quantity) !== 1) throw new Error(`transition race diverged consume=${JSON.stringify(consume)} release=${JSON.stringify(release)}`);
+    const transitionProof = (await setup.query('select status,consumed_quantity,(select qty from public.e10_inventory_items where organization_id=$1 and id=$3) on_hand,(select count(*) from e10.lot_transition_guards) guards from public.e10_lot_reservations where organization_id=$1 and id=$2', [org, reservationId, ids.item])).rows[0];
+    if (transitionProof.status !== 'released' || Number(transitionProof.consumed_quantity) !== 1 || Number(transitionProof.on_hand) !== 4 || Number(transitionProof.guards) !== 0) throw new Error('serialized transition state wrong: ' + JSON.stringify(transitionProof));
     // Overlap the new writer with the existing legacy writer on their shared item lock.
     await A.query('begin'); await A.query('select set_config($1,$2,true)', ['request.jwt.claims', jwt]);
     const heldItem = await A.query('select id from public.e10_inventory_items where organization_id=$1 and id=$2 for update', [org, ids.item2]);
@@ -76,7 +95,7 @@ async function main() {
     if (!legacy.ok || !bLegacyError || bLegacyError.code !== '23514') throw new Error(`legacy overlap outcomes legacy=${JSON.stringify(legacy)} new=${bLegacyError && bLegacyError.code}`);
     const overlap = (await setup.query(`select (select count(*) from public.e10_lot_reservations where lot_id=$1) lot_rows,(select coalesce(sum(qty),0) from public.e10_inventory_reservations where organization_id=$2 and item_id=$3 and status='active') legacy_reserved`, [ids.lot2, org, ids.item2])).rows[0];
     if (Number(overlap.lot_rows) !== 0 || Number(overlap.legacy_reserved) !== 4) throw new Error('legacy overlap diverged: ' + JSON.stringify(overlap));
-    console.log(`TA-X4b concurrent reserve: PASS (new/new lock proof and legacy/new shared-item lock proof; no overcommit; ledgers reconciled)`);
+    console.log(`TA-X4b/X4c concurrency: PASS (reserve contention, consume/release serialization, legacy/new overlap; no overcommit; ledgers reconciled)`);
   } finally {
     await A.query('rollback').catch(() => {}); await B.query('rollback').catch(() => {});
     await cleanup(setup);
