@@ -73,7 +73,9 @@ async function main() {
 
     const call = 'select public.e10_org_adjust_customer_transaction($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19) r';
     const finalizeCall = 'select public.e10_org_finalize_customer_transaction_component($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13) r';
-    const finalizeArgs = (theTx, theLine, component, amount, suffix) => [org,theTx,theLine,component,amount,'CAD',`reviewed ${suffix}`,'manual',null,`${run}-${suffix}`,`${run}-${suffix}`,JSON.stringify({review:suffix}),`${run}-${suffix}`];
+    const finalizeArgs = (theTx, theLine, component, amount, suffix, currency='CAD', sourceEvent=`${run}-${suffix}`, sourceComponent=`${run}-${suffix}`, targetOrg=org) => [targetOrg,theTx,theLine,component,amount,currency,`reviewed ${suffix}`,'manual',null,sourceEvent,sourceComponent,JSON.stringify({review:suffix}),`${run}-${suffix}`];
+    const openRecon='select public.e10_org_open_customer_transaction_reconciliation($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11) r';
+    const decideRecon='select public.e10_org_decide_customer_transaction_reconciliation($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10) r';
     const first = (await a.query(call, args(tx, line, 'partial', 'refund', 'decrease', 10, null, null))).rows[0].r;
     if (first.paid_changed || first.settlement_changed || first.inventory_returned) throw new Error('adjustment asserted payment, settlement, or inventory return');
     const replay = (await a.query(call, args(tx, line, 'partial', 'refund', 'decrease', 10, null, null))).rows[0].r;
@@ -89,15 +91,19 @@ async function main() {
     denied = false;
     try { await a.query(call, args(tx, line2, 'unknown-component', 'refund', 'decrease', null, 1, null)); } catch (e) { denied = e.code === '22023' && e.message === 'adjustment_component_unknown'; }
     if (!denied) throw new Error('unknown monetary component was adjusted');
-    const zeroFinal = (await a.query(finalizeCall, finalizeArgs(tx,line2,'shipping',0,'finalize-shipping-zero'))).rows[0].r;
-    const zeroReplay = (await a.query(finalizeCall, finalizeArgs(tx,line2,'shipping',0,'finalize-shipping-zero'))).rows[0].r;
+    const zeroFinal = (await a.query(finalizeCall, finalizeArgs(tx,line2,'shipping',0,'finalize-shipping-zero','CAD',`${run}-a#b`,'c'))).rows[0].r;
+    const zeroReplay = (await a.query(finalizeCall, finalizeArgs(tx,line2,'shipping',0,'finalize-shipping-zero','CAD',`${run}-a#b`,'c'))).rows[0].r;
     const zeroBalanceRaw=await awaitBalance(admin,line2,'shipping');const zeroBalance=Number(zeroBalanceRaw);
-    if (!zeroReplay.replay || zeroReplay.finalization_id!==zeroFinal.finalization_id || zeroBalance!==0) throw new Error(`zero finalization or replay failed ${JSON.stringify({zeroFinal,zeroReplay,zeroBalanceRaw,zeroBalance})}`);
+    if (!zeroReplay.replay || zeroReplay.finalization_id!==zeroFinal.finalization_id || zeroBalanceRaw===null || zeroBalance!==0) throw new Error(`zero finalization or replay failed ${JSON.stringify({zeroFinal,zeroReplay,zeroBalanceRaw,zeroBalance})}`);
     await a.query(call,args(tx,line2,'post-finalization-increase','correction','increase',null,2,null));
     if (Number(await awaitBalance(admin,line2,'shipping'))!==2) throw new Error('delta after zero finalization did not reconstruct');
     denied = false;
     try { await a.query(call, args(tx, line, 'bad-currency', 'refund', 'decrease', 1, null, null, 'bad-currency', 'USD')); } catch (e) { denied = e.code === '22023' && e.message === 'adjustment_currency_mismatch'; }
     if (!denied) throw new Error('currency mismatch was accepted');
+    denied=false;try{await a.query(finalizeCall,finalizeArgs(tx,line,'merchandise',30,'known-component'));}catch(e){denied=e.code==='22023'&&e.message==='component_already_known_at_posting';}if(!denied)throw new Error('known posted component was finalized');
+    denied=false;try{await a.query(finalizeCall,finalizeArgs(tx,line2,'tax',-1,'negative-finalization'));}catch(e){denied=e.code==='22023';}if(!denied)throw new Error('negative finalization accepted');
+    denied=false;try{await a.query(finalizeCall,finalizeArgs(tx,line2,'tax','NaN','nan-finalization'));}catch(e){denied=e.code==='22023';}if(!denied)throw new Error('nonfinite finalization accepted');
+    denied=false;try{await a.query(finalizeCall,finalizeArgs(tx,line2,'tax',1,'finalize-currency','USD'));}catch(e){denied=e.code==='22023'&&e.message==='component_finalization_currency_mismatch';}if(!denied)throw new Error('finalization currency mismatch accepted');
 
     const race = await bounded(Promise.allSettled([
       a.query(call, args(tx, line, 'race-a', 'refund', 'decrease', 15, null, null, 'shared-refund')),
@@ -134,6 +140,9 @@ async function main() {
     denied = false;
     try { await a.query(call, args(tx, secondLine, 'wrong-transaction-line-pair', 'refund', 'decrease', 1, null, null)); } catch (e) { denied = e.code === '42501' && e.message === 'adjustment_line_denied'; }
     if (!denied) throw new Error('same-org mismatched transaction and line were accepted');
+    denied=false;try{await a.query(finalizeCall,finalizeArgs(otherTx,otherLine,'shipping',1,'foreign-finalization','CAD',`${run}-foreign-finalization`,`${run}-foreign-finalization`,ids.otherOrg));}catch(e){denied=e.code==='42501'&&e.message==='finalize_customer_component_denied';}if(!denied)throw new Error('foreign-org finalization accepted');
+    denied=false;try{await a.query(finalizeCall,finalizeArgs(tx,otherLine,'shipping',1,'foreign-line-finalization'));}catch(e){denied=e.code==='42501'&&e.message==='component_finalization_line_denied';}if(!denied)throw new Error('foreign line finalized under local org');
+    denied=false;try{await a.query(finalizeCall,finalizeArgs(tx,secondLine,'tax',1,'wrong-pair-finalization'));}catch(e){denied=e.code==='42501'&&e.message==='component_finalization_line_denied';}if(!denied)throw new Error('wrong transaction-line pair finalized');
 
     const staleFinalizations = await bounded(Promise.allSettled([
       a.query(finalizeCall,finalizeArgs(secondTx,secondLine,'merchandise',2,'finalize-merch-a')),
@@ -147,8 +156,8 @@ async function main() {
     if (finalVsRefund[0].status!=='fulfilled' || !((finalVsRefund[1].status==='fulfilled') || (finalVsRefund[1].status==='rejected' && finalVsRefund[1].reason.code==='22023'))) throw new Error(`finalization/refund race unsafe ${JSON.stringify(finalVsRefund)}`);
     const shipBalance=Number(await awaitBalance(admin,secondLine,'shipping'));
     if (![3,4].includes(shipBalance)) throw new Error(`finalization/refund balance ${shipBalance}`);
-    const collisionA=args(secondTx,secondLine,'tuple-a','correction','increase',null,1,null);collisionA[14]=`${run}-a#b`;collisionA[15]='c';
-    const collisionB=args(secondTx,secondLine,'tuple-b','correction','increase',null,1,null);collisionB[14]=`${run}-a`;collisionB[15]='b#c';
+    const collisionA=args(secondTx,secondLine,'tuple-a','correction','increase',null,1,null);collisionA[14]=`${run}-adjust-a#b`;collisionA[15]='c';
+    const collisionB=args(secondTx,secondLine,'tuple-b','correction','increase',null,1,null);collisionB[14]=`${run}-adjust-a`;collisionB[15]='b#c';
     await a.query(call,collisionA);await a.query(call,collisionB);
     const duplicateTuple=[...collisionA];duplicateTuple[11]='reviewed duplicate tuple';duplicateTuple[17]=JSON.stringify({review:'duplicate tuple'});duplicateTuple[18]=`${run}-tuple-duplicate`;
     denied=false;try{await a.query(call,duplicateTuple);}catch(e){denied=e.code==='23505'&&e.message==='adjustment_source_component_already_recorded';}
@@ -159,6 +168,37 @@ async function main() {
       args(secondTx,secondLine,'invalid-source','correction','increase',1,null,null),
     ];invalidCases[2][12]='native';
     for(const invalid of invalidCases){denied=false;try{await a.query(call,invalid);}catch(e){denied=e.code==='22023';}if(!denied)throw new Error('replacement delta writer lost amount/provenance validation');}
+    const cancelUnknown=(await a.query(call,args(tx,line2,'cancel-with-unknown-tax','cancellation','decrease',19,2,null))).rows[0].r;
+    denied=false;try{await a.query(finalizeCall,finalizeArgs(tx,line2,'tax',1,'positive-on-cancelled'));}catch(e){denied=e.code==='22023'&&e.message==='cancelled_line_requires_explicit_reinstatement';}if(!denied)throw new Error('positive unknown finalization revived cancelled line');
+    await a.query(finalizeCall,finalizeArgs(tx,line2,'tax',0,'zero-on-cancelled','CAD',`${run}-a`,'b#c'));
+    const tupleEvents=(await admin.query("select count(distinct source_event_id)::int n from public.e10_commercial_events where customer_transaction_component_finalization_id in($1,$2)",[zeroFinal.finalization_id,(await admin.query("select id from public.e10_customer_transaction_component_finalizations where transaction_line_id=$1 and component='tax'",[line2])).rows[0].id])).rows[0].n;
+    if(tupleEvents!==2)throw new Error('collision-safe finalization source tuple encoding failed');
+    const txCountBefore=Number((await admin.query('select count(*) n from public.e10_customer_transactions where organization_id=$1',[org])).rows[0].n);
+    const reconArgs=[org,'manual',null,`${run}-recon-event`,`${run}-recon-component`,'CAD',31,null,null,JSON.stringify({provider_total:31}),`${run}-recon-open`];
+    const recon=(await a.query(openRecon,reconArgs)).rows[0].r;const reconReplay=(await a.query(openRecon,reconArgs)).rows[0].r;
+    if(!reconReplay.replay||reconReplay.case_id!==recon.case_id||recon.contribution_created)throw new Error('reconciliation open retry/contribution contract failed');
+    denied=false;try{const duplicate=[...reconArgs];duplicate[10]=`${run}-recon-open-duplicate`;await a.query(openRecon,duplicate);}catch(e){denied=e.code==='23505'&&e.message==='reconciliation_source_component_already_opened';}if(!denied)throw new Error('duplicate reconciliation source accepted');
+    await a.query(decideRecon,[org,recon.case_id,0,'ambiguous',null,null,null,'multiple possible lines',JSON.stringify({candidates:2}),`${run}-recon-ambiguous`]);
+    const linkRace=await bounded(Promise.allSettled([
+      a.query(decideRecon,[org,recon.case_id,1,'link','reviewed_match',tx,line,'operator compared provider row',JSON.stringify({matched_by:'provider order review'}),`${run}-recon-link-a`]),
+      b.query(decideRecon,[org,recon.case_id,1,'link','reviewed_match',tx,line,'operator compared provider row',JSON.stringify({matched_by:'provider order review'}),`${run}-recon-link-b`]),
+    ]));
+    if(linkRace.filter(x=>x.status==='fulfilled').length!==1||linkRace.filter(x=>x.status==='rejected'&&x.reason.code==='40001').length!==1)throw new Error(`reconciliation decision race ${JSON.stringify(linkRace)}`);
+    const durable=(await a.query(openRecon,[org,'import','provider-file',`${run}-durable-event`,`${run}-durable-line`,'CAD',30,null,null,JSON.stringify({provider_order_id:'durable-1'}),`${run}-durable-open`])).rows[0].r;
+    await a.query(decideRecon,[org,durable.case_id,0,'link','durable_external_id',tx,line,'exact provider order id',JSON.stringify({provider_order_id:'durable-1'}),`${run}-durable-link`]);
+    const unresolved=(await a.query(openRecon,[org,'manual',null,`${run}-unresolved-event`,`${run}-unresolved-line`,'CAD',30,null,null,JSON.stringify({name_price_date_only:true}),`${run}-unresolved-open`])).rows[0].r;
+    const wrongCurrency=(await a.query(openRecon,[org,'import','provider-file',`${run}-usd-event`,`${run}-usd-line`,'USD',30,null,null,JSON.stringify({currency:'USD'}),`${run}-usd-open`])).rows[0].r;
+    denied=false;try{await a.query(decideRecon,[org,wrongCurrency.case_id,0,'link','reviewed_match',tx,line,'currency mismatch must fail','{}',`${run}-usd-link`]);}catch(e){denied=e.code==='22023'&&e.message==='customer_reconciliation_currency_mismatch';}if(!denied)throw new Error('cross-currency reconciliation linked');
+    denied=false;try{await a.query(openRecon,[ids.otherOrg,'manual',null,`${run}-foreign-recon`,`${run}-foreign-recon`,'CAD',7,null,null,'{}',`${run}-foreign-recon`]);}catch(e){denied=e.code==='42501'&&e.message==='open_customer_reconciliation_denied';}if(!denied)throw new Error('foreign-org reconciliation opened');
+    denied=false;try{await a.query(openRecon,[org,'native','native-feed',`${run}-native`,`${run}-native`,'CAD',30,null,null,'{}',`${run}-native-auth`]);}catch(e){denied=e.code==='42501'&&e.message==='untrusted_native_reconciliation_source';}if(!denied)throw new Error('authenticated caller forged native reconciliation');
+    await admin.query('set role service_role');const native=(await admin.query(openRecon,[org,'native','native-feed',`${run}-native`,`${run}-native`,'CAD',30,null,null,'{}',`${run}-native-service`])).rows[0].r;await admin.query('reset role');
+    const listed=(await a.query("select public.e10_org_list_customer_transaction_reconciliation($1,'unresolved',10,null,null) r",[org])).rows[0].r;
+    if(!listed.items.some(x=>x.id===unresolved.case_id)||listed.items.some(x=>x.id===recon.case_id))throw new Error('bounded reconciliation state list incorrect');
+    const reconProof=(await admin.query('select (select count(*)::int from public.e10_customer_transaction_evidence_links where transaction_line_id=$1) links,(select observed_merchandise_amount from public.e10_customer_transaction_reconciliation_cases where id=$2) observed,(select count(*)::int from public.e10_customer_transactions where organization_id=$3) tx_count',[line,recon.case_id,org])).rows[0];
+    if(reconProof.links!==2||Number(reconProof.observed)!==31||reconProof.tx_count!==txCountBefore)throw new Error(`reconciliation changed contribution or lost discrepancy ${JSON.stringify(reconProof)}`);
+    const reconSigs=['public.e10_org_open_customer_transaction_reconciliation(uuid,text,text,text,text,text,numeric,numeric,numeric,jsonb,text)','public.e10_org_decide_customer_transaction_reconciliation(uuid,uuid,integer,text,text,uuid,uuid,text,jsonb,text)','public.e10_org_list_customer_transaction_reconciliation(uuid,text,integer,timestamptz,uuid)'];
+    for(const sig of reconSigs){const x=(await admin.query("select has_function_privilege('anon',$1,'execute') anon,has_function_privilege('authenticated',$1,'execute') auth",[sig])).rows[0];if(x.anon||!x.auth)throw new Error(`reconciliation ACL ${sig} ${JSON.stringify(x)}`);}
+    await a.query('reset role');await a.query('set role authenticated');denied=false;try{await a.query('select * from public.e10_customer_transaction_reconciliation_cases where id=$1',[recon.case_id]);}catch(e){denied=e.code==='42501';}if(!denied)throw new Error('authenticated direct reconciliation table access allowed');
     await admin.query("delete from public.e10_organization_role_permissions where organization_id=$1 and role_id=$2 and capability='act.reconcile_customer_transactions'",[org,ids.role]);
     denied=false;try{await a.query(finalizeCall,finalizeArgs(tx,line2,'tax',0,'missing-reconcile-cap'));}catch(e){denied=e.code==='42501'&&e.message==='finalize_customer_component_denied';}
     if(!denied)throw new Error('missing reconciliation capability finalized a component');
@@ -174,13 +214,16 @@ async function main() {
     if (acl.anon || !acl.auth) throw new Error(`wrong RPC ACL ${JSON.stringify(acl)}`);
     const finalizeAcl=(await admin.query("select has_function_privilege('anon',p.oid,'execute') anon,has_function_privilege('authenticated',p.oid,'execute') auth from pg_proc p where p.oid='public.e10_org_finalize_customer_transaction_component(uuid,uuid,uuid,text,numeric,text,text,text,text,text,text,jsonb,text)'::regprocedure")).rows[0];
     if(finalizeAcl.anon||!finalizeAcl.auth)throw new Error(`wrong finalization RPC ACL ${JSON.stringify(finalizeAcl)}`);
-    console.log('TA-X6d.2 customer adjustments/finalization: PASS (known-zero baseline, later deltas, stale/finalize-refund races, tuple-safe source identity, hostile tenant, cancellation state)');
+    console.log('TA-X6d.3 customer reconciliation: PASS (unknown finalization, deterministic deltas, reviewed/durable links, ambiguity/discrepancy retention, one contribution, native trust, hostile tenant, races)');
   } finally {
     await Promise.all([a.query('rollback').catch(() => {}), b.query('rollback').catch(() => {})]);
     await admin.query('begin').catch(() => {});
     await admin.query('set local session_replication_role=replica').catch(() => {});
     await admin.query("delete from public.e10_commercial_events where idempotency_key like $1 or idempotency_key like $2 or idempotency_key like $3", [`customer-adjustment:${run}%`, `transaction-post:${run}%`, `customer-component-finalization:${run}%`]).catch(() => {});
     await admin.query('delete from public.e10_customer_transaction_component_finalizations where transaction_id=any($1::uuid[])', [[tx, secondTx, otherTx].filter(Boolean)]).catch(() => {});
+    await admin.query("delete from public.e10_customer_transaction_evidence_links where case_id in(select id from public.e10_customer_transaction_reconciliation_cases where idempotency_key like $1)",[`${run}%`]).catch(()=>{});
+    await admin.query("delete from public.e10_customer_transaction_reconciliation_decisions where case_id in(select id from public.e10_customer_transaction_reconciliation_cases where idempotency_key like $1)",[`${run}%`]).catch(()=>{});
+    await admin.query("delete from public.e10_customer_transaction_reconciliation_cases where idempotency_key like $1",[`${run}%`]).catch(()=>{});
     await admin.query('delete from public.e10_customer_transaction_adjustments where transaction_id=any($1::uuid[])', [[tx, secondTx, otherTx].filter(Boolean)]).catch(() => {});
     await admin.query("delete from public.e10_customer_transaction_lines where source_line_id like $1", [`${run}%`]).catch(() => {});
     await admin.query('delete from public.e10_customer_transactions where id=any($1::uuid[])', [[tx, secondTx, otherTx].filter(Boolean)]).catch(() => {});
@@ -203,6 +246,7 @@ async function main() {
       (select count(*) from public.e10_customers where id=any($3::uuid[]))+
       (select count(*) from public.e10_customer_commercial_receipts where idempotency_key like $4)+
       (select count(*) from public.e10_customer_transaction_component_finalizations where idempotency_key like $4)+
+      (select count(*) from public.e10_customer_transaction_reconciliation_cases where idempotency_key like $4)+
       (select count(*) from public.e10_customer_transaction_lines where source_line_id like $4)+
       (select count(*) from public.e10_organizations where id=$5) n`, [[ids.user, ids.otherUser], [ids.role, ids.otherRole], [ids.customer, ids.otherCustomer], `${run}%`, ids.otherOrg])).rows[0].n;
     await Promise.all([admin.end(), a.end(), b.end()]);
