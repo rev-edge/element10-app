@@ -59,7 +59,10 @@ async function serviceCleanup(manifest) {
     await db.connect();
     try {
       await db.query('begin');
-      await db.query('alter table public.e10_commercial_events disable trigger e10_commercial_events_append_only_trg');
+      // Teardown runs as the local postgres superuser. Replica mode suppresses the append-only
+      // trigger without DDL, which also avoids ALTER TABLE failing while X6's deferred link
+      // constraints have pending trigger events in this transaction.
+      await db.query('set local session_replication_role=replica');
       await db.query(`delete from public.e10_integration_outbox
         where commercial_event_id in (
           select id from public.e10_commercial_events
@@ -67,7 +70,6 @@ async function serviceCleanup(manifest) {
         )`, [itemIds]);
       await db.query(`delete from public.e10_commercial_events
         where subject_type='inventory_item' and subject_id=any($1::text[])`, [itemIds]);
-      await db.query('alter table public.e10_commercial_events enable trigger e10_commercial_events_append_only_trg');
       await db.query('commit');
     } catch (e) {
       await db.query('rollback').catch(() => {});
