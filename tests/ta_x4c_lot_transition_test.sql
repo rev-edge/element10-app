@@ -14,6 +14,7 @@ declare
   product uuid := 'e4000000-0000-4000-8000-00000000e4c4';
   config uuid := 'e4000000-0000-4000-8000-00000000e4c5';
   lot uuid := 'e4000000-0000-4000-8000-00000000e4c6';
+  lot2 uuid := 'e4000000-0000-4000-8000-00000000e4c8';
   session uuid := 'e4000000-0000-4000-8000-00000000e4c7';
   reservation uuid; reservation2 uuid; r jsonb; c bigint; q numeric; consumed numeric; st text;
 begin
@@ -41,6 +42,8 @@ begin
   insert into public.e10_inventory_items(id,name,qty,organization_id) values('x4c-transition-item','X4c Item',10,o);
   insert into public.e10_inventory_lots(id,organization_id,configuration_version_id,location_id,supplier_id,inventory_item_id,status,accepted_quantity)
     values(lot,o,config,location,supplier,'x4c-transition-item','available',10);
+  insert into public.e10_inventory_lots(id,organization_id,configuration_version_id,location_id,supplier_id,inventory_item_id,status,accepted_quantity)
+    values(lot2,o,config,location,supplier,'x4c-transition-item','available',10);
   insert into public.e10_break_sessions(id,name,streamer_uid,organization_id,source_show_ref)
     values(session,'X4c Session',u,o,'x4c-transition-show');
   perform set_config('request.jwt.claims',jsonb_build_object('sub',u,'role','authenticated')::text,true);
@@ -51,7 +54,13 @@ begin
   begin perform public.e10_org_lot_consume(o,reservation,1,'x4c-denied'); raise exception 'missing capability allowed';
   exception when insufficient_privilege then null; end;
   perform set_config('request.jwt.claims',jsonb_build_object('sub',u,'role','authenticated')::text,true);
+  perform set_config('role','authenticated',true);
+  begin
+    insert into e10.lot_transition_guards(backend_pid,transaction_id) values(pg_backend_pid(),txid_current());
+    raise exception 'authenticated caller wrote private transition guard';
+  exception when insufficient_privilege then null; end;
   r:=public.e10_org_lot_consume(o,reservation,3,'x4c-consume');
+  perform set_config('role','postgres',true);
   if not (r->>'ok')::boolean or (r->>'consumed_quantity')::numeric<>3 or (r->>'remaining_quantity')::numeric<>7 then
     raise exception 'partial consume result wrong: %',r;
   end if;
@@ -85,6 +94,8 @@ begin
   r:=public.e10_org_lot_reserve(o,lot,7,session,'x4c-reserve-2');
   reservation2:=(r->>'reservation_id')::uuid;
   begin perform public.e10_org_lot_reserve(o,lot,1,session,'x4c-reserve-over'); raise exception 'consumed stock was re-exposed';
+  exception when check_violation then null; end;
+  begin perform public.e10_org_lot_reserve(o,lot2,8,session,'x4c-second-lot-over'); raise exception 'shared item re-exposed consumed stock';
   exception when check_violation then null; end;
   begin perform public.e10_org_lot_consume(o,reservation2,8,'x4c-overconsume'); raise exception 'overconsume accepted';
   exception when check_violation then null; end;
