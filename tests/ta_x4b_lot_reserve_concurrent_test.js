@@ -15,6 +15,8 @@ async function cleanup(c) {
   // Superuser-only fixture teardown for the immutable audit table; production callers cannot do this.
   await c.query("set session_replication_role=replica");
   await c.query("delete from public.e10_lot_reservation_transitions where lot_reservation_id in (select id from public.e10_lot_reservations where lot_id=any($1::uuid[]))", [[ids.lot, ids.lot2]]);
+  await c.query("delete from public.e10_integration_outbox where commercial_event_id in (select id from public.e10_commercial_events where subject_type='inventory_item' and subject_id=any($1::text[]))", [[ids.item, ids.item2]]);
+  await c.query("delete from public.e10_commercial_events where subject_type='inventory_item' and subject_id=any($1::text[])", [[ids.item, ids.item2]]);
   await c.query("set session_replication_role=origin");
   await c.query("delete from public.e10_lot_reservations where lot_id=any($1::uuid[])", [[ids.lot, ids.lot2]]);
   await c.query("delete from public.e10_inventory_reservations where item_id=any($1::text[])", [[ids.item, ids.item2]]);

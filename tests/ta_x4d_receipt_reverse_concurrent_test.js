@@ -10,6 +10,8 @@ const jwt = JSON.stringify({ sub: x.user, role: 'authenticated' });
 
 async function cleanup(c) {
   await c.query('set session_replication_role=replica');
+  await c.query("delete from public.e10_integration_outbox where commercial_event_id in (select id from public.e10_commercial_events where subject_type='inventory_item' and subject_id=$1)", [x.item]);
+  await c.query("delete from public.e10_commercial_events where subject_type='inventory_item' and subject_id=$1", [x.item]);
   await c.query("delete from public.e10_expected_allocation_events where receipt_line_id in (select id from public.e10_stock_receipt_lines where stock_receipt_id in (select id from public.e10_stock_receipts where idempotency_key=$1))", [`x4d-receive-${x.run}`]);
   await c.query("delete from public.e10_stock_receipt_reversals where stock_receipt_id in (select id from public.e10_stock_receipts where idempotency_key=$1)", [`x4d-receive-${x.run}`]);
   await c.query("delete from public.e10_inventory_lots where inventory_item_id=$1", [x.item]);
