@@ -160,6 +160,12 @@ jobs:
         # reversed post-X5c gains a provenance-marked origin event and correction lineage in the same transaction.
         # sale_committed/fulfillment remain operational evidence only, never official customer spend.
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x5c_native_movement_events_test.sql
+      - name: TA-X5d reviewed intake commit
+        # Commits resolved evidence observations only. Inventory receipt and customer activity rows must use
+        # their domain writers and cannot become inventory, official customer spend, finance, or settlement here.
+        run: |
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x5d_intake_commit_test.sql
+          node tests/ta_x5d_intake_commit_concurrent_test.js
       - name: Schema reproducibility (re-apply migrations cleanly)
         run: supabase db reset
       - name: Default-privileges regression probe (born-locked; zero anon-executable functions)
