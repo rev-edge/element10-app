@@ -4,7 +4,7 @@ const { randomUUID } = require('crypto');
 const CONN = process.env.E10_DB_URL || 'postgresql://postgres:postgres@127.0.0.1:54322/postgres';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ids = {
-  user: randomUUID(), lot: randomUUID(), lot2: randomUUID(), session: randomUUID(), supplier: randomUUID(),
+  user: randomUUID(), role: randomUUID(), lot: randomUUID(), lot2: randomUUID(), session: randomUUID(), supplier: randomUUID(),
   location: randomUUID(), product: randomUUID(), config: randomUUID(), item: `x4c-${randomUUID()}`, item2: `x4c-${randomUUID()}`,
 };
 const org = 'e1000000-0000-4000-8000-0000000000a6';
@@ -24,6 +24,7 @@ async function cleanup(c) {
   await c.query("delete from public.e10_locations where id=$1", [ids.location]);
   await c.query("delete from public.e10_suppliers where id=$1", [ids.supplier]);
   await c.query("delete from public.e10_organization_memberships where organization_id=$1 and user_id=$2", [org, ids.user]);
+  await c.query("delete from public.e10_organization_roles where organization_id=$1 and id=$2", [org, ids.role]);
   await c.query("delete from auth.users where id=$1", [ids.user]);
 }
 
@@ -33,8 +34,9 @@ async function main() {
   try {
     await cleanup(setup);
     await setup.query(`insert into auth.users(id,instance_id,aud,role,email,created_at,updated_at) values($1,'00000000-0000-0000-0000-000000000000','authenticated','authenticated','x4c@x.invalid',now(),now())`, [ids.user]);
-    await setup.query(`insert into public.e10_organization_memberships(organization_id,user_id,role_id,status) values($1,$2,'e1000000-0000-4000-8000-000000000002','active')`, [org, ids.user]);
-    await setup.query(`insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed) values($1,'e1000000-0000-4000-8000-000000000002','act.reserve_inventory',true) on conflict do nothing`, [org]);
+    await setup.query(`insert into public.e10_organization_roles(id,organization_id,key,name,is_system) values($1,$2,$3,'X4c Test Role',false)`, [ids.role, org, `x4c-${run}`]);
+    await setup.query(`insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed) values($1,$2,'act.reserve_inventory',true),($1,$2,'act.inventory_edit',true)`, [org, ids.role]);
+    await setup.query(`insert into public.e10_organization_memberships(organization_id,user_id,role_id,status) values($1,$2,$3,'active')`, [org, ids.user, ids.role]);
     await setup.query(`insert into public.e10_suppliers(id,organization_id,name) values($1,$2,'X4c Supplier')`, [ids.supplier, org]);
     await setup.query(`insert into public.e10_locations(id,organization_id,name) values($1,$2,'X4c Location')`, [ids.location, org]);
     await setup.query(`insert into public.e10_product_masters(id,organization_id,name) values($1,$2,'X4c Product')`, [ids.product, org]);
@@ -76,8 +78,9 @@ async function main() {
     if (Number(overlap.lot_rows) !== 0 || Number(overlap.legacy_reserved) !== 4) throw new Error('legacy overlap diverged: ' + JSON.stringify(overlap));
     console.log(`TA-X4b concurrent reserve: PASS (new/new lock proof and legacy/new shared-item lock proof; no overcommit; ledgers reconciled)`);
   } finally {
-    await A.query('rollback').catch(() => {}); await B.query('rollback').catch(() => {}); await cleanup(setup).catch(() => {});
-    await A.end().catch(() => {}); await B.end().catch(() => {}); await setup.end().catch(() => {});
+    await A.query('rollback').catch(() => {}); await B.query('rollback').catch(() => {});
+    await cleanup(setup);
+    await A.end(); await B.end(); await setup.end();
   }
 }
 main().catch((e) => { console.error('TA-X4b concurrent test ERROR: ' + (e.stack || e.message)); process.exit(1); });
