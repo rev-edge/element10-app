@@ -166,6 +166,10 @@ jobs:
         run: |
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x5d_intake_commit_test.sql
           node tests/ta_x5d_intake_commit_concurrent_test.js
+      - name: TA-X5e immutable observation corrections
+        run: |
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x5e_observation_corrections_test.sql
+          node tests/ta_x5e_observation_corrections_concurrent_test.js
       - name: Schema reproducibility (re-apply migrations cleanly)
         run: supabase db reset
       - name: Default-privileges regression probe (born-locked; zero anon-executable functions)
