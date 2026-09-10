@@ -91,12 +91,19 @@ begin
   if q<>-3 or consumed<>0 then raise exception 'movement ledger not reconciled on_hand=% reserved=%',q,consumed; end if;
 
   -- The seven released units can be reserved again; the three consumed units cannot.
+  -- Add ten independently accounted on-hand units from lot2 so the original-lot
+  -- rejection is proved by lot conservation, not by aggregate item availability.
+  update public.e10_inventory_items set qty=17 where organization_id=o and id='x4c-transition-item';
+  perform public.e10_org_emit_inventory_movement(o,'x4c-transition-item','intake',10,0,'x4c-lot2-intake',
+    'intake','second lot fixture','inventory_lot',lot2::text,'accept',null,jsonb_build_object('lot_id',lot2));
+  begin perform public.e10_org_lot_reserve(o,lot,8,session,'x4c-original-lot-over'); raise exception 'original lot re-exposed consumed stock';
+  exception when check_violation then null; end;
   r:=public.e10_org_lot_reserve(o,lot,7,session,'x4c-reserve-2');
   reservation2:=(r->>'reservation_id')::uuid;
   begin perform public.e10_org_lot_reserve(o,lot,1,session,'x4c-reserve-over'); raise exception 'consumed stock was re-exposed';
   exception when check_violation then null; end;
-  begin perform public.e10_org_lot_reserve(o,lot2,8,session,'x4c-second-lot-over'); raise exception 'shared item re-exposed consumed stock';
-  exception when check_violation then null; end;
+  r:=public.e10_org_lot_reserve(o,lot2,10,session,'x4c-second-lot-full');
+  if not (r->>'ok')::boolean then raise exception 'independent second lot was not reservable: %',r; end if;
   begin perform public.e10_org_lot_consume(o,reservation2,8,'x4c-overconsume'); raise exception 'overconsume accepted';
   exception when check_violation then null; end;
   begin perform public.e10_org_lot_release(o,reservation2,'x4c-consume'); raise exception 'cross-action idempotency reuse accepted';
