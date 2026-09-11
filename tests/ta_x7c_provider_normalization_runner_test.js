@@ -8,7 +8,7 @@ async function rejected(p, code) {
 async function main() {
   const c = new Client({ connectionString: db });
   await c.connect();
-  const x = {org:randomUUID(),user:randomUUID(),role:randomUUID(),customer:randomUUID(),session:randomUUID(),stream:randomUUID(),stream2:randomUUID(),segment:randomUUID(),segment2:randomUUID(),policy:randomUUID(),policyB:randomUUID(),coverage:randomUUID(),coverageB:randomUUID()};
+  const x = {org:randomUUID(),user:randomUUID(),role:randomUUID(),customer:randomUUID(),customer2:randomUUID(),session:randomUUID(),stream:randomUUID(),stream2:randomUUID(),segment:randomUUID(),segment2:randomUUID(),policy:randomUUID(),policyB:randomUUID(),coverage:randomUUID(),coverageB:randomUUID()};
   let ok=false;
   try {
     await c.query("insert into auth.users(id,instance_id,aud,role,email,created_at,updated_at)values($1,'00000000-0000-0000-0000-000000000000','authenticated','authenticated',$2,now(),now())",[x.user,`${x.user}@x.invalid`]);
@@ -16,7 +16,7 @@ async function main() {
     await c.query("insert into public.e10_organization_roles(id,organization_id,key,name,is_system)values($1,$2,'x7c-reader','X7c reader',false)",[x.role,x.org]);
     await c.query("insert into public.e10_organization_role_permissions(organization_id,role_id,capability)values($1,$2,'act.view_customer_engagement')",[x.org,x.role]);
     await c.query("insert into public.e10_organization_memberships(organization_id,user_id,role_id,status)values($1,$2,$3,'active')",[x.org,x.user,x.role]);
-    await c.query("insert into public.e10_customers(id,organization_id,display_name)values($1,$2,'X7c customer')",[x.customer,x.org]);
+    await c.query("insert into public.e10_customers(id,organization_id,display_name)values($1,$3,'X7c customer'),($2,$3,'X7c customer 2')",[x.customer,x.customer2,x.org]);
     await c.query("insert into public.e10_break_sessions(id,organization_id,streamer_uid,name,status,visibility,created_at,ended_at)values($1,$2,$3,'Runner','ended','private','2026-01-01','2026-01-31')",[x.session,x.org,x.user]);
     await c.query("insert into public.e10_presence_collection_policies(organization_id,policy_version,source_class,provider_key,enabled,notice_version,heartbeat_expiry_seconds,min_event_interval_ms,max_events_per_minute,retention_interval,coverage_label,effective_from)values($1,1,'authorized_platform','provider-a',true,'n1',300,0,60,interval '30 days','fixture','2026-01-01')",[x.org]);
     await c.query("insert into public.e10_provider_presence_normalization_policy_decisions(id,organization_id,provider_key,revision,action,effective_from,effective_through,heartbeat_expiry,maximum_late_arrival,collection_policy_version,reason,evidence,idempotency_key,request_fingerprint)values($1,$2,'provider-a',1,'enable','2026-01-01','2027-01-01',interval '5 minutes',interval '1 day',1,'fixture','{}','policy','policy-fp')",[x.policy,x.org]);
@@ -65,18 +65,23 @@ async function main() {
     if(!denied)throw Error("authenticated caller executed service runner");
     const run=(await c.query("select status,input_event_count,interval_count,quarantine_count,output_reporting_revision>input_reporting_revision advanced from public.e10_provider_presence_normalization_runs where id=$1",[first.run_id])).rows[0];
     if(run.status!=="complete"||Number(run.input_event_count)!==8||!run.advanced)throw Error("sealed run metadata wrong");
+    const jwt=JSON.stringify({sub:x.user,role:'authenticated'});await c.query("select set_config('request.jwt.claims',$1,false)",[jwt]);await c.query("set role authenticated");
+    const noCoverage=(await c.query("select * from public.e10_org_source_attendance_summary($1,'provider-none',$2,$3,'2026-01-01','2026-02-01','2026-02-01') order by source_class",[x.org,x.session,x.customer])).rows;await c.query('reset role');
+    if(noCoverage.length!==2||noCoverage.some(v=>!v.availability.startsWith('unavailable_')||v.observed_seconds!==null))throw Error(`missing run/coverage manufactured zero ${JSON.stringify(noCoverage)}`);
     await c.query("insert into public.e10_presence_collection_policies(organization_id,policy_version,source_class,provider_key,enabled,notice_version,heartbeat_expiry_seconds,min_event_interval_ms,max_events_per_minute,retention_interval,coverage_label,effective_from,effective_through)values($1,1,'companion','companion',true,'cn1',300,0,60,interval '365 days','fixture','2026-01-01','2026-02-01')",[x.org]);
     const cc=randomUUID(),cp=randomUUID();
     await c.query("insert into public.e10_attendance_coverage_assertions(id,organization_id,coverage_key,revision,action,source_class,provider_key,covered_from,covered_to,coverage_status,policy_version,review_basis,evidence,idempotency_key,request_fingerprint)values($1,$3,$1,1,'assert','companion','companion','2026-01-01','2026-02-01','complete',1,'fixture','{}','comp-complete','cc'),($2,$3,$2,1,'assert','companion','companion','2026-01-02 10:00:30Z','2026-01-02 10:00:45Z','partial',1,'fixture','{}','comp-partial','cp')",[cc,cp,x.org]);
     const cs1=randomUUID(),cs2=randomUUID(),cg1=randomUUID(),cg2=randomUUID();
     for(const [st,sg,connection]of[[cs1,cg1,'comp-1'],[cs2,cg2,'comp-2']]){await c.query("insert into public.e10_session_presence_streams(id,organization_id,session_id,source_class,provider_key,subject_key,connection_id,observed_user_id,original_customer_id,identity_status,collection_policy_version,notice_version,coverage_label,retention_expires_at)values($1,$2,$3,'companion','companion',$4::uuid::text,$5,$4::uuid,$6,'reviewed_attributed',1,'cn1','fixture','2027-01-01')",[st,x.org,x.session,x.user,connection,x.customer]);await c.query("insert into public.e10_session_presence_segments(id,organization_id,stream_id,segment_sequence,heartbeat_expiry_seconds,retention_expires_at,collection_policy_version,notice_version,coverage_label)values($1,$2,$3,1,300,'2027-01-01',1,'cn1','fixture')",[sg,x.org,st]);await c.query("insert into public.e10_session_presence_events(id,organization_id,stream_id,segment_id,event_sequence,event_kind,server_received_at,evidence,request_fingerprint)values($1,$2,$3,$4,1,'join','2026-01-02 10:00Z','{}',$5),($6,$2,$3,$4,2,'leave','2026-01-02 10:01Z','{}',$7)",[randomUUID(),x.org,st,sg,connection+'-join',randomUUID(),connection+'-leave']);}
-    const jwt=JSON.stringify({sub:x.user,role:'authenticated'});await c.query("select set_config('request.jwt.claims',$1,false)",[jwt]);await c.query("set role authenticated");
+    await c.query("set role authenticated");
     const detail="select * from public.e10_org_provider_attendance_intervals($1,'provider-a',$2,$3,'2026-01-01','2026-02-01','2026-02-01',1,$4,$5,$6,$7)";
     const page1=(await c.query(detail,[x.org,x.session,x.customer,null,null,null,null])).rows[0];
     if(!page1||page1.availability!=="available"||page1.source_class!=="authorized_platform"||Number(page1.observed_seconds)!==60)throw Error(`provider detail wrong ${JSON.stringify(page1)}`);
     const page2=(await c.query(detail,[x.org,x.session,x.customer,page1.started_at,page1.interval_id,Number(page1.dataset_revision),page1.query_fingerprint])).rows[0];
     if(!page2||page2.interval_id===page1.interval_id)throw Error("provider detail cursor failed");
     if(!await rejected(c.query(detail,[x.org,x.session,x.customer,page1.started_at,page1.interval_id,Number(page1.dataset_revision),page1.query_fingerprint+'x']),"22023"))throw Error("provider cursor rebind accepted");
+    const targetFp=(await c.query("select md5(jsonb_build_object('metric','provider-attendance-intervals-v1','org',$1::uuid,'provider','provider-a','session',$2::uuid,'customer',$3::uuid,'from','2026-01-01'::timestamptz,'to','2026-02-01'::timestamptz,'cutoff','2026-02-01'::timestamptz,'revision',$4::bigint,'run',$5::uuid)::text) fp",[x.org,x.session,x.customer2,page1.dataset_revision,page1.run_id])).rows[0].fp;
+    if(!await rejected(c.query(detail,[x.org,x.session,x.customer2,page1.started_at,page1.interval_id,Number(page1.dataset_revision),targetFp]),"22023"))throw Error("interval cursor crossed customer cohort");
     const quarantine=(await c.query("select * from public.e10_org_provider_attendance_quarantine($1,'provider-a','2026-01-01','2026-02-01','2026-02-01',null,2,null,null,null)",[x.org])).rows;
     if(quarantine.length!==2||quarantine.some(r=>r.availability!=="available"||r.evidence_event_count<1))throw Error("quarantine read wrong");
     const summary=(await c.query("select * from public.e10_org_source_attendance_summary($1,'provider-a',$2,$3,'2026-01-01','2026-02-01','2026-02-01') order by source_class",[x.org,x.session,x.customer])).rows;
@@ -86,14 +91,20 @@ async function main() {
     const qb=(await c.query("select * from public.e10_org_provider_attendance_quarantine($1,'provider-a','2026-01-01','2026-02-01','2026-02-01','future_provider_time',2,null,null,null)",[x.org])).rows[0];
     if(!await rejected(c.query("select * from public.e10_org_provider_attendance_quarantine($1,'provider-a','2026-01-01','2026-02-01','2026-02-01','future_provider_time',2,$2,$3,$4)",[x.org,qa.quarantine_id,Number(qb.dataset_revision),qb.query_fingerprint]),"22023"))throw Error("quarantine cursor crossed reason cohort");
     await c.query("reset role");await c.query("delete from public.e10_organization_role_permissions where organization_id=$1 and role_id=$2 and capability='act.view_customer_engagement'",[x.org,x.role]);await c.query("set role authenticated");
-    if(!await rejected(c.query(detail,[x.org,x.session,x.customer,null,null,null,null]),"42501"))throw Error("missing-cap provider read allowed");
+    if(!await rejected(c.query(detail,[x.org,x.session,x.customer,null,null,null,null]),"42501")||!await rejected(c.query("select * from public.e10_org_provider_attendance_quarantine($1,'provider-a','2026-01-01','2026-02-01','2026-02-01',null,2,null,null,null)",[x.org]),"42501")||!await rejected(c.query("select * from public.e10_org_source_attendance_summary($1,'provider-a',$2,$3,'2026-01-01','2026-02-01','2026-02-01')",[x.org,x.session,x.customer]),"42501"))throw Error("missing-cap provider RPC allowed");
     await c.query("reset role");await c.query("insert into public.e10_organization_role_permissions(organization_id,role_id,capability)values($1,$2,'act.view_customer_engagement')",[x.org,x.role]);await c.query("set role anon");
-    if(!await rejected(c.query(detail,[x.org,x.session,x.customer,null,null,null,null]),"42501"))throw Error("anon provider read allowed");
+    if(!await rejected(c.query(detail,[x.org,x.session,x.customer,null,null,null,null]),"42501")||!await rejected(c.query("select * from public.e10_org_provider_attendance_quarantine($1,'provider-a','2026-01-01','2026-02-01','2026-02-01',null,2,null,null,null)",[x.org]),"42501")||!await rejected(c.query("select * from public.e10_org_source_attendance_summary($1,'provider-a',$2,$3,'2026-01-01','2026-02-01','2026-02-01')",[x.org,x.session,x.customer]),"42501"))throw Error("anon provider RPC allowed");
     await c.query("reset role");
-    const stale=randomUUID();await c.query("insert into public.e10_session_presence_attribution_decisions(id,organization_id,stream_id,revision,action,customer_id,reason,evidence,idempotency_key,request_fingerprint)values($1,$2,$3,1,'attribute',$4,'stale fixture','{}','stale-attribution','stale-fp')",[stale,x.org,x.stream,x.customer]);
+    const stale=randomUUID();await c.query("insert into public.e10_session_presence_attribution_decisions(id,organization_id,stream_id,revision,action,customer_id,reason,evidence,idempotency_key,request_fingerprint)values($1,$2,$3,1,'attribute',$4,'stale fixture','{}','stale-attribution','stale-fp')",[stale,x.org,x.stream,x.customer2]);
     await c.query("set role authenticated");
     const unavailable=(await c.query(detail,[x.org,x.session,x.customer,null,null,null,null])).rows[0];await c.query("reset role");
     if(unavailable.availability!=="unavailable_rebuild_required"||unavailable.observed_seconds!==null)throw Error("stale run manufactured attendance");
+    const unaffected=(await c.query("select (e10.current_provider_normalization_run($1,'provider-b','2026-01-01','2026-02-01','2026-02-01')).id id",[x.org])).rows[0].id;
+    if(unaffected!==providerB.run_id)throw Error("provider A attribution invalidated provider B");
+    const rebuilt=(await c.query(call.replace("'run-1'","'run-after-attribution'"),[x.org,x.policy])).rows[0].result;
+    if(rebuilt.status!=="complete"||rebuilt.run_id===first.run_id)throw Error("attribution rebuild failed");
+    const detailAll=detail.replace(',1,$4,$5,$6,$7)',',200,$4,$5,$6,$7)');await c.query("set role authenticated");const oldCustomer=(await c.query(detailAll,[x.org,x.session,x.customer,null,null,null,null])).rows;const freshRows=(await c.query(detailAll,[x.org,x.session,x.customer2,null,null,null,null])).rows;const fresh=freshRows[0];await c.query("reset role");
+    if(oldCustomer.length!==1||Number(oldCustomer[0].observed_seconds)!==60||freshRows.length!==2||freshRows.some(v=>v.availability!=="available"||v.run_id!==rebuilt.run_id)||freshRows.reduce((n,v)=>n+Number(v.observed_seconds),0)!==120)throw Error(`rebuilt attribution did not move corrected stream customer ${JSON.stringify({oldCustomer,freshRows,rebuilt})}`);
     ok=true;
   } finally {
     await c.query("reset role").catch(()=>{});await c.query("set session_replication_role=replica");
