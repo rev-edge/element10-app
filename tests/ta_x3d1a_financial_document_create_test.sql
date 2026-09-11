@@ -140,9 +140,17 @@ begin
     perform public.e10_org_create_supplier_invoice(o,'d3100000-0000-4000-8000-000000000010',
       'INV-X3D1A','CAD','2026-09-11',precise+2,null,null,null,null,null,
       jsonb_build_array(jsonb_build_object('id','d3100000-0000-4000-8000-000000000031',
-        'line_no',1,'invoiced_quantity','2.5','unit_cost','12.50','line_amount',precise)),
-      'x3d1a-invalid-existing-lines');
-    raise exception 'invalid string numerics reached existing-identity reconciliation';
+        'line_no',1,'invoiced_quantity','2.5','unit_cost',12.50,'line_amount',precise)),
+      'x3d1a-invalid-existing-quantity');
+    raise exception 'string quantity reached existing-identity reconciliation';
+  exception when sqlstate '22023' then null; end;
+  begin
+    perform public.e10_org_create_supplier_invoice(o,'d3100000-0000-4000-8000-000000000010',
+      'INV-X3D1A','CAD','2026-09-11',precise+2,null,null,null,null,null,
+      jsonb_build_array(jsonb_build_object('id','d3100000-0000-4000-8000-000000000031',
+        'line_no',1,'invoiced_quantity',2.5,'unit_cost','12.50','line_amount',precise)),
+      'x3d1a-invalid-existing-unit-cost');
+    raise exception 'string unit cost reached existing-identity reconciliation';
   exception when sqlstate '22023' then null; end;
   begin
     perform public.e10_org_create_supplier_invoice(o,'d3100000-0000-4000-8000-000000000010',
@@ -194,13 +202,13 @@ begin
   if (select (received_snapshot->>'total_amount')::numeric
       from public.e10_financial_document_reconciliation_cases
       where existing_document_id=invoice_id and identity_kind='manual')
-      <>124.45678901234567890123456789
+      is distinct from 124.45678901234567890123456789
     or (select received_snapshot->'lines'->0->>'id'
       from public.e10_financial_document_reconciliation_cases
       where existing_document_id=invoice_id and identity_kind='manual')
-      <>'d3100000-0000-4000-8000-000000000031'
+      is distinct from 'd3100000-0000-4000-8000-000000000031'
     or exists(select 1 from public.e10_financial_document_commands
-      where idempotency_key='x3d1a-invalid-existing-lines') then
+      where idempotency_key in ('x3d1a-invalid-existing-quantity','x3d1a-invalid-existing-unit-cost')) then
     raise exception 'bounded incoming snapshot missing or invalid-line request wrote evidence';
   end if;
   if (select count(*) from public.e10_supplier_credit_lines
