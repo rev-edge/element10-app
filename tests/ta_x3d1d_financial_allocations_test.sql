@@ -4,8 +4,10 @@ begin;
 do $$
 declare
   o constant uuid:='d31f0000-0000-4000-8000-000000000001';
+  other_org constant uuid:='d31f0000-0000-4000-8000-000000000019';
   actor constant uuid:='d31f0000-0000-4000-8000-000000000002';
   role_id constant uuid:='d31f0000-0000-4000-8000-000000000003';
+  other_role constant uuid:='d31f0000-0000-4000-8000-000000000020';
   supplier constant uuid:='d31f0000-0000-4000-8000-000000000004';
   location_id constant uuid:='d31f0000-0000-4000-8000-000000000005';
   product_id constant uuid:='d31f0000-0000-4000-8000-000000000006';
@@ -23,15 +25,16 @@ declare
   cl constant uuid:='d31f0000-0000-4000-8000-000000000018';
   r jsonb; replay jsonb; baseline jsonb;
 begin
-  insert into public.e10_organizations(id,name,slug) values(o,'X3d1d org','x3d1d-org');
+  insert into public.e10_organizations(id,name,slug) values
+    (o,'X3d1d org','x3d1d-org'),(other_org,'X3d1d other','x3d1d-other');
   insert into auth.users(id,instance_id,aud,role,email,created_at,updated_at)
     values(actor,'00000000-0000-0000-0000-000000000000','authenticated','authenticated','x3d1d@example.invalid',now(),now());
   insert into public.e10_organization_roles(id,organization_id,key,name)
-    values(role_id,o,'x3d1d','X3d1d');
+    values(role_id,o,'x3d1d','X3d1d'),(other_role,other_org,'x3d1d-other','X3d1d other');
   insert into public.e10_organization_memberships(organization_id,user_id,role_id,status)
-    values(o,actor,role_id,'active');
+    values(o,actor,role_id,'active'),(other_org,actor,other_role,'active');
   insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed)
-    values(o,role_id,'act.purchasing_prepare',true);
+    values(o,role_id,'act.purchasing_prepare',true),(other_org,other_role,'act.purchasing_prepare',true);
   insert into public.e10_suppliers(id,organization_id,name,status) values(supplier,o,'X3d1d supplier','active');
   insert into public.e10_locations(id,organization_id,name,status) values(location_id,o,'X3d1d location','active');
   insert into public.e10_location_role_permissions(organization_id,location_id,role_id,can_receive)
@@ -119,6 +122,9 @@ begin
   begin
     perform public.e10_org_allocate_invoice_to_po(o,il1,pol1,1,1,7,'changed','x3d1d-ip-1');
     raise exception 'idempotency mismatch accepted'; exception when invalid_parameter_value then null; end;
+  begin
+    perform public.e10_org_allocate_invoice_to_po(other_org,il1,pol1,1,1,1,'foreign lines','x3d1d-cross-org');
+    raise exception 'foreign-org lines accepted for authorized multi-member'; exception when insufficient_privilege then null; end;
   reset role;
 
   set constraints all immediate;
@@ -128,7 +134,7 @@ begin
     or (select count(*) from public.e10_credit_invoice_allocation_events where organization_id=o)<>3
     or (select count(*) from public.e10_financial_allocation_commands where organization_id=o)<>6
     or exists(select 1 from public.e10_financial_allocation_commands where organization_id=o
-      and idempotency_key in ('x3d1d-ip-over','x3d1d-ip-closed','x3d1d-ip-excess','x3d1d-ci-over','x3d1d-nan','x3d1d-stale'))
+      and idempotency_key in ('x3d1d-ip-over','x3d1d-ip-closed','x3d1d-ip-excess','x3d1d-ci-over','x3d1d-nan','x3d1d-stale','x3d1d-cross-org'))
     or not exists(select 1 from public.e10_supplier_invoice_revisions where organization_id=o
       and supplier_invoice_id=inv1 and revision=2 and status='reviewed'
       and jsonb_array_length(snapshot->'purchase_order_allocations')=1)
