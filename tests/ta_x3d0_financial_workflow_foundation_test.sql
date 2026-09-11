@@ -8,6 +8,7 @@ declare
   product uuid:=gen_random_uuid(); config uuid:=gen_random_uuid(); version uuid:=gen_random_uuid();
   po uuid:=gen_random_uuid(); po_line uuid:=gen_random_uuid();
   invoice uuid:=gen_random_uuid(); invoice_line uuid:=gen_random_uuid(); invoice_b uuid:=gen_random_uuid();
+  invoice_connected uuid:=gen_random_uuid();
   credit uuid:=gen_random_uuid(); credit_line uuid:=gen_random_uuid();
   invoice_event uuid:=gen_random_uuid(); credit_event uuid:=gen_random_uuid(); actor uuid:=gen_random_uuid();
   invoice_release uuid:=gen_random_uuid(); credit_release uuid:=gen_random_uuid();
@@ -43,6 +44,10 @@ begin
   insert into public.e10_supplier_invoices
     (id,organization_id,supplier_id,supplier_document_number,currency,total_amount)
     values(invoice_b,ob,supplier_b,'INV-FOREIGN','CAD',50);
+  insert into public.e10_supplier_invoices
+    (id,organization_id,supplier_id,supplier_document_number,currency,total_amount,
+     source_connection,external_document_id,payload_fingerprint)
+    values(invoice_connected,o,supplier,'Inv-01','CAD',50,'provider-x3d','connected-1','connected-fp');
   begin
     insert into public.e10_supplier_invoices
       (organization_id,supplier_id,supplier_document_number,currency,total_amount)
@@ -70,16 +75,10 @@ begin
     raise exception 'mixed-null credit void metadata accepted';
   exception when check_violation then null; end;
 
-  insert into public.e10_supplier_invoices
-    (organization_id,supplier_id,currency,total_amount,identity_legacy_unresolved_at)
-    values(o,supplier,'CAD',1,transaction_timestamp());
-  set local session_replication_role=replica;
-  insert into public.e10_supplier_credits
-    (organization_id,supplier_id,supplier_document_number,currency,total_amount)
-    values(o,supplier,'LEGACY-DUP','CAD',1),(o,supplier,'legacy-dup','CAD',2);
-  set local session_replication_role=origin;
-  update public.e10_supplier_credits set total_amount=3
-    where organization_id=o and lower(btrim(supplier_document_number))='legacy-dup';
+  begin
+    update public.e10_supplier_invoices set supplier_document_number=null where id=invoice;
+    raise exception 'identified invoice was allowed to become unresolved without review';
+  exception when check_violation then null; end;
 
   insert into public.e10_invoice_po_allocation_events
     (id,organization_id,invoice_line_id,purchase_order_line_id,operation,quantity_delta,reason,command_idempotency_key)
@@ -154,6 +153,13 @@ begin
     (organization_id,document_kind,identity_kind,supplier_id,normalized_document_number,
      existing_document_id,existing_fingerprint,received_fingerprint)
     values(o,'supplier_invoice','manual',supplier,'inv-01',invoice,'old','new');
+  begin
+    insert into public.e10_financial_document_reconciliation_cases
+      (organization_id,document_kind,identity_kind,supplier_id,normalized_document_number,
+       existing_document_id,existing_fingerprint,received_fingerprint)
+      values(o,'supplier_invoice','manual',supplier,'inv-01',invoice_connected,'old','new-connected-as-manual');
+    raise exception 'connected invoice accepted under manual reconciliation identity';
+  exception when check_violation then null; end;
   begin
     insert into public.e10_credit_invoice_allocation_events
       (organization_id,credit_line_id,invoice_line_id,operation,amount_delta,reason,command_idempotency_key)

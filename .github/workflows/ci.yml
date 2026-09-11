@@ -202,7 +202,9 @@ jobs:
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3c_purchase_order_lifecycle_test.sql
           node tests/ta_x3c_purchase_order_concurrent_test.js
       - name: TA-X3d.0 financial workflow foundation (identity, allocation history, fail-closed storage)
-        run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3d0_financial_workflow_foundation_test.sql
+        run: |
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3d0_financial_workflow_foundation_test.sql
+          node tests/ta_x3d0_manual_identity_concurrent_test.js
       - name: TA-X4a lot and reservation foundation
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x4a_lot_reservation_foundation_test.sql
       - name: TA-X4b atomic lot reservation writer
@@ -263,6 +265,8 @@ jobs:
         run: |
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x6c_customer_transaction_posting_test.sql
           node tests/ta_x6c_customer_transaction_posting_concurrent_test.js
+      - name: TA-X3d.0 predecessor-schema upgrade compatibility
+        run: bash tests/ta_x3d0_predecessor_upgrade_test.sh
       - name: Schema reproducibility (re-apply migrations cleanly)
         run: supabase db reset
       - name: Default-privileges regression probe (born-locked; zero anon-executable functions)

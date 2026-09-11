@@ -12,7 +12,6 @@ alter table public.e10_supplier_invoices
   add column duplicate_review_outcome text
     check(duplicate_review_outcome in ('confirmed_distinct','possible_duplicate_accepted')),
   add column duplicate_review_reason text,
-  add column identity_legacy_unresolved_at timestamptz,
   add constraint e10_supplier_invoices_review_state_chk check(
     num_nonnulls(reviewed_by,reviewed_at) in (0,2)),
   add constraint e10_supplier_invoices_approval_state_chk check(
@@ -32,7 +31,6 @@ alter table public.e10_supplier_credits
   add column duplicate_review_outcome text
     check(duplicate_review_outcome in ('confirmed_distinct','possible_duplicate_accepted')),
   add column duplicate_review_reason text,
-  add column identity_legacy_unresolved_at timestamptz,
   add constraint e10_supplier_credits_review_state_chk check(
     num_nonnulls(reviewed_by,reviewed_at) in (0,2)),
   add constraint e10_supplier_credits_approval_state_chk check(
@@ -41,27 +39,14 @@ alter table public.e10_supplier_credits
   add constraint e10_supplier_credits_void_state_chk check(
     num_nonnulls(voided_by,voided_at) in (0,2));
 
-update public.e10_supplier_invoices set identity_legacy_unresolved_at=transaction_timestamp()
-where source_connection is null and nullif(btrim(supplier_document_number),'') is null;
-update public.e10_supplier_credits set identity_legacy_unresolved_at=transaction_timestamp()
-where source_connection is null and nullif(btrim(supplier_document_number),'') is null;
-
 alter table public.e10_supplier_invoices
   add constraint e10_supplier_invoices_manual_identity_chk check(
-    source_connection is not null
-    or nullif(btrim(supplier_document_number),'') is not null
-    or (duplicate_review_outcome is not null and duplicate_review_reason is not null
-      and btrim(duplicate_review_reason)<>'' and identity_legacy_unresolved_at is null)
-    or (identity_legacy_unresolved_at is not null and duplicate_review_outcome is null
-      and duplicate_review_reason is null));
+    num_nonnulls(duplicate_review_outcome,duplicate_review_reason) in (0,2)
+    and (duplicate_review_reason is null or btrim(duplicate_review_reason)<>''));
 alter table public.e10_supplier_credits
   add constraint e10_supplier_credits_manual_identity_chk check(
-    source_connection is not null
-    or nullif(btrim(supplier_document_number),'') is not null
-    or (duplicate_review_outcome is not null and duplicate_review_reason is not null
-      and btrim(duplicate_review_reason)<>'' and identity_legacy_unresolved_at is null)
-    or (identity_legacy_unresolved_at is not null and duplicate_review_outcome is null
-      and duplicate_review_reason is null));
+    num_nonnulls(duplicate_review_outcome,duplicate_review_reason) in (0,2)
+    and (duplicate_review_reason is null or btrim(duplicate_review_reason)<>''));
 
 create index e10_supplier_invoices_manual_identity_idx
   on public.e10_supplier_invoices(organization_id,supplier_id,lower(btrim(supplier_document_number)))
@@ -74,6 +59,19 @@ create function e10.guard_financial_manual_identity() returns trigger
 language plpgsql security definer set search_path=public as $$
 declare v_kind text:=tg_argv[0];
 begin
+  if new.source_connection is null
+    and nullif(btrim(new.supplier_document_number),'') is null
+    and new.duplicate_review_outcome is null then
+    if tg_op='INSERT'
+      or old.organization_id is distinct from new.organization_id
+      or old.supplier_id is distinct from new.supplier_id
+      or old.source_connection is distinct from new.source_connection
+      or old.supplier_document_number is distinct from new.supplier_document_number
+      or old.duplicate_review_outcome is distinct from new.duplicate_review_outcome
+      or old.duplicate_review_reason is distinct from new.duplicate_review_reason then
+      raise exception using errcode='23514',message='financial_identity_required';
+    end if;
+  end if;
   if new.source_connection is null and nullif(btrim(new.supplier_document_number),'') is not null then
     perform pg_advisory_xact_lock(hashtextextended(new.organization_id::text||'|'||v_kind||'|manual|'||
       new.supplier_id::text||'|'||lower(btrim(new.supplier_document_number)),0));
@@ -91,10 +89,12 @@ begin
   return new;
 end $$;
 create trigger e10_supplier_invoices_manual_identity_trg before insert or update of
-  organization_id,supplier_id,supplier_document_number,source_connection on public.e10_supplier_invoices
+  organization_id,supplier_id,supplier_document_number,source_connection,
+  duplicate_review_outcome,duplicate_review_reason on public.e10_supplier_invoices
   for each row execute function e10.guard_financial_manual_identity('supplier_invoice');
 create trigger e10_supplier_credits_manual_identity_trg before insert or update of
-  organization_id,supplier_id,supplier_document_number,source_connection on public.e10_supplier_credits
+  organization_id,supplier_id,supplier_document_number,source_connection,
+  duplicate_review_outcome,duplicate_review_reason on public.e10_supplier_credits
   for each row execute function e10.guard_financial_manual_identity('supplier_credit');
 
 alter table public.e10_supplier_invoice_lines
@@ -276,14 +276,14 @@ begin
         and d.id=new.existing_document_id
         and ((new.identity_kind='connected' and d.source_connection=new.source_connection
           and d.external_document_id=new.external_document_id)
-          or (new.identity_kind='manual' and d.supplier_id=new.supplier_id
+          or (new.identity_kind='manual' and d.source_connection is null and d.supplier_id=new.supplier_id
             and lower(btrim(d.supplier_document_number))=new.normalized_document_number))))
     or (new.document_kind='supplier_credit' and not exists(
       select 1 from public.e10_supplier_credits d where d.organization_id=new.organization_id
         and d.id=new.existing_document_id
         and ((new.identity_kind='connected' and d.source_connection=new.source_connection
           and d.external_document_id=new.external_document_id)
-          or (new.identity_kind='manual' and d.supplier_id=new.supplier_id
+          or (new.identity_kind='manual' and d.source_connection is null and d.supplier_id=new.supplier_id
             and lower(btrim(d.supplier_document_number))=new.normalized_document_number)))) then
     raise exception using errcode='23514',message='financial_reconciliation_target_invalid';
   end if;
