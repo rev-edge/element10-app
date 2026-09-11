@@ -10,9 +10,11 @@ begin
   insert into public.e10_suppliers(id,organization_id,name) values(supplier,o,'X3b Supplier');
   insert into public.e10_locations(id,organization_id,name) values(location,o,'X3b Location');
   insert into public.e10_purchase_orders(id,organization_id,supplier_id,destination_location_id,currency) values(po,o,supplier,location,'CAD');
-  insert into public.e10_supplier_invoices(id,organization_id,supplier_id,currency) values(inv,o,supplier,'CAD');
+  insert into public.e10_supplier_invoices(id,organization_id,supplier_id,supplier_document_number,currency)
+    values(inv,o,supplier,'X3B-INVOICE-1','CAD');
   insert into public.e10_stock_receipts(id,organization_id,supplier_id,destination_location_id) values(receipt,o,supplier,location);
-  insert into public.e10_supplier_credits(id,organization_id,supplier_id,currency,total_amount) values(credit,o,supplier,'CAD',1);
+  insert into public.e10_supplier_credits(id,organization_id,supplier_id,supplier_document_number,currency,total_amount)
+    values(credit,o,supplier,'X3B-CREDIT-1','CAD',1);
   insert into public.e10_purchase_order_revisions(organization_id,purchase_order_id,revision,status,snapshot,payload_fingerprint) values(o,po,1,'draft','{"lines":[]}','po-1');
   insert into public.e10_supplier_invoice_revisions(organization_id,supplier_invoice_id,revision,status,snapshot,payload_fingerprint) values(o,inv,1,'draft','{"lines":[]}','inv-1');
   insert into public.e10_stock_receipt_revisions(organization_id,stock_receipt_id,revision,status,snapshot,payload_fingerprint) values(o,receipt,1,'draft','{"lines":[]}','receipt-1');

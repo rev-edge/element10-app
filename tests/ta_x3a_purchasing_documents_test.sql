@@ -31,7 +31,8 @@ begin
  insert into public.e10_stock_receipt_lines(id,organization_id,stock_receipt_id,configuration_version_id,line_no,received_quantity,accepted_quantity,damaged_quantity,quarantined_quantity,actual_unit_cost,currency) values(rl,o,r,v,1,10,8,1,1,12,'CAD');
  insert into public.e10_receipt_po_allocations values(o,rl,pol,10,now());
  insert into public.e10_receipt_invoice_allocations values(o,rl,il,10,now());
- insert into public.e10_supplier_credits(id,organization_id,supplier_id,status,currency,total_amount) values(cr,o,s,'approved','CAD',12);
+ insert into public.e10_supplier_credits(id,organization_id,supplier_id,supplier_document_number,status,currency,total_amount)
+   values(cr,o,s,'X3A-CREDIT-1','approved','CAD',12);
  insert into public.e10_supplier_credit_lines(id,organization_id,supplier_credit_id,line_no,line_amount) values(cl,o,cr,1,12);
  insert into public.e10_credit_invoice_allocations values(o,cl,il,12,now());
  insert into public.e10_commercial_comments(id,organization_id,audience,body,purchase_order_id,created_by) values(ci,o,'internal','private note',po,'a7000000-0000-4000-8000-00000000e3a2');
