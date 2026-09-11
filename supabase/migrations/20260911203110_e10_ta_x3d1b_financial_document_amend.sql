@@ -3,7 +3,7 @@
 -- that would strand allocated quantity/value fail closed.
 
 create function e10.validate_financial_document_lines(
-  p_org uuid,p_document_kind text,p_lines jsonb
+  p_org uuid,p_document_kind text,p_lines jsonb,p_require_active_configuration boolean
 ) returns void language plpgsql stable security definer set search_path=public as $$
 declare line record; line_count integer; line_id uuid;
 begin
@@ -38,7 +38,8 @@ begin
         and ((line.x->>'unit_cost')::numeric<0 or (line.x->>'unit_cost')::numeric::text in ('NaN','Infinity','-Infinity')) then
       raise exception using errcode='22023',message='financial_document_line_value_invalid';
     end if;
-    if jsonb_typeof(line.x->'configuration_version_id')='string' and not exists(
+    if p_require_active_configuration
+      and jsonb_typeof(line.x->'configuration_version_id')='string' and not exists(
       select 1 from public.e10_product_configuration_versions
       where organization_id=p_org and id=(line.x->>'configuration_version_id')::uuid and state='active') then
       raise exception using errcode='42501',message='financial_document_configuration_denied';
@@ -51,8 +52,38 @@ begin
 exception when invalid_text_representation or numeric_value_out_of_range then
   raise exception using errcode='22023',message='financial_document_line_encoding_invalid';
 end $$;
-revoke all on function e10.validate_financial_document_lines(uuid,text,jsonb) from public,anon,authenticated;
-grant execute on function e10.validate_financial_document_lines(uuid,text,jsonb) to service_role;
+revoke all on function e10.validate_financial_document_lines(uuid,text,jsonb,boolean) from public,anon,authenticated;
+grant execute on function e10.validate_financial_document_lines(uuid,text,jsonb,boolean) to service_role;
+
+-- Historical events bind to their immutable revision, not the mutable current header.
+create or replace function e10.guard_financial_document_event() returns trigger
+language plpgsql security definer set search_path=public as $$
+begin
+  if not exists(
+    select 1 from public.e10_financial_document_commands c
+    where c.organization_id=new.organization_id
+      and c.idempotency_key=new.command_idempotency_key
+      and c.document_kind=new.document_kind and c.operation=new.operation
+      and c.document_id=new.document_id
+      and c.result->>'lifecycle_event_id'=new.id::text
+      and c.result->>'revision'=new.revision::text and c.result->>'status'=new.status
+  ) or (new.document_kind='supplier_invoice' and not exists(
+    select 1 from public.e10_supplier_invoice_revisions r
+    where r.organization_id=new.organization_id and r.supplier_invoice_id=new.document_id
+      and r.revision=new.revision and r.status=new.status
+      and r.snapshot->>'revision'=new.revision::text and r.snapshot->>'status'=new.status
+  )) or (new.document_kind='supplier_credit' and not exists(
+    select 1 from public.e10_supplier_credit_revisions r
+    where r.organization_id=new.organization_id and r.supplier_credit_id=new.document_id
+      and r.revision=new.revision and r.status=new.status
+      and r.snapshot->>'revision'=new.revision::text and r.snapshot->>'status'=new.status
+  )) then
+    raise exception using errcode='23514',message='financial_document_event_link_invalid';
+  end if;
+  return new;
+end $$;
+revoke all on function e10.guard_financial_document_event() from public,anon,authenticated;
+grant execute on function e10.guard_financial_document_event() to service_role;
 
 create function e10.lock_financial_document(
   p_org uuid,p_document_kind text,p_document_id uuid
@@ -125,7 +156,7 @@ begin
     or p_document_kind='supplier_credit' and p_total_amount is null then
     raise exception using errcode='22023',message='financial_document_amend_payload_invalid';
   end if;
-  perform e10.validate_financial_document_lines(p_org,p_document_kind,p_lines);
+  perform e10.validate_financial_document_lines(p_org,p_document_kind,p_lines,false);
   fp:=md5(jsonb_build_object('v','financial-document-amend-v1','org',p_org,'kind',p_document_kind,
     'document_id',p_document_id,'expected_revision',p_expected_revision,'currency',p_currency,
     'document_date',p_document_date,'total_amount',p_total_amount,'lines',p_lines,'reason',btrim(p_reason))::text);
@@ -148,7 +179,7 @@ begin
     or not e10.is_org_member(p_org) or not e10.has_org_cap(p_org,'act.purchasing_prepare') then
     raise exception using errcode='42501',message='financial_document_prepare_denied';
   end if;
-  perform e10.validate_financial_document_lines(p_org,p_document_kind,p_lines);
+  perform e10.validate_financial_document_lines(p_org,p_document_kind,p_lines,true);
   if p_document_kind='supplier_invoice' then
     select d.* into document from public.e10_supplier_invoices d
       where d.organization_id=p_org and d.id=p_document_id;
@@ -200,7 +231,7 @@ begin
         end if;
         if coalesce((select sum(a.allocated_quantity) from public.e10_invoice_po_allocations a
               where a.organization_id=p_org and a.invoice_line_id=(line.x->>'id')::uuid),0)>0
-          and (jsonb_typeof(line.x->'invoiced_quantity')<>'number'
+          and (jsonb_typeof(line.x->'invoiced_quantity') is distinct from 'number'
             or (line.x->>'invoiced_quantity')::numeric<(select sum(a.allocated_quantity)
               from public.e10_invoice_po_allocations a
               where a.organization_id=p_org and a.invoice_line_id=(line.x->>'id')::uuid))
@@ -218,7 +249,7 @@ begin
                 then (line.x->>'configuration_version_id')::uuid end)
           or coalesce((select sum(a.allocated_quantity) from public.e10_receipt_invoice_allocations a
               where a.organization_id=p_org and a.invoice_line_id=(line.x->>'id')::uuid),0)>0
-            and (jsonb_typeof(line.x->'invoiced_quantity')<>'number'
+            and (jsonb_typeof(line.x->'invoiced_quantity') is distinct from 'number'
               or (line.x->>'invoiced_quantity')::numeric<(select sum(a.allocated_quantity)
                 from public.e10_receipt_invoice_allocations a
                 where a.organization_id=p_org and a.invoice_line_id=(line.x->>'id')::uuid))
