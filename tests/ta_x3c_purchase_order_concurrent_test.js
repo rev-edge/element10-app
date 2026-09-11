@@ -7,7 +7,7 @@ async function waitBlocked(obs,pid,blocker,label){const end=Date.now()+5000;whil
 async function actor(id){const c=new Client({connectionString:db});await c.connect();await c.query("set statement_timeout='10s';set lock_timeout='9s'");await c.query('select set_config($1,$2,false)',['request.jwt.claims',JSON.stringify({sub:id,role:'authenticated'})]);await c.query('set role authenticated');return c}
 async function main(){
  const s=new Client({connectionString:db}),obs=new Client({connectionString:db});await Promise.all([s.connect(),obs.connect()]);for(const c of[s,obs])await c.query("set statement_timeout='10s';set lock_timeout='9s'");
- const x={org:randomUUID(),prep:randomUUID(),role:randomUUID(),loc:randomUUID(),supplier:randomUUID(),product:randomUUID(),config:randomUUID(),version:randomUUID(),item:'x3c-'+randomUUID(),line:randomUUID(),run:randomUUID()};let a,b,pending=[],completed=false;
+ const x={org:randomUUID(),prep:randomUUID(),role:randomUUID(),loc:randomUUID(),supplier:randomUUID(),product:randomUUID(),config:randomUUID(),version:randomUUID(),item:'x3c-'+randomUUID(),line:randomUUID(),expected:randomUUID(),run:randomUUID()};let a,b,pending=[],completed=false;
  const lines=JSON.stringify([{id:x.line,line_no:1,configuration_version_id:x.version,ordered_quantity:10,estimated_unit_cost:5}]);
  const createSql='select public.e10_org_create_purchase_order($1,$2,$3,$4,$5,null,$6::jsonb,$7) r';
  try{
@@ -15,7 +15,7 @@ async function main(){
   await s.query("insert into public.e10_organizations(id,name,slug)values($1,$2,$3)",[x.org,'X3c '+x.run,'x3c-'+x.run]);
   await s.query("insert into public.e10_organization_roles(id,organization_id,key,name,is_system)values($1,$2,'prep','Prepare',false)",[x.role,x.org]);
   await s.query("insert into public.e10_organization_memberships(organization_id,user_id,role_id,status)values($1,$2,$3,'active')",[x.org,x.prep,x.role]);
-  await s.query("insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed)values($1,$2,'act.purchasing_prepare',true),($1,$2,'act.create_receiving',true)",[x.org,x.role]);
+  await s.query("insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed)values($1,$2,'act.purchasing_prepare',true),($1,$2,'act.purchasing_cancel',true),($1,$2,'act.create_receiving',true)",[x.org,x.role]);
   await s.query("insert into public.e10_locations(id,organization_id,name,status)values($1,$2,'X3c location','active')",[x.loc,x.org]);
   await s.query('insert into public.e10_location_role_permissions(organization_id,location_id,role_id,can_receive)values($1,$2,$3,true)',[x.org,x.loc,x.role]);
   await s.query("insert into public.e10_suppliers(id,organization_id,name,status)values($1,$2,'X3c supplier','active')",[x.supplier,x.org]);
@@ -39,6 +39,29 @@ async function main(){
   console.log('[proof] create reread removed purchasing capability after exact command-lock wait');
   await s.query("insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed)values($1,$2,'act.purchasing_prepare',true)",[x.org,x.role]);
 
+  const blockedSubmit=x.run+'-blocked-submit';await s.query('begin');await s.query("select pg_advisory_xact_lock(hashtextextended($1||'|purchase-order|'||$2,0))",[x.org,po]);
+  const transitionDenied=outcome(b.query('select public.e10_org_transition_purchase_order($1,$2,1,$3,$4,$5)',[x.org,po,'submit','blocked capability',blockedSubmit]));pending=[transitionDenied];await waitBlocked(obs,bp,sp,'transition capability after PO lock');
+  await s.query("delete from public.e10_organization_role_permissions where organization_id=$1 and role_id=$2 and capability='act.purchasing_prepare'",[x.org,x.role]);await s.query('commit');const td=await bounded(transitionDenied);pending=[];
+  if(td.ok||td.error.code!=='42501')throw Error('transition post-PO-lock capability revocation not denied');
+  if(Number((await s.query('select count(*) n from public.e10_purchase_order_commands where organization_id=$1 and idempotency_key=$2',[x.org,blockedSubmit])).rows[0].n))throw Error('denied transition persisted');
+  console.log('[proof] transition reread removed purchasing capability after exact PO-lock wait');
+  await s.query("insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed)values($1,$2,'act.purchasing_prepare',true)",[x.org,x.role]);
+
+  const blockedOrg=x.run+'-blocked-org';await s.query('begin');await s.query("select pg_advisory_xact_lock(hashtextextended($1||'|purchase-order|'||$2,0))",[x.org,po]);
+  const orgDenied=outcome(b.query('select public.e10_org_transition_purchase_order($1,$2,1,$3,$4,$5)',[x.org,po,'submit','blocked org',blockedOrg]));pending=[orgDenied];await waitBlocked(obs,bp,sp,'transition organization after PO lock');
+  await s.query("update public.e10_organizations set status='suspended' where id=$1",[x.org]);await s.query('commit');const od=await bounded(orgDenied);pending=[];
+  if(od.ok||od.error.code!=='42501')throw Error('transition post-PO-lock organization suspension not denied');
+  if(Number((await s.query('select count(*) n from public.e10_purchase_order_commands where organization_id=$1 and idempotency_key=$2',[x.org,blockedOrg])).rows[0].n))throw Error('suspended-org transition persisted');
+  console.log('[proof] transition reread suspended organization after exact PO-lock wait');await s.query("update public.e10_organizations set status='active' where id=$1",[x.org]);
+
+  const blockedCancel=x.run+'-blocked-cancel';await s.query('begin');await s.query("select pg_advisory_xact_lock(hashtextextended($1||'|purchase-order|'||$2,0))",[x.org,po]);
+  const cancelDenied=outcome(b.query('select public.e10_org_transition_purchase_order($1,$2,1,$3,$4,$5)',[x.org,po,'cancel','blocked commitment',blockedCancel]));pending=[cancelDenied];await waitBlocked(obs,bp,sp,'cancel versus commitment');
+  await s.query("insert into public.e10_expected_inventory_allocations(id,organization_id,purchase_order_line_id,destination_location_id,expected_quantity,status,planning_reference)values($1,$2,$3,$4,1,'open',$5)",[x.expected,x.org,x.line,x.loc,x.run]);await s.query('commit');const cd=await bounded(cancelDenied);pending=[];
+  if(cd.ok||cd.error.code!=='55000')throw Error('cancel did not observe post-lock commitment');
+  if(Number((await s.query('select count(*) n from public.e10_purchase_order_commands where organization_id=$1 and idempotency_key=$2',[x.org,blockedCancel])).rows[0].n))throw Error('denied cancel persisted');
+  console.log('[proof] cancel backend observed commitment inserted before exact PO-lock release and denied with zero command residue');
+  await s.query('delete from public.e10_expected_inventory_allocations where organization_id=$1 and id=$2',[x.org,x.expected]);
+
   await a.query('select public.e10_org_transition_purchase_order($1,$2,1,$3,$4,$5)',[x.org,po,'submit','ready',x.run+'-submit']);
   await a.query('begin');await a.query("select pg_advisory_xact_lock(hashtextextended($1||'|purchase-order|'||$2,0))",[x.org,po]);
   const receive=outcome(b.query("select public.e10_org_receive_po_line($1,$2,$3,10,0,0,null,now(),'[]'::jsonb,$4) r",[x.org,x.line,x.item,x.run+'-receive']));pending=[receive];await waitBlocked(obs,bp,ap,'receive versus amend');
@@ -53,9 +76,9 @@ async function main(){
  }finally{
   for(const c of[a,b])if(c){await c.query('rollback').catch(()=>{});await c.query('reset role').catch(()=>{});await c.end().catch(()=>{})}if(pending.length)await Promise.allSettled(pending.map(p=>bounded(p).catch(()=>{})));
   await s.query('rollback').catch(()=>{});await s.query('set session_replication_role=replica');
-  for(const table of['e10_commercial_events','e10_purchase_order_commands','e10_purchase_order_revisions','e10_stock_receipt_reversals','e10_stock_receipt_lines','e10_stock_receipts','e10_receipt_po_allocations','e10_expected_inventory_allocations','e10_purchase_order_lines','e10_purchase_orders','e10_inventory_items','e10_location_role_permissions','e10_locations','e10_suppliers','e10_product_configuration_versions','e10_product_configurations','e10_product_masters','e10_organization_role_permissions','e10_organization_memberships','e10_organization_roles'])await s.query(`delete from public.${table} where organization_id=$1`,[x.org]).catch(()=>{});
+  for(const table of['e10_commercial_events','e10_purchase_order_commands','e10_purchase_order_revisions','e10_stock_receipt_reversals','e10_stock_receipt_lines','e10_stock_receipts','e10_receipt_po_allocations','e10_expected_inventory_allocations','e10_purchase_order_lines','e10_purchase_orders','e10_inventory_items','e10_location_role_permissions','e10_locations','e10_suppliers','e10_product_configuration_versions','e10_product_configurations','e10_product_masters','e10_organization_role_permissions','e10_organization_memberships','e10_organization_roles'])await s.query(`delete from public.${table} where organization_id=$1`,[x.org]);
   await s.query('delete from public.e10_organizations where id=$1',[x.org]);await s.query('set session_replication_role=origin');await s.query('delete from auth.users where id=$1',[x.prep]);
-  const residue=Number((await s.query("select (select count(*) from public.e10_purchase_orders where organization_id=$1)+(select count(*) from public.e10_purchase_order_commands where organization_id=$1)+(select count(*) from auth.users where id=$2) n",[x.org,x.prep])).rows[0].n);await Promise.all([s.end(),obs.end()]);if(residue)throw Error('cleanup residue '+residue);if(completed)console.log('TA-X3c concurrent command/receipt locks: PASS (fixture-free)');
+  const residue=Number((await s.query("select (select count(*) from public.e10_purchase_orders where organization_id=$1)+(select count(*) from public.e10_purchase_order_lines where organization_id=$1)+(select count(*) from public.e10_purchase_order_revisions where organization_id=$1)+(select count(*) from public.e10_purchase_order_commands where organization_id=$1)+(select count(*) from public.e10_commercial_events where organization_id=$1)+(select count(*) from public.e10_expected_inventory_allocations where organization_id=$1)+(select count(*) from public.e10_stock_receipts where organization_id=$1)+(select count(*) from public.e10_organization_memberships where organization_id=$1)+(select count(*) from public.e10_organizations where id=$1)+(select count(*) from auth.users where id=$2) n",[x.org,x.prep])).rows[0].n);await Promise.all([s.end(),obs.end()]);if(residue)throw Error('cleanup residue '+residue);if(completed)console.log('TA-X3c concurrent command/receipt locks: PASS (fixture-free)');
  }
 }
 main().catch(e=>{console.error(e.stack);process.exit(1)});

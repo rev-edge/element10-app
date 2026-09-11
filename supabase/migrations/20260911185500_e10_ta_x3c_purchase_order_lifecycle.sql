@@ -57,6 +57,14 @@ alter table public.e10_commercial_events add constraint e10_commercial_events_ev
   'acquisition','receipt','available_for_sale','listing_created','listing_published','listing_paused','listing_resumed',
   'listing_ended','listing_relisted','asking_price_changed','hold','release','sale_committed','customer_transaction_posted',
   'fulfillment','fee','payout','refund','return','cost_correction','correction','purchase_order_changed'));
+alter table public.e10_commercial_events add column purchase_order_command_idempotency_key text;
+alter table public.e10_commercial_events add constraint e10_commercial_events_org_po_command_fkey
+  foreign key(organization_id,purchase_order_command_idempotency_key)
+  references public.e10_purchase_order_commands(organization_id,idempotency_key)
+  deferrable initially deferred;
+create unique index e10_commercial_events_org_po_command_uq
+  on public.e10_commercial_events(organization_id,purchase_order_command_idempotency_key)
+  where purchase_order_command_idempotency_key is not null;
 insert into public.e10_commercial_event_schemas(event_type,schema_version,required_payload_keys,description)
 values('purchase_order_changed',1,array['purchase_order_id','operation','status','revision'],
   'Purchase-order lifecycle evidence. It does not assert receipt, payment or accounting recognition.');
@@ -125,6 +133,34 @@ $$;
 revoke all on function e10.purchase_order_snapshot(uuid,uuid) from public,anon,authenticated;
 grant execute on function e10.purchase_order_snapshot(uuid,uuid) to service_role;
 
+create function e10.guard_purchase_order_event() returns trigger
+language plpgsql security definer set search_path=public as $$
+begin
+  if new.event_type='purchase_order_changed' then
+    if new.purchase_order_command_idempotency_key is null or new.subject_type<>'other'
+      or not exists(
+        select 1 from public.e10_purchase_order_commands c
+        join public.e10_purchase_order_revisions r
+          on r.organization_id=c.organization_id and r.purchase_order_id=c.purchase_order_id
+          and r.revision=(c.result->>'revision')::integer
+        where c.organization_id=new.organization_id
+          and c.idempotency_key=new.purchase_order_command_idempotency_key
+          and c.purchase_order_id::text=new.subject_id
+          and c.operation=new.payload->>'operation'
+          and c.result->>'status'=new.payload->>'status'
+          and c.result->>'revision'=new.payload->>'revision'
+          and new.payload->>'purchase_order_id'=c.purchase_order_id::text)
+    then raise exception using errcode='42501',message='purchase_order_event_link_invalid'; end if;
+  elsif new.purchase_order_command_idempotency_key is not null then
+    raise exception using errcode='23514',message='purchase_order_event_link_type_invalid';
+  end if;
+  return new;
+end $$;
+revoke all on function e10.guard_purchase_order_event() from public,anon,authenticated;
+grant execute on function e10.guard_purchase_order_event() to service_role;
+create trigger e10_purchase_order_event_link_trg before insert on public.e10_commercial_events
+  for each row execute function e10.guard_purchase_order_event();
+
 create function e10.lock_purchase_order_line(p_org uuid,p_purchase_order_line_id uuid) returns uuid
 language plpgsql security definer set search_path=public as $$
 declare v_purchase_order_id uuid;
@@ -177,12 +213,20 @@ create function public.e10_org_receive_po_line(
   p_lot_code text,p_received_at timestamptz,p_expected_allocations jsonb,p_idempotency_key text
 ) returns jsonb language plpgsql security definer set search_path=public as $$
 begin
-  if not e10.is_org_member(p_org) or not e10.has_org_cap(p_org,'act.create_receiving') then
+  if not exists(select 1 from public.e10_organizations where id=p_org and status='active')
+    or not e10.is_org_member(p_org) or not e10.has_org_cap(p_org,'act.create_receiving') then
     raise exception using errcode='42501',message='create_receiving_denied';
   end if;
   perform e10.lock_purchase_order_line(p_org,p_purchase_order_line_id);
-  if not e10.is_org_member(p_org) or not e10.has_org_cap(p_org,'act.create_receiving') then
+  if not exists(select 1 from public.e10_organizations where id=p_org and status='active')
+    or not e10.is_org_member(p_org) or not e10.has_org_cap(p_org,'act.create_receiving') then
     raise exception using errcode='42501',message='create_receiving_denied';
+  end if;
+  if not exists(select 1 from public.e10_stock_receipts
+      where organization_id=p_org and idempotency_key=p_idempotency_key)
+    and not exists(select 1 from public.e10_purchase_order_lines
+      where organization_id=p_org and id=p_purchase_order_line_id and state='active') then
+    raise exception using errcode='55000',message='purchase_order_line_not_receivable';
   end if;
   return public._e10_org_receive_po_line_x4d(p_org,p_purchase_order_line_id,p_inventory_item_id,
     p_accepted_quantity,p_damaged_quantity,p_quarantined_quantity,p_lot_code,p_received_at,
@@ -203,11 +247,13 @@ create function public.e10_org_reverse_receipt(
   p_org uuid,p_receipt_id uuid,p_reason text,p_idempotency_key text
 ) returns jsonb language plpgsql security definer set search_path=public as $$
 begin
-  if not e10.is_org_member(p_org) or not e10.has_org_cap(p_org,'act.resolve_recovery') then
+  if not exists(select 1 from public.e10_organizations where id=p_org and status='active')
+    or not e10.is_org_member(p_org) or not e10.has_org_cap(p_org,'act.resolve_recovery') then
     raise exception using errcode='42501',message='resolve_recovery_denied';
   end if;
   perform e10.lock_receipt_purchase_orders(p_org,p_receipt_id);
-  if not e10.is_org_member(p_org) or not e10.has_org_cap(p_org,'act.resolve_recovery') then
+  if not exists(select 1 from public.e10_organizations where id=p_org and status='active')
+    or not e10.is_org_member(p_org) or not e10.has_org_cap(p_org,'act.resolve_recovery') then
     raise exception using errcode='42501',message='resolve_recovery_denied';
   end if;
   return public._e10_org_reverse_receipt_x4d(p_org,p_receipt_id,p_reason,p_idempotency_key);
@@ -247,13 +293,13 @@ begin
   from public.e10_purchase_order_commands where organization_id=p_org and idempotency_key=p_idempotency_key;
   if found then
     if v_existing.request_fingerprint<>v_fp then raise exception using errcode='22023',message='idempotency_key_mismatch'; end if;
-    if auth.uid() is distinct from v_actor or not e10.is_org_member(p_org)
+    if auth.uid() is distinct from v_actor or not exists(select 1 from public.e10_organizations where id=p_org and status='active') or not e10.is_org_member(p_org)
       or not e10.has_org_cap(p_org,'act.purchasing_prepare') then
       raise exception using errcode='42501',message='purchase_order_prepare_denied';
     end if;
     return v_existing.result||jsonb_build_object('replay',true);
   end if;
-  if auth.uid() is distinct from v_actor or not e10.is_org_member(p_org)
+  if auth.uid() is distinct from v_actor or not exists(select 1 from public.e10_organizations where id=p_org and status='active') or not e10.is_org_member(p_org)
     or not e10.has_org_cap(p_org,'act.purchasing_prepare') then
     raise exception using errcode='42501',message='purchase_order_prepare_denied';
   end if;
@@ -295,18 +341,18 @@ begin
   insert into public.e10_purchase_order_revisions(organization_id,purchase_order_id,revision,status,snapshot,
     payload_fingerprint,change_reason,created_by)
   values(p_org,v_po,1,'draft',v_snapshot,v_fp,'created',v_actor);
-  insert into public.e10_commercial_events(id,organization_id,event_type,event_schema_version,subject_type,subject_id,
-    occurred_at,occurred_at_precision,idempotency_key,source_kind,source_reference,source_event_id,
-    correlation_id,evidence_quality,payload,created_by,request_fingerprint)
-  values(v_event,p_org,'purchase_order_changed',1,'other',v_po::text,now(),'exact',
-    'purchase-order:'||p_idempotency_key,'manual','purchase_order',p_idempotency_key,v_po::text,
-    'operator_asserted',jsonb_build_object('purchase_order_id',v_po::text,'operation','create',
-      'status','draft','revision','1'),v_actor,md5('purchase-order-event|'||v_fp));
   v_result:=jsonb_build_object('ok',true,'replay',false,'purchase_order_id',v_po,
     'status','draft','revision',1,'commercial_event_id',v_event);
   insert into public.e10_purchase_order_commands(organization_id,idempotency_key,operation,purchase_order_id,
     request_fingerprint,result,created_by)
   values(p_org,p_idempotency_key,'create',v_po,v_fp,v_result,v_actor);
+  insert into public.e10_commercial_events(id,organization_id,event_type,event_schema_version,subject_type,subject_id,
+    occurred_at,occurred_at_precision,idempotency_key,source_kind,source_reference,source_event_id,
+    correlation_id,evidence_quality,payload,created_by,request_fingerprint,purchase_order_command_idempotency_key)
+  values(v_event,p_org,'purchase_order_changed',1,'other',v_po::text,now(),'exact',
+    'purchase-order:'||p_idempotency_key,'manual','purchase_order',p_idempotency_key,v_po::text,
+    'operator_asserted',jsonb_build_object('purchase_order_id',v_po::text,'operation','create',
+      'status','draft','revision','1'),v_actor,md5('purchase-order-event|'||v_fp),p_idempotency_key);
   return v_result;
 exception
   when invalid_text_representation or numeric_value_out_of_range then
@@ -363,17 +409,33 @@ begin
     from public.e10_purchase_order_commands where organization_id=p_org and idempotency_key=p_idempotency_key;
   if found then
     if v_existing.request_fingerprint<>v_fp then raise exception using errcode='22023',message='idempotency_key_mismatch'; end if;
-    if auth.uid() is distinct from v_actor or not e10.is_org_member(p_org) or not e10.has_org_cap(p_org,v_cap) then
+    if auth.uid() is distinct from v_actor or not exists(select 1 from public.e10_organizations where id=p_org and status='active') or not e10.is_org_member(p_org) or not e10.has_org_cap(p_org,v_cap) then
       raise exception using errcode='42501',message='purchase_order_transition_denied';
     end if;
     return v_existing.result||jsonb_build_object('replay',true);
   end if;
   perform e10.lock_purchase_order(p_org,p_purchase_order_id);
-  if auth.uid() is distinct from v_actor or not e10.is_org_member(p_org) or not e10.has_org_cap(p_org,v_cap) then
+  if auth.uid() is distinct from v_actor or not exists(select 1 from public.e10_organizations where id=p_org and status='active') or not e10.is_org_member(p_org) or not e10.has_org_cap(p_org,v_cap) then
     raise exception using errcode='42501',message='purchase_order_transition_denied';
   end if;
   select * into v_po from public.e10_purchase_orders where organization_id=p_org and id=p_purchase_order_id;
   if v_po.revision<>p_expected_revision then raise exception using errcode='40001',message='purchase_order_stale_revision'; end if;
+  if p_action in ('submit','approve','close') and not exists(select 1 from public.e10_purchase_order_lines
+    where organization_id=p_org and purchase_order_id=p_purchase_order_id and state='active') then
+    raise exception using errcode='55000',message='purchase_order_has_no_active_lines';
+  end if;
+  if p_action in ('submit','approve') then
+    if not exists(select 1 from public.e10_suppliers where organization_id=p_org and id=v_po.supplier_id and status='active') then
+      raise exception using errcode='55000',message='purchase_order_supplier_inactive'; end if;
+    if not exists(select 1 from public.e10_locations where organization_id=p_org and id=v_po.destination_location_id and status='active')
+      or not e10.can_receive_at(p_org,v_po.destination_location_id) then
+      raise exception using errcode='42501',message='purchase_order_destination_denied'; end if;
+    if exists(select 1 from public.e10_purchase_order_lines l
+      left join public.e10_product_configuration_versions v on v.organization_id=l.organization_id
+        and v.id=l.configuration_version_id and v.state='active'
+      where l.organization_id=p_org and l.purchase_order_id=p_purchase_order_id and l.state='active' and v.id is null) then
+      raise exception using errcode='55000',message='purchase_order_configuration_inactive'; end if;
+  end if;
   if p_action='submit' then
     if v_po.status<>'draft' then raise exception using errcode='55000',message='purchase_order_transition_invalid'; end if;
     v_new_status:='submitted';
@@ -412,19 +474,19 @@ begin
   insert into public.e10_purchase_order_revisions(organization_id,purchase_order_id,revision,status,snapshot,
     payload_fingerprint,change_reason,created_by)
   values(p_org,p_purchase_order_id,p_expected_revision+1,v_new_status,v_snapshot,v_fp,btrim(p_reason),v_actor);
-  insert into public.e10_commercial_events(id,organization_id,event_type,event_schema_version,subject_type,subject_id,
-    occurred_at,occurred_at_precision,idempotency_key,source_kind,source_reference,source_event_id,
-    correlation_id,evidence_quality,payload,created_by,request_fingerprint)
-  values(v_event,p_org,'purchase_order_changed',1,'other',p_purchase_order_id::text,now(),'exact',
-    'purchase-order:'||p_idempotency_key,'manual','purchase_order',p_idempotency_key,p_purchase_order_id::text,
-    'operator_asserted',jsonb_build_object('purchase_order_id',p_purchase_order_id::text,'operation',p_action,
-      'status',v_new_status,'revision',(p_expected_revision+1)::text,'reason',btrim(p_reason)),
-    v_actor,md5('purchase-order-event|'||v_fp));
   v_result:=jsonb_build_object('ok',true,'replay',false,'purchase_order_id',p_purchase_order_id,
     'status',v_new_status,'revision',p_expected_revision+1,'commercial_event_id',v_event);
   insert into public.e10_purchase_order_commands(organization_id,idempotency_key,operation,purchase_order_id,
     request_fingerprint,result,created_by)
   values(p_org,p_idempotency_key,p_action,p_purchase_order_id,v_fp,v_result,v_actor);
+  insert into public.e10_commercial_events(id,organization_id,event_type,event_schema_version,subject_type,subject_id,
+    occurred_at,occurred_at_precision,idempotency_key,source_kind,source_reference,source_event_id,
+    correlation_id,evidence_quality,payload,created_by,request_fingerprint,purchase_order_command_idempotency_key)
+  values(v_event,p_org,'purchase_order_changed',1,'other',p_purchase_order_id::text,now(),'exact',
+    'purchase-order:'||p_idempotency_key,'manual','purchase_order',p_idempotency_key,p_purchase_order_id::text,
+    'operator_asserted',jsonb_build_object('purchase_order_id',p_purchase_order_id::text,'operation',p_action,
+      'status',v_new_status,'revision',(p_expected_revision+1)::text,'reason',btrim(p_reason)),
+    v_actor,md5('purchase-order-event|'||v_fp),p_idempotency_key);
   return v_result;
 end $$;
 revoke all on function public.e10_org_transition_purchase_order(uuid,uuid,integer,text,text,text) from public,anon;
@@ -464,7 +526,7 @@ begin
     from public.e10_purchase_order_commands where organization_id=p_org and idempotency_key=p_idempotency_key;
   if found then
     if v_existing.request_fingerprint<>v_fp then raise exception using errcode='22023',message='idempotency_key_mismatch'; end if;
-    if auth.uid() is distinct from v_actor or not e10.is_org_member(p_org)
+    if auth.uid() is distinct from v_actor or not exists(select 1 from public.e10_organizations where id=p_org and status='active') or not e10.is_org_member(p_org)
       or not e10.has_org_cap(p_org,'act.purchasing_prepare') then
       raise exception using errcode='42501',message='purchase_order_prepare_denied';
     end if;
@@ -472,7 +534,7 @@ begin
   end if;
   perform e10.lock_purchase_order(p_org,p_purchase_order_id);
   set constraints e10_purchase_order_lines_org_po_line_no_uq deferred;
-  if auth.uid() is distinct from v_actor or not e10.is_org_member(p_org)
+  if auth.uid() is distinct from v_actor or not exists(select 1 from public.e10_organizations where id=p_org and status='active') or not e10.is_org_member(p_org)
     or not e10.has_org_cap(p_org,'act.purchasing_prepare') then
     raise exception using errcode='42501',message='purchase_order_prepare_denied';
   end if;
@@ -486,6 +548,7 @@ begin
     raise exception using errcode='42501',message='purchase_order_destination_denied';
   end if;
   if (select count(*) from (select (x->>'line_no')::integer n from jsonb_array_elements(p_lines) x group by 1) q)<>v_count
+    or (select count(*) from jsonb_array_elements(p_lines) x where x ? 'id')<>v_count
     or (select count(*) from (select (x->>'id')::uuid id from jsonb_array_elements(p_lines) x
       where x ? 'id' group by 1) q)<>(select count(*) from jsonb_array_elements(p_lines) x where x ? 'id') then
     raise exception using errcode='22023',message='purchase_order_line_identity_duplicate';
@@ -523,29 +586,34 @@ begin
       v_line_id:=(v_line.x->>'id')::uuid;
       select * into v_old from public.e10_purchase_order_lines
         where organization_id=p_org and id=v_line_id and purchase_order_id=p_purchase_order_id;
-      if not found then raise exception using errcode='42501',message='purchase_order_line_access_denied'; end if;
-      select greatest(
-        coalesce((select sum(a.allocated_quantity) from public.e10_receipt_po_allocations a
-          join public.e10_stock_receipt_lines rl on rl.organization_id=a.organization_id and rl.id=a.receipt_line_id
-          join public.e10_stock_receipts r on r.organization_id=rl.organization_id and r.id=rl.stock_receipt_id
-          where a.organization_id=p_org and a.purchase_order_line_id=v_line_id and r.status<>'reversed'),0),
-        coalesce((select sum(a.allocated_quantity) from public.e10_invoice_po_allocations a
-          where a.organization_id=p_org and a.purchase_order_line_id=v_line_id),0),
-        coalesce((select sum(a.expected_quantity) from public.e10_expected_inventory_allocations a
-          where a.organization_id=p_org and a.purchase_order_line_id=v_line_id and a.status='open'),0)) into v_committed;
-      if v_line.ordered_quantity<v_committed then raise exception using errcode='23514',message='purchase_order_reduction_below_committed'; end if;
-      if v_line.configuration_version_id<>v_old.configuration_version_id and v_committed>0 then
-        raise exception using errcode='55000',message='purchase_order_bound_configuration_change_denied';
+      if found then
+        select greatest(
+          coalesce((select sum(a.allocated_quantity) from public.e10_invoice_po_allocations a
+            where a.organization_id=p_org and a.purchase_order_line_id=v_line_id),0),
+          coalesce((select sum(a.allocated_quantity) from public.e10_receipt_po_allocations a
+            join public.e10_stock_receipt_lines rl on rl.organization_id=a.organization_id and rl.id=a.receipt_line_id
+            join public.e10_stock_receipts r on r.organization_id=rl.organization_id and r.id=rl.stock_receipt_id
+            where a.organization_id=p_org and a.purchase_order_line_id=v_line_id and r.status<>'reversed'),0)
+          +coalesce((select sum(a.expected_quantity-coalesce(a.fulfilled_quantity,0))
+            from public.e10_expected_inventory_allocations a
+            where a.organization_id=p_org and a.purchase_order_line_id=v_line_id and a.status='open'),0)) into v_committed;
+        if v_line.ordered_quantity<v_committed then raise exception using errcode='23514',message='purchase_order_reduction_below_committed'; end if;
+        if v_line.configuration_version_id<>v_old.configuration_version_id and (
+          exists(select 1 from public.e10_receipt_po_allocations where organization_id=p_org and purchase_order_line_id=v_line_id)
+          or exists(select 1 from public.e10_invoice_po_allocations where organization_id=p_org and purchase_order_line_id=v_line_id)
+          or exists(select 1 from public.e10_expected_inventory_allocations where organization_id=p_org and purchase_order_line_id=v_line_id)) then
+          raise exception using errcode='55000',message='purchase_order_bound_configuration_change_denied';
+        end if;
+        update public.e10_purchase_order_lines set line_no=v_line.line_no,
+          configuration_version_id=v_line.configuration_version_id,ordered_quantity=v_line.ordered_quantity,
+          estimated_unit_cost=v_line.estimated_unit_cost,state='active'
+        where organization_id=p_org and id=v_line_id;
+      else
+        insert into public.e10_purchase_order_lines(id,organization_id,purchase_order_id,configuration_version_id,
+          line_no,ordered_quantity,estimated_unit_cost,state)
+        values(v_line_id,p_org,p_purchase_order_id,v_line.configuration_version_id,v_line.line_no,
+          v_line.ordered_quantity,v_line.estimated_unit_cost,'active');
       end if;
-      update public.e10_purchase_order_lines set line_no=v_line.line_no,
-        configuration_version_id=v_line.configuration_version_id,ordered_quantity=v_line.ordered_quantity,
-        estimated_unit_cost=v_line.estimated_unit_cost,state='active'
-      where organization_id=p_org and id=v_line_id;
-    else
-      insert into public.e10_purchase_order_lines(organization_id,purchase_order_id,configuration_version_id,
-        line_no,ordered_quantity,estimated_unit_cost,state)
-      values(p_org,p_purchase_order_id,v_line.configuration_version_id,v_line.line_no,
-        v_line.ordered_quantity,v_line.estimated_unit_cost,'active');
     end if;
   end loop;
   for v_old in select * from public.e10_purchase_order_lines
@@ -569,19 +637,19 @@ begin
   insert into public.e10_purchase_order_revisions(organization_id,purchase_order_id,revision,status,snapshot,
     payload_fingerprint,change_reason,created_by)
   values(p_org,p_purchase_order_id,p_expected_revision+1,v_new_status,v_snapshot,v_fp,btrim(p_reason),v_actor);
-  insert into public.e10_commercial_events(id,organization_id,event_type,event_schema_version,subject_type,subject_id,
-    occurred_at,occurred_at_precision,idempotency_key,source_kind,source_reference,source_event_id,
-    correlation_id,evidence_quality,payload,created_by,request_fingerprint)
-  values(v_event,p_org,'purchase_order_changed',1,'other',p_purchase_order_id::text,now(),'exact',
-    'purchase-order:'||p_idempotency_key,'manual','purchase_order',p_idempotency_key,p_purchase_order_id::text,
-    'operator_asserted',jsonb_build_object('purchase_order_id',p_purchase_order_id::text,'operation','amend',
-      'status',v_new_status,'revision',(p_expected_revision+1)::text,'reason',btrim(p_reason)),v_actor,
-    md5('purchase-order-event|'||v_fp));
   v_result:=jsonb_build_object('ok',true,'replay',false,'purchase_order_id',p_purchase_order_id,
     'status',v_new_status,'revision',p_expected_revision+1,'commercial_event_id',v_event);
   insert into public.e10_purchase_order_commands(organization_id,idempotency_key,operation,purchase_order_id,
     request_fingerprint,result,created_by)
   values(p_org,p_idempotency_key,'amend',p_purchase_order_id,v_fp,v_result,v_actor);
+  insert into public.e10_commercial_events(id,organization_id,event_type,event_schema_version,subject_type,subject_id,
+    occurred_at,occurred_at_precision,idempotency_key,source_kind,source_reference,source_event_id,
+    correlation_id,evidence_quality,payload,created_by,request_fingerprint,purchase_order_command_idempotency_key)
+  values(v_event,p_org,'purchase_order_changed',1,'other',p_purchase_order_id::text,now(),'exact',
+    'purchase-order:'||p_idempotency_key,'manual','purchase_order',p_idempotency_key,p_purchase_order_id::text,
+    'operator_asserted',jsonb_build_object('purchase_order_id',p_purchase_order_id::text,'operation','amend',
+      'status',v_new_status,'revision',(p_expected_revision+1)::text,'reason',btrim(p_reason)),v_actor,
+    md5('purchase-order-event|'||v_fp),p_idempotency_key);
   return v_result;
 exception
   when invalid_text_representation or numeric_value_out_of_range then
