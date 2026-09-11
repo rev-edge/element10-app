@@ -140,6 +140,9 @@ jobs:
         run: |
           node tests/ta_x7b_spend_control_test.js
           node tests/ta_x7b_financial_permission_concurrent_test.js
+          node tests/ta_x7b_spend_reporting_test.js
+          node tests/ta_x7b_spend_reporting_concurrent_test.js
+          node tests/ta_x7b_spend_lifecycle_test.js
       - name: A7 hostile two-org matrix (every identity class x both orgs x every census family, real JWTs, specific refusals)
         # docs/A7_HOSTILE_MATRIX.md proven: F1-F8 cross-org denials + legitimate positives under real authenticated JWTs;
         # ledger outlives items under a hostile identity; receipts server-only (no authenticated grant); anon zero access;
