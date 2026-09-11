@@ -1,5 +1,16 @@
 -- TA-X7e.0 guarded reviewed-evidence writer.
 
+create function e10.inventory_episode_key(p_org uuid,p_item uuid,p_origin uuid)returns text
+language plpgsql stable security definer set search_path=public as $$
+declare o record;
+begin
+ select*into o from public.e10_current_inventory_lifecycle_events e where e.organization_id=p_org and e.unique_item_id=p_item and e.id=p_origin and e.event_type in('acquisition','receipt');
+ if not found then raise exception using errcode='23514',message='inventory_disposition_origin_invalid';end if;
+ return case when o.correlation_id is null then'event:'||o.id::text else'corr:'||o.correlation_id end;
+end $$;
+revoke all on function e10.inventory_episode_key(uuid,uuid,uuid)from public,anon,authenticated;
+grant execute on function e10.inventory_episode_key(uuid,uuid,uuid)to service_role;
+
 create function e10.inventory_episode_origin(p_org uuid,p_item uuid,p_origin uuid)returns uuid
 language plpgsql stable security definer set search_path=public as $$
 declare o record;a uuid;n integer;
@@ -41,18 +52,20 @@ begin
    if not found or p.evidence_key<>new.evidence_key or p.unique_item_id is distinct from new.unique_item_id or p.catalog_variant_id is distinct from new.catalog_variant_id or p.method<>new.method or p.method_version<>new.method_version or new.revision<>p.revision+1 then raise exception using errcode='23514',message='inventory_evidence_successor_invalid';end if;
   end if;
  else
-  new.episode_origin_event_id:=e10.inventory_episode_origin(new.organization_id,new.unique_item_id,new.origin_event_id);
   if new.supersedes_link_id is null then
+   new.episode_key:=e10.inventory_episode_key(new.organization_id,new.unique_item_id,new.origin_event_id);
+   new.episode_origin_event_id:=e10.inventory_episode_origin(new.organization_id,new.unique_item_id,new.origin_event_id);
    if new.action<>'assert'or new.revision<>1 then raise exception using errcode='23514',message='inventory_evidence_root_revision_invalid';end if;
   else
    select*into p from public.e10_inventory_disposition_links where organization_id=new.organization_id and id=new.supersedes_link_id;
-   if not found or p.disposition_key<>new.disposition_key or p.unique_item_id<>new.unique_item_id or p.episode_origin_event_id<>new.episode_origin_event_id or new.revision<>p.revision+1 then raise exception using errcode='23514',message='inventory_evidence_successor_invalid';end if;
+   new.episode_key:=p.episode_key;new.episode_origin_event_id:=p.episode_origin_event_id;
+   if not found or p.disposition_key<>new.disposition_key or p.unique_item_id<>new.unique_item_id or new.revision<>p.revision+1 then raise exception using errcode='23514',message='inventory_evidence_successor_invalid';end if;
   end if;
-  select e.* into v_origin from public.e10_current_inventory_lifecycle_events e
-  where e.organization_id=new.organization_id and e.id=new.origin_event_id
-    and e.unique_item_id=new.unique_item_id and e.event_type in('acquisition','receipt');
-  if not found then raise exception using errcode='23514',message='inventory_disposition_origin_invalid';end if;
   if new.action='assert'then
+   select e.* into v_origin from public.e10_current_inventory_lifecycle_events e
+   where e.organization_id=new.organization_id and e.id=new.origin_event_id
+     and e.unique_item_id=new.unique_item_id and e.event_type in('acquisition','receipt');
+   if not found then raise exception using errcode='23514',message='inventory_disposition_origin_invalid';end if;
    if new.customer_transaction_id is not null and new.disposition_kind='sale'then
     select max(t.occurred_at),max(t.occurred_at_precision)into v_source_time,v_source_precision from public.e10_customer_transactions t join public.e10_customer_transaction_lines l on l.organization_id=t.organization_id and l.transaction_id=t.id where t.organization_id=new.organization_id and t.id=new.customer_transaction_id and l.unique_item_id=new.unique_item_id;
    elsif new.market_observation_id is not null and new.disposition_kind='sale'then
@@ -75,7 +88,7 @@ create trigger e10_inventory_disposition_insert_guard before insert on public.e1
 create function public.e10_org_review_inventory_evidence(
  p_org uuid,p_kind text,p_key uuid,p_expected_revision bigint,p_action text,p_payload jsonb,p_reason text,p_idempotency_key text
 )returns jsonb language plpgsql security definer set search_path=public as $$
-declare actor uuid:=auth.uid();k uuid:=coalesce(p_key,gen_random_uuid());prior record;replay record;rid uuid:=gen_random_uuid();fp text;out_id uuid;episode_origin uuid;
+declare actor uuid:=auth.uid();k uuid:=coalesce(p_key,gen_random_uuid());prior record;replay record;rid uuid:=gen_random_uuid();fp text;out_id uuid;episode_origin uuid;episode_key_value text;
 begin
  if actor is null or not exists(select 1 from public.e10_organizations where id=p_org and status='active')or not e10.is_org_member(p_org)or not e10.has_org_cap(p_org,'act.curate_market_analytics')then raise exception using errcode='42501',message='inventory_evidence_review_denied';end if;
  if p_org is null or p_kind is null or p_kind not in('grade_assessment','population_snapshot','valuation_evidence','disposition_link')or p_expected_revision is null or p_expected_revision<0 or p_action is null or p_action not in('assert','revoke')or p_payload is null or jsonb_typeof(p_payload)<>'object'or octet_length(p_payload::text)>65536 or p_reason is null or length(btrim(p_reason))not between 1 and 2000 or p_idempotency_key is null or length(btrim(p_idempotency_key))not between 1 and 500 then raise exception using errcode='22023',message='inventory_evidence_review_invalid';end if;
@@ -100,8 +113,14 @@ begin
    perform 1 from public.e10_customer_transaction_lines where organization_id=p_org and transaction_id=(p_payload->>'customer_transaction_id')::uuid and unique_item_id=(p_payload->>'unique_item_id')::uuid for key share;
   elsif p_payload->>'market_observation_id'is not null then perform 1 from public.e10_market_observations where organization_id=p_org and id=(p_payload->>'market_observation_id')::uuid for key share;
   elsif p_payload->>'commercial_event_id'is not null then perform 1 from public.e10_commercial_events where organization_id=p_org and id=(p_payload->>'commercial_event_id')::uuid for key share;end if;
-  episode_origin:=e10.inventory_episode_origin(p_org,(p_payload->>'unique_item_id')::uuid,(p_payload->>'origin_event_id')::uuid);
-  perform pg_advisory_xact_lock(hashtextextended(p_org::text||'|inventory-episode|'||(p_payload->>'unique_item_id')||'|'||episode_origin::text,0));
+  if p_key is null then
+   episode_key_value:=e10.inventory_episode_key(p_org,(p_payload->>'unique_item_id')::uuid,(p_payload->>'origin_event_id')::uuid);
+   episode_origin:=e10.inventory_episode_origin(p_org,(p_payload->>'unique_item_id')::uuid,(p_payload->>'origin_event_id')::uuid);
+  else
+   select d.episode_key,d.episode_origin_event_id into episode_key_value,episode_origin from public.e10_inventory_disposition_links d where d.organization_id=p_org and d.disposition_key=p_key and not exists(select 1 from public.e10_inventory_disposition_links n where n.organization_id=d.organization_id and n.supersedes_link_id=d.id);
+   if not found then raise exception using errcode='22023',message='inventory_evidence_key_invalid';end if;
+  end if;
+  perform pg_advisory_xact_lock(hashtextextended(p_org::text||'|inventory-episode|'||(p_payload->>'unique_item_id')||'|'||episode_key_value,0));
  end if;
  if auth.uid()is distinct from actor or not exists(select 1 from public.e10_organizations where id=p_org and status='active')or not e10.is_org_member(p_org)or not e10.has_org_cap(p_org,'act.curate_market_analytics')then raise exception using errcode='42501',message='inventory_evidence_review_denied';end if;
 
@@ -127,8 +146,8 @@ begin
   select*into prior from public.e10_inventory_disposition_links d where d.organization_id=p_org and d.disposition_key=k and not exists(select 1 from public.e10_inventory_disposition_links n where n.organization_id=d.organization_id and n.supersedes_link_id=d.id)for update;
   if p_key is null then if found or p_expected_revision<>0 then raise exception using errcode='22023',message='inventory_evidence_transition_invalid';end if;else if not found then raise exception using errcode='22023',message='inventory_evidence_key_invalid';end if;if prior.revision<>p_expected_revision then raise exception using errcode='40001',message='inventory_evidence_revision_conflict';end if;end if;
   if auth.uid()is distinct from actor or not exists(select 1 from public.e10_organizations where id=p_org and status='active')or not e10.is_org_member(p_org)or not e10.has_org_cap(p_org,'act.curate_market_analytics')then raise exception using errcode='42501',message='inventory_evidence_review_denied';end if;
-  insert into public.e10_inventory_disposition_links(id,organization_id,disposition_key,unique_item_id,origin_event_id,episode_origin_event_id,revision,action,disposition_kind,disposed_at,disposed_at_precision,customer_transaction_id,market_observation_id,commercial_event_id,supersedes_link_id,reason,evidence,idempotency_key,request_fingerprint,reviewed_by)
-  values(rid,p_org,k,(p_payload->>'unique_item_id')::uuid,(p_payload->>'origin_event_id')::uuid,episode_origin,p_expected_revision+1,p_action,p_payload->>'disposition_kind',(p_payload->>'disposed_at')::timestamptz,p_payload->>'disposed_at_precision',(p_payload->>'customer_transaction_id')::uuid,(p_payload->>'market_observation_id')::uuid,(p_payload->>'commercial_event_id')::uuid,prior.id,btrim(p_reason),coalesce(p_payload->'evidence','{}'),btrim(p_idempotency_key),fp,actor)returning id into out_id;
+  insert into public.e10_inventory_disposition_links(id,organization_id,disposition_key,unique_item_id,origin_event_id,episode_origin_event_id,episode_key,revision,action,disposition_kind,disposed_at,disposed_at_precision,customer_transaction_id,market_observation_id,commercial_event_id,supersedes_link_id,reason,evidence,idempotency_key,request_fingerprint,reviewed_by)
+  values(rid,p_org,k,(p_payload->>'unique_item_id')::uuid,case when p_action='revoke'then prior.origin_event_id else(p_payload->>'origin_event_id')::uuid end,episode_origin,episode_key_value,p_expected_revision+1,p_action,p_payload->>'disposition_kind',(p_payload->>'disposed_at')::timestamptz,case when p_action='revoke'then'unknown'else p_payload->>'disposed_at_precision'end,(p_payload->>'customer_transaction_id')::uuid,(p_payload->>'market_observation_id')::uuid,(p_payload->>'commercial_event_id')::uuid,prior.id,btrim(p_reason),coalesce(p_payload->'evidence','{}'),btrim(p_idempotency_key),fp,actor)returning id into out_id;
  end if;
  return jsonb_build_object('ok',true,'replay',false,'kind',p_kind,'evidence_id',out_id,'evidence_key',k,'revision',p_expected_revision+1);
 exception when invalid_text_representation or datetime_field_overflow then raise exception using errcode='22023',message='inventory_evidence_payload_invalid';

@@ -105,7 +105,7 @@ create index e10_valuation_evidence_variant_time_idx on public.e10_valuation_evi
 
 create table public.e10_inventory_disposition_links(
  id uuid primary key default gen_random_uuid(),organization_id uuid not null,
- disposition_key uuid not null,unique_item_id uuid not null,origin_event_id uuid not null,episode_origin_event_id uuid not null,
+ disposition_key uuid not null,unique_item_id uuid not null,origin_event_id uuid not null,episode_origin_event_id uuid not null,episode_key text not null,
  revision bigint not null check(revision>0),action text not null check(action in('assert','revoke')),
  disposition_kind text,disposed_at timestamptz,disposed_at_precision text not null,
  customer_transaction_id uuid,market_observation_id uuid,commercial_event_id uuid,
@@ -126,11 +126,12 @@ create table public.e10_inventory_disposition_links(
  check((action='revoke'and disposition_kind is null and num_nonnulls(customer_transaction_id,market_observation_id,commercial_event_id)=0)
    or(action='assert'and disposition_kind in('sale','disposal','return')and num_nonnulls(customer_transaction_id,market_observation_id,commercial_event_id)=1)),
  check(action='revoke'or action='assert'and disposition_kind is not null),
+ check(length(episode_key)between 7 and 80),
  check(length(btrim(reason))between 1 and 2000),check(jsonb_typeof(evidence)='object'and octet_length(evidence::text)<=65536),
  check(length(btrim(idempotency_key))between 1 and 500 and btrim(request_fingerprint)<>'')
 );
 create unique index e10_inventory_disposition_successor_uq on public.e10_inventory_disposition_links(organization_id,supersedes_link_id)where supersedes_link_id is not null;
-create unique index e10_inventory_disposition_episode_root_uq on public.e10_inventory_disposition_links(organization_id,unique_item_id,episode_origin_event_id)where supersedes_link_id is null;
+create unique index e10_inventory_disposition_episode_root_uq on public.e10_inventory_disposition_links(organization_id,unique_item_id,episode_key)where supersedes_link_id is null;
 create index e10_inventory_disposition_item_time_idx on public.e10_inventory_disposition_links(organization_id,unique_item_id,disposed_at desc,recorded_at desc,id);
 
 create table public.e10_inventory_reporting_revisions(

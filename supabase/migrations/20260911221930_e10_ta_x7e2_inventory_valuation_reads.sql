@@ -11,32 +11,33 @@ language sql stable security definer set search_path=public as $$
 $$;
 
 create function e10.inventory_holdings_at(p_org uuid,p_cutoff timestamptz)
-returns table(unique_item_id uuid,catalog_variant_id uuid,origin_event_id uuid,origin_at timestamptz,origin_recorded_at timestamptz,holding_evidence text)
+returns table(unique_item_id uuid,catalog_variant_id uuid,episode_key text,origin_event_id uuid,origin_at timestamptz,origin_recorded_at timestamptz,holding_evidence text)
 language sql stable security definer set search_path=public as $$
  with primary_origins as(
   select e.*from public.e10_current_inventory_lifecycle_events e
   where e.organization_id=p_org and e.occurred_at<=p_cutoff and(
-   e.event_type='acquisition'and(e.correlation_id is null or not exists(select 1 from public.e10_current_inventory_lifecycle_events a where a.organization_id=e.organization_id and a.unique_item_id=e.unique_item_id and a.event_type='acquisition'and a.occurred_at<=p_cutoff and a.correlation_id=e.correlation_id and a.id<>e.id))or e.event_type='receipt'and not exists(
+   e.event_type='acquisition'and not exists(select 1 from public.e10_current_inventory_lifecycle_events a where a.organization_id=e.organization_id and a.unique_item_id=e.unique_item_id and a.event_type='acquisition'and a.occurred_at<=p_cutoff and a.episode_key=e.episode_key and a.id<>e.id)or e.event_type='receipt'and not exists(
     select 1 from public.e10_current_inventory_lifecycle_events a where a.organization_id=e.organization_id
      and a.unique_item_id=e.unique_item_id and a.event_type='acquisition'and a.occurred_at<=p_cutoff
-     and a.correlation_id is not null and a.correlation_id=e.correlation_id))
+     and a.episode_key=e.episode_key))
  ),origins as(
-  select e.unique_item_id,e.id,e.occurred_at,e.recorded_at,d.disposition_count,
+  select e.unique_item_id,e.episode_key,e.id,e.occurred_at,e.recorded_at,d.disposition_count,
    row_number()over(partition by e.unique_item_id order by e.occurred_at desc,e.recorded_at desc,e.id desc)rn,
    count(*)over(partition by e.unique_item_id)open_count
   from primary_origins e cross join lateral(select count(*)disposition_count from public.e10_current_inventory_dispositions d
-   where d.organization_id=p_org and d.unique_item_id=e.unique_item_id and d.origin_event_id=e.id and d.disposed_at<=p_cutoff)d
+   where d.organization_id=p_org and d.unique_item_id=e.unique_item_id and d.episode_key=e.episode_key and d.disposed_at<=p_cutoff
+    and not(d.source_basis='trusted_posted_transaction'and exists(select 1 from public.e10_current_inventory_dispositions r where r.organization_id=d.organization_id and r.unique_item_id=d.unique_item_id and r.episode_key=d.episode_key and r.source_basis='reviewed_link'and r.disposed_at<=p_cutoff)))d
   where d.disposition_count<>1
  ),known as(
-  select o.unique_item_id,o.id origin_event_id,o.occurred_at origin_at,o.recorded_at origin_recorded_at,case when o.disposition_count>1 then'episode_finality_conflict'when o.open_count=1 then'episode'else'episode_ambiguous'end evidence
+  select o.unique_item_id,o.episode_key,o.id origin_event_id,o.occurred_at origin_at,o.recorded_at origin_recorded_at,case when o.disposition_count>1 then'episode_finality_conflict'when o.open_count=1 then'episode'else'episode_ambiguous'end evidence
   from origins o where o.rn=1
  ),record_only as(
-  select u.id,null::uuid,null::timestamptz,null::timestamptz,'record_only'
+  select u.id,null::text,null::uuid,null::timestamptz,null::timestamptz,'record_only'
   from public.e10_unique_items u where u.organization_id=p_org and u.created_at<=p_cutoff
    and not exists(select 1 from origins o where o.unique_item_id=u.id)
    and not exists(select 1 from public.e10_current_inventory_dispositions d where d.organization_id=p_org and d.unique_item_id=u.id and d.disposed_at<=p_cutoff)
  )
- select h.unique_item_id,u.catalog_variant_id,h.origin_event_id,h.origin_at,h.origin_recorded_at,h.evidence from(select*from known union all select*from record_only)h
+ select h.unique_item_id,u.catalog_variant_id,h.episode_key,h.origin_event_id,h.origin_at,h.origin_recorded_at,h.evidence from(select*from known union all select*from record_only)h
  join public.e10_unique_items u on u.organization_id=p_org and u.id=h.unique_item_id
 $$;
 
@@ -103,16 +104,16 @@ begin
  fp:=encode(sha256(convert_to(jsonb_build_object('v','inventory-valuation-v1','org',p_org,'actor',actor,'method',btrim(p_method),'method_version',btrim(p_method_version),'currency',p_currency,'closing',extract(epoch from p_closing_cutoff),'opening',extract(epoch from p_opening_cutoff),'freshness_days',p_freshness_days,'revision',rev)::text,'UTF8')),'hex');
  if p_cursor is not null then cur:=e10.inventory_cursor_decode(p_org,p_cursor);if cur->>'fingerprint'<>fp or(cur->>'actor')::uuid<>actor or(cur->>'revision')::bigint<>rev then raise exception using errcode='40001',message='inventory_cursor_stale_or_foreign';end if;after_item:=(cur->>'unique_item_id')::uuid;end if;
  with close_h as materialized(select*from e10.inventory_holdings_at(p_org,p_closing_cutoff)),open_h as materialized(select*from e10.inventory_holdings_at(p_org,p_opening_cutoff)where p_opening_cutoff is not null),all_ids as materialized(select unique_item_id from close_h union select unique_item_id from open_h),facts as materialized(
-  select i.unique_item_id,coalesce(c.catalog_variant_id,o.catalog_variant_id)catalog_variant_id,c.origin_event_id closing_origin_event_id,o.origin_event_id opening_origin_event_id,c.holding_evidence closing_holding,o.holding_evidence opening_holding,
+  select i.unique_item_id,coalesce(c.catalog_variant_id,o.catalog_variant_id)catalog_variant_id,c.episode_key closing_episode_key,o.episode_key opening_episode_key,c.origin_event_id closing_origin_event_id,o.origin_event_id opening_origin_event_id,c.holding_evidence closing_holding,o.holding_evidence opening_holding,
    ce.amount closing_value,ce.evidence_id closing_evidence_id,ce.observed_at closing_evidence_at,ce.source_kind closing_source,ce.selected_basis closing_basis,
    ce.applicability_key closing_applicability,oe.amount opening_value,oe.evidence_id opening_evidence_id,oe.applicability_key opening_applicability,
    pop.population_count,pop.observed_at population_observed_at,pop.applicability_key population_applicability,pop.population_scope,
    case when can_cost then cost.amount end actual_cost,cost.id actual_cost_evidence_id,cost.occurred_at actual_cost_observed_at,cost.source_kind actual_cost_source_kind,cost.source_reference actual_cost_source_reference,
    case when not can_cost then'not_authorized'when cost.amount is null then'unknown'else'available'end actual_cost_access,
-   c.origin_event_id is not null and c.origin_event_id=o.origin_event_id and c.holding_evidence='episode'and o.holding_evidence='episode'
+   c.episode_key is not null and c.episode_key=o.episode_key and c.holding_evidence='episode'and o.holding_evidence='episode'
     and ce.amount is not null and oe.amount is not null and ce.applicability_key=oe.applicability_key as comparable,
-   case when c.holding_evidence in('record_only','episode_ambiguous')then c.holding_evidence
-    when o.holding_evidence is not null and c.holding_evidence is not null and o.origin_event_id is distinct from c.origin_event_id then'ownership_episode_changed'
+   case when c.holding_evidence in('record_only','episode_ambiguous','episode_finality_conflict')then c.holding_evidence
+    when o.holding_evidence is not null and c.holding_evidence is not null and o.episode_key is distinct from c.episode_key then'ownership_episode_changed'
     when o.holding_evidence is not null and c.holding_evidence is not null and oe.applicability_key is distinct from ce.applicability_key then'applicability_changed'
     when c.holding_evidence is not null and ce.amount is null then'closing_value_unavailable'
     when o.holding_evidence is not null and oe.amount is null then'opening_value_unavailable'end uncomparable_reason
@@ -125,13 +126,13 @@ begin
    'closing_holding_count',count(*)filter(where closing_holding is not null),'closing_valued_count',count(*)filter(where closing_holding is not null and closing_value is not null),'closing_unvalued_count',count(*)filter(where closing_holding is not null and closing_value is null),'closing_value',sum(closing_value)filter(where closing_holding is not null),
    'opening_holding_count',count(*)filter(where opening_holding is not null),'opening_valued_count',count(*)filter(where opening_holding is not null and opening_value is not null),'opening_value',sum(opening_value)filter(where opening_holding is not null),
    'comparable_count',count(*)filter(where comparable),'market_movement',sum(closing_value-opening_value)filter(where comparable),
-   'acquisition_count',count(*)filter(where closing_holding is not null and(opening_holding is null or opening_origin_event_id is distinct from closing_origin_event_id)),'acquisition_endpoint_value',sum(closing_value)filter(where closing_holding is not null and(opening_holding is null or opening_origin_event_id is distinct from closing_origin_event_id)),
-   'disposal_count',count(*)filter(where opening_holding is not null and(closing_holding is null or opening_origin_event_id is distinct from closing_origin_event_id)),'disposal_endpoint_value',sum(opening_value)filter(where opening_holding is not null and(closing_holding is null or opening_origin_event_id is distinct from closing_origin_event_id)),
+   'acquisition_count',count(*)filter(where closing_holding is not null and(opening_holding is null or opening_episode_key is distinct from closing_episode_key)),'acquisition_endpoint_value',sum(closing_value)filter(where closing_holding is not null and(opening_holding is null or opening_episode_key is distinct from closing_episode_key)),
+   'disposal_count',count(*)filter(where opening_holding is not null and(closing_holding is null or opening_episode_key is distinct from closing_episode_key)),'disposal_endpoint_value',sum(opening_value)filter(where opening_holding is not null and(closing_holding is null or opening_episode_key is distinct from closing_episode_key)),
    'uncomparable_count',count(*)filter(where opening_holding is not null and closing_holding is not null and not coalesce(comparable,false)),
-   'record_only_count',count(*)filter(where closing_holding='record_only'),'ambiguous_episode_count',count(*)filter(where closing_holding='episode_ambiguous'),
+   'record_only_count',count(*)filter(where closing_holding='record_only'),'ambiguous_episode_count',count(*)filter(where closing_holding in('episode_ambiguous','episode_finality_conflict')),
    'unknown_cost_count',count(*)filter(where closing_holding is not null and(can_cost and actual_cost is null)),'actual_cost_contribution',case when can_cost then sum(actual_cost)filter(where closing_holding is not null)end,'actual_cost_access',case when can_cost then'authorized'else'not_authorized'end)j from facts),
  page as(select*from facts where closing_holding is not null and(after_item is null or unique_item_id>after_item)order by unique_item_id limit p_limit+1),shown as(select*from page order by unique_item_id limit p_limit)
- select(select j from totals),(select count(*)from page)>p_limit,coalesce(jsonb_agg(jsonb_build_object('unique_item_id',unique_item_id,'origin_event_id',closing_origin_event_id,'holding_evidence',closing_holding,'value',closing_value,'valuation_evidence_id',closing_evidence_id,'evidence_observed_at',closing_evidence_at,'source_kind',closing_source,'selected_basis',closing_basis,'applicability_key',closing_applicability,'population_count',population_count,'population_observed_at',population_observed_at,'population_scope',population_scope,'population_applicability_key',population_applicability,'actual_cost',actual_cost,'actual_cost_evidence_id',actual_cost_evidence_id,'actual_cost_observed_at',actual_cost_observed_at,'actual_cost_source_kind',actual_cost_source_kind,'actual_cost_source_reference',actual_cost_source_reference,'actual_cost_access',actual_cost_access,'comparable',comparable,'uncomparable_reason',uncomparable_reason)order by unique_item_id),'[]'),(select unique_item_id from shown order by unique_item_id desc limit 1)
+ select(select j from totals),(select count(*)from page)>p_limit,coalesce(jsonb_agg(jsonb_build_object('unique_item_id',unique_item_id,'episode_key',closing_episode_key,'origin_event_id',closing_origin_event_id,'holding_evidence',closing_holding,'value',closing_value,'valuation_evidence_id',closing_evidence_id,'evidence_observed_at',closing_evidence_at,'source_kind',closing_source,'selected_basis',closing_basis,'applicability_key',closing_applicability,'population_count',population_count,'population_observed_at',population_observed_at,'population_scope',population_scope,'population_applicability_key',population_applicability,'actual_cost',actual_cost,'actual_cost_evidence_id',actual_cost_evidence_id,'actual_cost_observed_at',actual_cost_observed_at,'actual_cost_source_kind',actual_cost_source_kind,'actual_cost_source_reference',actual_cost_source_reference,'actual_cost_access',actual_cost_access,'comparable',comparable,'uncomparable_reason',uncomparable_reason)order by unique_item_id),'[]'),(select unique_item_id from shown order by unique_item_id desc limit 1)
  into summary,has_more,items,last_item from shown;
  if has_more then next_cursor:=e10.inventory_cursor_encode(p_org,jsonb_build_object('fingerprint',fp,'actor',actor,'revision',rev,'unique_item_id',last_item));end if;
  return jsonb_build_object('metric_version','inventory-valuation-v1','organization_revision',rev,'method',btrim(p_method),'method_version',btrim(p_method_version),'currency',p_currency,'opening_cutoff',p_opening_cutoff,'closing_cutoff',p_closing_cutoff,'freshness_days',p_freshness_days,'summary',summary,'items',items,'next_cursor',next_cursor);
