@@ -449,6 +449,10 @@ begin
       join public.e10_stock_receipt_lines rl on rl.organization_id=a.organization_id and rl.id=a.receipt_line_id
       join public.e10_stock_receipts r on r.organization_id=rl.organization_id and r.id=rl.stock_receipt_id
       where l.organization_id=p_org and l.purchase_order_id=p_purchase_order_id and r.status<>'reversed')
+      or exists(select 1 from public.e10_purchase_order_lines l
+        join public.e10_invoice_po_allocations ia
+          on ia.organization_id=l.organization_id and ia.purchase_order_line_id=l.id
+        where l.organization_id=p_org and l.purchase_order_id=p_purchase_order_id)
       or exists(select 1 from public.e10_purchase_order_lines l join public.e10_expected_inventory_allocations ea
         on ea.organization_id=l.organization_id and ea.purchase_order_line_id=l.id
         where l.organization_id=p_org and l.purchase_order_id=p_purchase_order_id and ea.status='open') then

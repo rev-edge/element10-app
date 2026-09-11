@@ -41,9 +41,13 @@ begin
     values(o,location,prep_role,true),(o,location,approve_role,true);
   insert into public.e10_suppliers(id,organization_id,code,name,status) values(supplier,o,'X3C','X3c supplier','active');
   insert into public.e10_product_masters(id,organization_id,name) values(product,o,'X3c non-card product');
-  insert into public.e10_product_configurations(id,organization_id,product_master_id,name) values(config,o,product,'X3c case');
+  insert into public.e10_product_configurations(id,organization_id,product_master_id,name) values
+    (config,o,product,'X3c case'),
+    ('a7000000-0000-4000-8000-00000000e30b',o,product,'X3c alternate case');
   insert into public.e10_product_configuration_versions(id,organization_id,configuration_id,version_no,state,packaging_kind,base_unit,base_units_per_package)
-    values(version,o,config,1,'active','case','unit',12);
+    values
+      (version,o,config,1,'active','case','unit',12),
+      ('a7000000-0000-4000-8000-00000000e30a',o,'a7000000-0000-4000-8000-00000000e30b',1,'active','case','unit',24);
   insert into public.e10_inventory_items(id,name,qty,organization_id) values('x3c-item','X3c item',0,o);
   insert into public.e10_purchase_orders(id,organization_id,supplier_id,destination_location_id,order_number,revision,status,currency,created_by)
     values('a7000000-0000-4000-8000-00000000e321',o,supplier,location,'X3C-COMMITTED',1,'draft','CAD','a7000000-0000-4000-8000-00000000e311');
@@ -59,6 +63,18 @@ begin
     values(o,'a7000000-0000-4000-8000-00000000e324','a7000000-0000-4000-8000-00000000e322',3);
   insert into public.e10_expected_inventory_allocations(id,organization_id,purchase_order_line_id,destination_location_id,expected_quantity,status,planning_reference)
     values('a7000000-0000-4000-8000-00000000e325',o,'a7000000-0000-4000-8000-00000000e322',location,4,'open','x3c-commitment');
+  insert into public.e10_purchase_orders(id,organization_id,supplier_id,destination_location_id,order_number,revision,status,currency,created_by)
+    values('a7000000-0000-4000-8000-00000000e326',o,supplier,location,'X3C-INVOICED',1,'draft','CAD','a7000000-0000-4000-8000-00000000e311');
+  insert into public.e10_purchase_order_lines(id,organization_id,purchase_order_id,configuration_version_id,line_no,ordered_quantity,state)
+    values('a7000000-0000-4000-8000-00000000e327',o,'a7000000-0000-4000-8000-00000000e326',version,1,2,'active');
+  insert into public.e10_purchase_order_revisions(organization_id,purchase_order_id,revision,status,snapshot,payload_fingerprint,change_reason,created_by)
+    values(o,'a7000000-0000-4000-8000-00000000e326',1,'draft',e10.purchase_order_snapshot(o,'a7000000-0000-4000-8000-00000000e326'),'fixture-invoiced','fixture','a7000000-0000-4000-8000-00000000e311');
+  insert into public.e10_supplier_invoices(id,organization_id,supplier_id,supplier_document_number,status,currency,total_amount,created_by)
+    values('a7000000-0000-4000-8000-00000000e328',o,supplier,'X3C-INV','approved','CAD',20,'a7000000-0000-4000-8000-00000000e311');
+  insert into public.e10_supplier_invoice_lines(id,organization_id,supplier_invoice_id,configuration_version_id,line_no,invoiced_quantity,unit_cost,line_amount)
+    values('a7000000-0000-4000-8000-00000000e329',o,'a7000000-0000-4000-8000-00000000e328',version,1,2,10,20);
+  insert into public.e10_invoice_po_allocations(organization_id,invoice_line_id,purchase_order_line_id,allocated_quantity)
+    values(o,'a7000000-0000-4000-8000-00000000e329','a7000000-0000-4000-8000-00000000e327',2);
 end $$;
 
 set local role authenticated;
@@ -138,6 +154,39 @@ begin
       'cancel','would strand committed supply','x3c-cancel-committed');
     raise exception 'cancel with receipt/expected commitment accepted';
   exception when sqlstate '55000' then null; end;
+  begin
+    perform public.e10_org_transition_purchase_order(o,'a7000000-0000-4000-8000-00000000e326',1,
+      'cancel','would strand invoice match','x3c-cancel-invoiced');
+    raise exception 'cancel with invoice allocation accepted';
+  exception when sqlstate '55000' then null; end;
+end $$;
+
+reset role;
+update public.e10_stock_receipts set status='reversed'
+  where organization_id='e1000000-0000-4000-8000-0000000000a6' and id='a7000000-0000-4000-8000-00000000e323';
+update public.e10_expected_inventory_allocations set status='fulfilled',fulfilled_quantity=expected_quantity
+  where organization_id='e1000000-0000-4000-8000-0000000000a6' and id='a7000000-0000-4000-8000-00000000e325';
+set local role authenticated;
+do $$
+declare o uuid:='e1000000-0000-4000-8000-0000000000a6'; r jsonb;
+begin
+  perform set_config('request.jwt.claims',jsonb_build_object('sub','a7000000-0000-4000-8000-00000000e311','role','authenticated')::text,true);
+  begin
+    perform public.e10_org_amend_purchase_order(o,'a7000000-0000-4000-8000-00000000e321',1,
+      'a7000000-0000-4000-8000-00000000e302','a7000000-0000-4000-8000-00000000e301',
+      'X3C-COMMITTED','CAD',null,jsonb_build_array(jsonb_build_object(
+        'id','a7000000-0000-4000-8000-00000000e322','line_no',1,
+        'configuration_version_id','a7000000-0000-4000-8000-00000000e30a','ordered_quantity',8)),
+      'illegal historical rebind','x3c-rebind-after-reversal');
+    raise exception 'configuration rebound after reversed receipt history';
+  exception when sqlstate '55000' then null; end;
+  r:=public.e10_org_amend_purchase_order(o,'a7000000-0000-4000-8000-00000000e321',1,
+    'a7000000-0000-4000-8000-00000000e302','a7000000-0000-4000-8000-00000000e301',
+    'X3C-COMMITTED','CAD',null,jsonb_build_array(jsonb_build_object(
+      'id','a7000000-0000-4000-8000-00000000e322','line_no',1,
+      'configuration_version_id','a7000000-0000-4000-8000-00000000e305','ordered_quantity',1)),
+    'fulfilled supply no longer remains','x3c-fulfilled-floor');
+  if (r->>'revision')::integer<>2 then raise exception 'fulfilled expected allocation still counted as remaining commitment: %',r; end if;
 end $$;
 
 do $$
