@@ -20,16 +20,20 @@ language sql stable security definer set search_path=public as $$
     select 1 from public.e10_current_inventory_lifecycle_events a where a.organization_id=e.organization_id
      and a.unique_item_id=e.unique_item_id and a.event_type='acquisition'and a.occurred_at<=p_cutoff
      and a.episode_key=e.episode_key))
+ ),eligible_dispositions as materialized(
+  select d.*from public.e10_current_inventory_dispositions d where d.organization_id=p_org and d.disposed_at<=p_cutoff
+   and not(d.source_basis='trusted_posted_transaction'and exists(select 1 from public.e10_current_inventory_dispositions r where r.organization_id=d.organization_id and r.unique_item_id=d.unique_item_id and r.episode_key=d.episode_key and r.source_basis='reviewed_link'and r.disposed_at<=p_cutoff))
+ ),unresolved_items as materialized(
+  select distinct d.unique_item_id from eligible_dispositions d where not exists(select 1 from primary_origins o where o.unique_item_id=d.unique_item_id and o.episode_key=d.episode_key)
  ),origins as(
-  select e.unique_item_id,e.episode_key,e.id,e.occurred_at,e.recorded_at,d.disposition_count,
+  select e.unique_item_id,e.episode_key,e.id,e.occurred_at,e.recorded_at,d.disposition_count,u.unique_item_id is not null unresolved_finality,
    row_number()over(partition by e.unique_item_id order by e.occurred_at desc,e.recorded_at desc,e.id desc)rn,
    count(*)over(partition by e.unique_item_id)open_count
-  from primary_origins e cross join lateral(select count(*)disposition_count from public.e10_current_inventory_dispositions d
-   where d.organization_id=p_org and d.unique_item_id=e.unique_item_id and d.episode_key=e.episode_key and d.disposed_at<=p_cutoff
-    and not(d.source_basis='trusted_posted_transaction'and exists(select 1 from public.e10_current_inventory_dispositions r where r.organization_id=d.organization_id and r.unique_item_id=d.unique_item_id and r.episode_key=d.episode_key and r.source_basis='reviewed_link'and r.disposed_at<=p_cutoff)))d
-  where d.disposition_count<>1
+  from primary_origins e cross join lateral(select count(*)disposition_count from eligible_dispositions d where d.unique_item_id=e.unique_item_id and d.episode_key=e.episode_key)d
+  left join unresolved_items u on u.unique_item_id=e.unique_item_id
+  where d.disposition_count<>1 or u.unique_item_id is not null
  ),known as(
-  select o.unique_item_id,o.episode_key,o.id origin_event_id,o.occurred_at origin_at,o.recorded_at origin_recorded_at,case when o.disposition_count>1 then'episode_finality_conflict'when o.open_count=1 then'episode'else'episode_ambiguous'end evidence
+  select o.unique_item_id,o.episode_key,o.id origin_event_id,o.occurred_at origin_at,o.recorded_at origin_recorded_at,case when o.unresolved_finality or o.disposition_count>1 then'episode_finality_conflict'when o.open_count=1 then'episode'else'episode_ambiguous'end evidence
   from origins o where o.rn=1
  ),record_only as(
   select u.id,null::text,null::uuid,null::timestamptz,null::timestamptz,'record_only'

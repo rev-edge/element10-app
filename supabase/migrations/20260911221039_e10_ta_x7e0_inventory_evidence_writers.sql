@@ -66,6 +66,7 @@ begin
    where e.organization_id=new.organization_id and e.id=new.origin_event_id
      and e.unique_item_id=new.unique_item_id and e.event_type in('acquisition','receipt');
    if not found then raise exception using errcode='23514',message='inventory_disposition_origin_invalid';end if;
+   if e10.inventory_episode_key(new.organization_id,new.unique_item_id,new.origin_event_id)<>new.episode_key then raise exception using errcode='23514',message='inventory_disposition_episode_mismatch';end if;
    if new.customer_transaction_id is not null and new.disposition_kind='sale'then
     select max(t.occurred_at),max(t.occurred_at_precision)into v_source_time,v_source_precision from public.e10_customer_transactions t join public.e10_customer_transaction_lines l on l.organization_id=t.organization_id and l.transaction_id=t.id where t.organization_id=new.organization_id and t.id=new.customer_transaction_id and l.unique_item_id=new.unique_item_id;
    elsif new.market_observation_id is not null and new.disposition_kind='sale'then
