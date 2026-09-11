@@ -42,32 +42,60 @@ Add immutable, organization-owned relations:
    currency, amount, observed and recorded timestamps, source, input evidence,
    review status, and supersession. It is never a completed sale.
 4. `e10_inventory_reporting_revisions`: one monotonic revision per
-   organization. Triggers advance it for eligible commercial-event, unique
-   item, lot-cost, market-observation, grade, population, and valuation changes.
+   organization. Triggers advance it for every dependency named below. Writers
+   do not pre-lock this row before their source row, avoiding a reverse
+   revision-to-source lock order.
+
+Grade, population, and valuation evidence carries typed applicability:
+`condition_state` (`raw`, `graded`, or explicit `all_conditions` only for an
+aggregate), grader code, grade label, grade qualifier, and optional autograph
+designation. A graded scope requires grader and grade. A raw scope forbids
+them. A copy matches only exact known dimensions; unknown dimensions are
+unavailable and no grade, grader, qualifier, or condition conversion is
+implicit. Copy-specific valuation evidence wins over variant evidence only
+when both are otherwise eligible. Remaining ties resolve by observed time,
+recorded time, source key, then evidence ID, and the response discloses the
+selected basis.
 
 Every evidence table has RLS, no client table grants, append-only update/delete
 guards, composite tenant foreign keys, one successor per predecessor, bounded
 text/JSON, finite numeric/time checks, and current service-only
-`security_invoker` projections. Writers lock the organization revision row,
-canonicalize the idempotency key once, validate same-org targets and
-supersession, recheck authorization after the lock, and return stable replay.
+`security_invoker` projections. Writers canonicalize the idempotency key once,
+take a deterministic evidence-key advisory lock followed by the target and
+predecessor rows, validate same-org targets and supersession, recheck
+authorization after the wait, and return stable replay. Their insert trigger
+advances the reporting revision only after source locks are held.
 No writer creates a source row when evidence is absent.
 
 ## X7e.1: lifecycle and exposure projection
 
 Create a service-only projection over current eligible commercial events.
 Correction chains select the terminal eligible interpretation without deleting
-history. Eligible lifecycle events require exact/date occurrence time and an
+history. Eligibility is current-restated at a requested observation cutoff:
+event occurrence must be at or before the cutoff, while a later-recorded
+eligible correction may restate that occurrence. The response returns both
+occurrence and recorded times. Ties order by occurrence time, recorded time,
+then event ID. Eligible lifecycle events require exact/date occurrence time and an
 unambiguous physical-copy subject:
 
 - `subject_type='unique_item'` directly identifies the copy; or
 - `subject_type='inventory_item'` maps only when exactly one unique item is
   attached to that organization inventory row.
 
-Ambiguous quantity or identity is excluded with a counted reason. Listing
+Date-precision events may establish calendar ordering but never produce an
+exact intraday duration; affected measures are returned unavailable with a
+precision exclusion. Ambiguous quantity or identity is excluded with a counted reason. Listing
 events are keyed by copy, `listing_id`, and channel. `listing_published` and
 `listing_resumed` open an interval. `listing_paused`, `listing_ended`, or a
-sale closes it. A disappearance never closes it. Duplicate opens do not add
+qualifying final sale closes it. `sale_committed` alone is provisional and does
+not establish final sale. Final sale requires a linked posted customer
+transaction for the same organization/copy, or an eligible completed-sale
+market observation with exact copy identity. Release, return, resale, and
+reacquisition start or end distinct ownership episodes only where linked
+evidence resolves the same copy and chronology. Ambiguous/unmatched transitions
+are excluded; the projection never spans earliest acquisition to latest resale
+as one episode. Acquisition and physical receipt are separately labeled origins
+and never silently coalesced. A disappearance never closes a listing. Duplicate opens do not add
 exposure. At the requested finite cutoff, open intervals are censored. Ranges
 are unioned per physical copy before duration is summed, so simultaneous
 channels do not double-count.
@@ -80,7 +108,8 @@ For each copy, return distinct nullable measures and explicit availability:
 - unioned active exposure;
 - sale state, censoring state, contributing event IDs, and exclusion reasons.
 
-The Jan 1 receipt, Jan 3 publish, Jan 4 pause, Jan 6 resume, Jan 9 sale fixture
+The exact-timestamp Jan 1 receipt, Jan 3 publish, Jan 4 pause, Jan 6 resume,
+Jan 9 final-sale fixture
 must yield age 8 days, intake delay 2 days, first-list-to-sale 6 days, and active
 exposure 4 days under `[start,end)` boundaries.
 
@@ -96,20 +125,48 @@ Add three JSON RPCs:
    and historical grade assessments, applicable population snapshots, and
    valuation evidence with provenance and freshness.
 3. `e10_org_inventory_valuation_coverage`: explicit organization, method,
-   method version, currency, finite cutoff, freshness interval bounded to
-   3650 days, and hard limit at most 200. Select the newest eligible, reviewed,
-   non-stale estimate for each holding without converting currency. Return
+   method version, currency, finite closing cutoff, optional finite opening
+   cutoff earlier than closing, freshness interval bounded to 3650 days, and
+   hard detail-page limit at most 200. Compute totals and coverage over the
+   complete filtered holding population before applying the detail-page limit.
+   Select the newest eligible, reviewed, non-stale estimate for each holding at
+   each cutoff without converting currency, using its grade/condition as of
+   that cutoff. Return
    valued/unvalued counts, evidence age/source/method/version, population date,
    and unknown cost count. Acquisition-cost contribution is separate from
    estimate movement. Actual-cost amounts and contribution are NULL with
    `actual_cost_access='not_authorized'` unless the caller holds
    `financial.actual_cost.read`; missing authorized evidence remains
-   `unknown`, never zero.
+   `unknown`, never zero. Portfolio change partitions same-copy comparable
+   opening-to-closing valuation movement from acquisitions, disposals, and
+   uncomparable holdings. Comparable movement requires the same physical copy,
+   currency, method/version, and eligible applicability at both cutoffs.
+   Acquisitions and disposals are counts plus separately labeled endpoint
+   values, not appreciation and not cost allocation. A disposed then
+   reacquired copy is separate episodes unless explicit lifecycle evidence
+   proves continuous ownership. Unknown/uncomparable counts are always
+   returned.
 
 All cursors bind organization, normalized request fingerprint, metric version,
-cutoff, and organization revision. A concurrent source mutation or authority
-revocation rejects the stale page. Full-dataset filtering precedes pagination.
-No materialized aggregate is authoritative.
+cutoff(s), and organization revision. Each RPC executes as one top-level SQL
+statement, so PostgreSQL supplies one command snapshot. It reads the revision,
+all source facts, and the same revision again within that snapshot without a
+`FOR SHARE` lock. A concurrent writer is therefore either wholly absent or
+wholly visible; its trigger advances the revision in its own transaction. A
+follow-on page compares its cursor with the then-current committed revision and
+rejects stale state. Authorization is checked before source work and again
+immediately before return. This avoids the revision-to-source/source-to-revision
+deadlock cycle while preserving snapshot consistency.
+
+Revision invalidators include commercial events and their corrections/schema
+eligibility links; unique-item identity and inventory-item attachment; inventory
+quantity/ownership state; lots, receipts, reversals, and lot-cost evidence;
+posted transaction lines and attribution/correction/finalization facts used for
+sale finality; market observations, supersessions, reviewed facts and
+equivalences; grade assessments; population snapshots; valuation evidence; and
+any reviewed applicability or source-status row consumed by the projection.
+Full-dataset filtering and aggregation precede pagination. No materialized
+aggregate is authoritative.
 
 ## Test mapping
 
@@ -127,6 +184,10 @@ No materialized aggregate is authoritative.
 | Feed independence | Manual/import evidence works with zero connector rows. |
 | Access | Hostile organization, missing market capability, missing cost capability, NULL/unbounded input, foreign cursor, stale revision, and post-lock revocation fail closed with positive controls. |
 | Integrity | Same-key replay stable; different payload rejected; concurrent successors have one winner; update/delete denied. |
+| Applicability | Raw, PSA 9, and PSA 10 remain distinct; regrade changes only later-cutoff applicability; unknown/ambiguous provider dimensions are unavailable. |
+| Episodes | Sale/disposal/reacquisition does not bridge ownership episodes; provisional sale does not close one. |
+| Portfolio arithmetic | Added copy with unchanged comparable values is acquisition only; sold and reacquired copy is not appreciation; totals precede a 200-row detail page. |
+| Snapshot race | An ordinary source writer blocked mid-transaction cannot produce mixed source/revision output; its commit makes the prior cursor stale. |
 | Cleanup | Every run-owned row removed and tenant-zero sentinel unchanged. |
 
 ## Delivery and stop boundary
