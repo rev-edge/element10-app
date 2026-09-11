@@ -24,6 +24,21 @@ async function main(){
  await Promise.all([admin.connect(),a.connect(),b.connect()]);await setup();
  await admin.query('begin');await admin.query("set local role authenticated");await admin.query("select set_config('request.jwt.claims',$1,true)",[JSON.stringify({sub:x.actor,role:'authenticated'})]);
  const root=(await add(admin,'Original vendor instruction',null,`root-${run}`)).rows[0].r;await admin.query('commit');
+ await admin.query('begin');await admin.query('set local role authenticated');await admin.query("select set_config('request.jwt.claims',$1,true)",[JSON.stringify({sub:x.actor,role:'authenticated'})]);
+ const paddedReplay=(await add(admin,'Original vendor instruction',null,` root-${run} `)).rows[0].r;await admin.query('commit');
+ if(!paddedReplay.replay||paddedReplay.comment_id!==root.comment_id)throw Error('padded idempotency replay did not canonicalize');
+
+ const equivalentKey=`equivalent-${run}`;
+ await a.query('begin');await a.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[`${x.org}|commercial-comment-command|${equivalentKey}`]);
+ await b.query('begin');await claims(b);const equivalentPid=(await b.query('select pg_backend_pid() pid')).rows[0].pid;
+ const equivalentPending=add(b,'Equivalent key comment',null,` ${equivalentKey} `);await waitBlocked(equivalentPid);
+ await claims(a);const equivalentWinner=await add(a,'Equivalent key comment',null,equivalentKey);await a.query('commit');
+ const equivalentReplay=await bounded(equivalentPending);await b.query('commit');
+ if(equivalentWinner.rows[0].r.comment_id!==equivalentReplay.rows[0].r.comment_id||!equivalentReplay.rows[0].r.replay)throw Error('concurrent canonical keys did not converge');
+ await admin.query('begin');await admin.query('set local role authenticated');await admin.query("select set_config('request.jwt.claims',$1,true)",[JSON.stringify({sub:x.actor,role:'authenticated'})]);
+ let mismatch;try{await add(admin,'Changed equivalent payload',null,` ${equivalentKey} `)}catch(e){mismatch=e}await admin.query('rollback');
+ if(!mismatch||mismatch.code!=='22023')throw Error('canonical key changed-payload mismatch accepted');
+ console.log(`[proof] backend ${equivalentPid} waited on the canonical command key; padded/unpadded requests converged and changed payload was denied`);
 
  await a.query('begin');await a.query('select e10.lock_purchase_order($1,$2)',[x.org,x.po]);
  await b.query('begin');await claims(b);const bPid=(await b.query('select pg_backend_pid() pid')).rows[0].pid;
@@ -32,8 +47,8 @@ async function main(){
  await claims(a);const winner=await add(a,'Winning amendment A',root.comment_id,`branch-a-${run}`);await a.query('commit');
  let loser;try{await bounded(pending)}catch(e){loser=e}await b.query('rollback');
  if(!loser||loser.code!=='40001')throw Error(`stale successor was not serialization-denied: ${loser&&loser.code}`);
- const chain=await admin.query('select body,supersedes_comment_id from public.e10_commercial_comments where organization_id=$1 order by created_at,id',[x.org]);
- if(chain.rowCount!==2||chain.rows[1].body!=='Winning amendment A'||chain.rows[1].supersedes_comment_id!==root.comment_id)throw Error('single-successor retained chain invalid');
+ const chain=await admin.query("select count(*)::int total,count(*) filter(where supersedes_comment_id=$2)::int successors,count(*) filter(where supersedes_comment_id=$2 and body='Winning amendment A')::int winner from public.e10_commercial_comments where organization_id=$1",[x.org,root.comment_id]);
+ if(chain.rows[0].total!==3||chain.rows[0].successors!==1||chain.rows[0].winner!==1)throw Error('single-successor retained chain invalid');
  const po=await admin.query('select revision,status from public.e10_purchase_orders where organization_id=$1 and id=$2',[x.org,x.po]);
  if(po.rows[0].revision!==9||po.rows[0].status!=='approved')throw Error('comment concurrency changed PO revision or approval');
  console.log(`[proof] backend ${bPid} waited on the exact document lock; one successor committed and stale competitor was rejected`);
@@ -47,6 +62,18 @@ async function main(){
  const residue=await admin.query('select count(*)::int n from public.e10_commercial_comment_commands where organization_id=$1 and idempotency_key=$2',[x.org,`revoked-${run}`]);
  if(residue.rows[0].n)throw Error('revoked comment command left residue');
  console.log(`[proof] backend ${revokePid} reread prepare authority after its exact document-lock wait; no residue`);
+
+ await admin.query("insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed) values($1,$2,'act.purchasing_prepare',true)",[x.org,x.role]);
+ await a.query('begin');await a.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[`${x.org}|commercial-comment-command|root-${run}`]);
+ await b.query('begin');await claims(b);const pausedPid=(await b.query('select pg_backend_pid() pid')).rows[0].pid;
+ const pausedReplay=add(b,'Original vendor instruction',null,` root-${run} `);await waitBlocked(pausedPid);
+ await admin.query("update public.e10_organizations set status='suspended' where id=$1",[x.org]);await a.query('commit');
+ let pausedDenied;try{await bounded(pausedReplay)}catch(e){pausedDenied=e}await b.query('rollback');
+ if(!pausedDenied||pausedDenied.code!=='42501')throw Error(`paused organization replay succeeded: ${pausedDenied&&pausedDenied.code}`);
+ const rootCount=await admin.query('select count(*)::int n from public.e10_commercial_comment_commands where organization_id=$1 and idempotency_key=$2',[x.org,`root-${run}`]);
+ if(rootCount.rows[0].n!==1)throw Error('paused replay changed command cardinality');
+ await admin.query("update public.e10_organizations set status='active' where id=$1",[x.org]);
+ console.log(`[proof] backend ${pausedPid} reread active organization state after exact replay lock wait; replay denied with no write`);
 }
 async function cleanup(){
  await admin.query('begin');await admin.query("set local session_replication_role='replica'");

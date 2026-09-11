@@ -132,17 +132,67 @@ begin
   end if;
   return new;
 end $$;
+
+create function e10.guard_commercial_comment_event() returns trigger
+language plpgsql security definer set search_path=public as $$
+declare command_row record; comment_row record; document_kind text; document_id uuid;
+begin
+  if new.event_type<>'commercial_comment_changed' then
+    if new.commercial_comment_command_idempotency_key is not null then
+      raise exception using errcode='23514',message='commercial_comment_event_type_invalid';
+    end if;
+    return new;
+  end if;
+  if new.commercial_comment_command_idempotency_key is null then
+    raise exception using errcode='42501',message='commercial_comment_event_requires_command';
+  end if;
+  select c.* into command_row from public.e10_commercial_comment_commands c
+    where c.organization_id=new.organization_id
+      and c.idempotency_key=new.commercial_comment_command_idempotency_key;
+  if not found then raise exception using errcode='23514',message='commercial_comment_event_command_invalid'; end if;
+  select c.* into comment_row from public.e10_commercial_comments c
+    where c.organization_id=new.organization_id and c.id=command_row.comment_id
+      and c.commercial_event_id=new.id;
+  if not found then raise exception using errcode='23514',message='commercial_comment_event_link_invalid'; end if;
+  document_kind:=case when comment_row.purchase_order_id is not null then 'purchase_order'
+    when comment_row.supplier_invoice_id is not null then 'supplier_invoice'
+    when comment_row.stock_receipt_id is not null then 'stock_receipt'
+    else 'supplier_credit' end;
+  document_id:=coalesce(comment_row.purchase_order_id,comment_row.supplier_invoice_id,
+    comment_row.stock_receipt_id,comment_row.supplier_credit_id);
+  if command_row.commercial_event_id<>new.id or command_row.operation is distinct from new.payload->>'operation'
+    or new.payload->>'comment_id' is distinct from comment_row.id::text
+    or new.payload->>'document_kind' is distinct from document_kind
+    or new.payload->>'document_id' is distinct from document_id::text
+    or new.payload->>'audience' is distinct from comment_row.audience
+    or new.subject_type<>'other' or new.subject_id<>document_id::text
+    or new.source_kind<>'manual' or new.source_connection_id is distinct from 'purchasing-comments'
+    or new.source_reference is distinct from 'commercial_comment_command'
+    or new.source_event_id is distinct from comment_row.id::text
+    or new.correlation_id is distinct from document_kind||':'||document_id::text
+    or new.evidence_quality<>'operator_asserted'
+    or new.created_by is distinct from command_row.created_by
+    or new.created_by is distinct from comment_row.created_by then
+    raise exception using errcode='23514',message='commercial_comment_event_integrity_invalid';
+  end if;
+  return new;
+end $$;
 create trigger e10_commercial_comment_lineage_trg
   before insert on public.e10_commercial_comments
   for each row execute function e10.guard_commercial_comment_lineage();
+create trigger e10_commercial_comment_event_guard_trg
+  before insert on public.e10_commercial_events
+  for each row execute function e10.guard_commercial_comment_event();
 
 create constraint trigger e10_commercial_comment_command_link_trg
   after insert on public.e10_commercial_comment_commands deferrable initially deferred
   for each row execute function e10.guard_commercial_comment_command();
 revoke all on function e10.guard_commercial_comment_command() from public,anon,authenticated;
 revoke all on function e10.guard_commercial_comment_lineage() from public,anon,authenticated;
+revoke all on function e10.guard_commercial_comment_event() from public,anon,authenticated;
 grant execute on function e10.guard_commercial_comment_command() to service_role;
 grant execute on function e10.guard_commercial_comment_lineage() to service_role;
+grant execute on function e10.guard_commercial_comment_event() to service_role;
 
 create function public.e10_org_add_commercial_comment(
   p_org uuid,p_document_kind text,p_document_id uuid,p_audience text,p_body text,
@@ -151,6 +201,7 @@ create function public.e10_org_add_commercial_comment(
 declare
   actor uuid:=auth.uid(); fp text; existing_cmd record; prior record;
   comment_id uuid:=gen_random_uuid(); event_id uuid:=gen_random_uuid(); result jsonb;
+  normalized_key text:=btrim(p_idempotency_key);
   operation text:=case when p_supersedes_comment_id is null then 'create' else 'supersede' end;
 begin
   if actor is null or p_org is null
@@ -158,8 +209,8 @@ begin
     or not e10.is_org_member(p_org) or not e10.has_org_cap(p_org,'act.purchasing_prepare') then
     raise exception using errcode='42501',message='commercial_comment_write_denied';
   end if;
-  if p_document_kind not in ('purchase_order','supplier_invoice','stock_receipt','supplier_credit')
-    or p_document_id is null or p_audience not in ('internal','vendor')
+  if p_document_kind is null or p_document_kind not in ('purchase_order','supplier_invoice','stock_receipt','supplier_credit')
+    or p_document_id is null or p_audience is null or p_audience not in ('internal','vendor')
     or p_body is null or btrim(p_body)='' or length(p_body)>4000
     or p_idempotency_key is null or btrim(p_idempotency_key)='' or length(p_idempotency_key)>200 then
     raise exception using errcode='22023',message='commercial_comment_payload_invalid';
@@ -167,12 +218,14 @@ begin
   fp:=md5(jsonb_build_object('v','commercial-comment-v1','org',p_org,'document_kind',p_document_kind,
     'document_id',p_document_id,'audience',p_audience,'body',p_body,
     'supersedes_comment_id',p_supersedes_comment_id)::text);
-  perform pg_advisory_xact_lock(hashtextextended(p_org::text||'|commercial-comment-command|'||p_idempotency_key,0));
+  perform pg_advisory_xact_lock(hashtextextended(p_org::text||'|commercial-comment-command|'||normalized_key,0));
   select c.request_fingerprint,c.result into existing_cmd from public.e10_commercial_comment_commands c
-    where c.organization_id=p_org and c.idempotency_key=p_idempotency_key;
+    where c.organization_id=p_org and c.idempotency_key=normalized_key;
   if found then
     if existing_cmd.request_fingerprint<>fp then raise exception using errcode='22023',message='idempotency_key_mismatch'; end if;
-    if auth.uid() is distinct from actor or not e10.is_org_member(p_org)
+    if auth.uid() is distinct from actor
+      or not exists(select 1 from public.e10_organizations where id=p_org and status='active')
+      or not e10.is_org_member(p_org)
       or not e10.has_org_cap(p_org,'act.purchasing_prepare') then
       raise exception using errcode='42501',message='commercial_comment_write_denied';
     end if;
@@ -214,7 +267,7 @@ begin
     'document_kind',p_document_kind,'document_id',p_document_id);
   insert into public.e10_commercial_comment_commands(organization_id,idempotency_key,operation,
     comment_id,commercial_event_id,request_fingerprint,result,created_by)
-  values(p_org,btrim(p_idempotency_key),operation,comment_id,event_id,fp,result,actor);
+  values(p_org,normalized_key,operation,comment_id,event_id,fp,result,actor);
   insert into public.e10_commercial_comments(id,organization_id,audience,body,purchase_order_id,
     supplier_invoice_id,stock_receipt_id,supplier_credit_id,supersedes_comment_id,created_by,commercial_event_id)
   values(comment_id,p_org,p_audience,p_body,
@@ -225,13 +278,13 @@ begin
     p_supersedes_comment_id,actor,event_id);
   insert into public.e10_commercial_events(id,organization_id,event_type,event_schema_version,subject_type,
     subject_id,occurred_at,occurred_at_precision,idempotency_key,source_kind,source_connection_id,
-    source_event_id,correlation_id,evidence_quality,payload,created_by,request_fingerprint,
+    source_reference,source_event_id,correlation_id,evidence_quality,payload,created_by,request_fingerprint,
     commercial_comment_command_idempotency_key)
   values(event_id,p_org,'commercial_comment_changed',1,'other',p_document_id::text,now(),'exact',
-    'commercial-comment:'||btrim(p_idempotency_key),'manual','purchasing-comments',comment_id::text,
+    'commercial-comment:'||normalized_key,'manual','purchasing-comments','commercial_comment_command',comment_id::text,
     p_document_kind||':'||p_document_id::text,'operator_asserted',jsonb_build_object('comment_id',comment_id,
       'document_kind',p_document_kind,'document_id',p_document_id,'audience',p_audience,'operation',operation),
-    actor,md5('commercial-comment-event|'||fp),btrim(p_idempotency_key));
+    actor,md5('commercial-comment-event|'||fp),normalized_key);
   return result;
 end $$;
 
