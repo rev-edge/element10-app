@@ -23,6 +23,12 @@ declare
   il2 constant uuid:='d31f0000-0000-4000-8000-000000000016';
   credit constant uuid:='d31f0000-0000-4000-8000-000000000017';
   cl constant uuid:='d31f0000-0000-4000-8000-000000000018';
+  null_invoice constant uuid:='d31f0000-0000-4000-8000-000000000021';
+  null_invoice_line constant uuid:='d31f0000-0000-4000-8000-000000000022';
+  null_credit constant uuid:='d31f0000-0000-4000-8000-000000000023';
+  null_credit_line constant uuid:='d31f0000-0000-4000-8000-000000000024';
+  target_credit constant uuid:='d31f0000-0000-4000-8000-000000000025';
+  target_credit_line constant uuid:='d31f0000-0000-4000-8000-000000000026';
   r jsonb; replay jsonb; baseline jsonb;
 begin
   insert into public.e10_organizations(id,name,slug) values
@@ -67,6 +73,24 @@ begin
   insert into public.e10_supplier_credit_lines
     (id,organization_id,supplier_credit_id,configuration_version_id,line_no,line_amount)
     values(cl,o,credit,version_id,1,30);
+  insert into public.e10_supplier_invoices
+    (id,organization_id,supplier_id,supplier_document_number,currency,total_amount,created_by)
+    values(null_invoice,o,supplier,'X3D1D-NULL-INV','CAD',12,actor);
+  insert into public.e10_supplier_invoice_lines
+    (id,organization_id,supplier_invoice_id,line_no,line_amount)
+    values(null_invoice_line,o,null_invoice,1,12);
+  insert into public.e10_supplier_credits
+    (id,organization_id,supplier_id,supplier_document_number,currency,total_amount,created_by)
+    values(null_credit,o,supplier,'X3D1D-NULL-CR','CAD',8,actor);
+  insert into public.e10_supplier_credit_lines
+    (id,organization_id,supplier_credit_id,line_no,line_amount)
+    values(null_credit_line,o,null_credit,1,8);
+  insert into public.e10_supplier_credits
+    (id,organization_id,supplier_id,supplier_document_number,currency,total_amount,created_by)
+    values(target_credit,o,supplier,'X3D1D-TARGET-CR','CAD',40,actor);
+  insert into public.e10_supplier_credit_lines
+    (id,organization_id,supplier_credit_id,configuration_version_id,line_no,line_amount)
+    values(target_credit_line,o,target_credit,version_id,1,40);
   baseline:=jsonb_build_object('receipts',(select count(*) from public.e10_stock_receipts),
     'lots',(select count(*) from public.e10_inventory_lots),'movements',(select count(*) from public.e10_inventory_movements));
 
@@ -79,6 +103,9 @@ begin
   if replay->>'replay'<>'true' or replay->>'supplier_invoice_revision'<>'2' then raise exception 'replay failed'; end if;
   r:=public.e10_org_allocate_invoice_to_po(o,il1,pol2,2,1,4,'split target','x3d1d-ip-2');
   if r->>'allocated_quantity'<>'4' or r->>'supplier_invoice_revision'<>'3' then raise exception 'split failed'; end if;
+  begin
+    perform public.e10_org_allocate_invoice_to_po(o,il1,pol1,3,1,1,'source overrun','x3d1d-ip-source-over');
+    raise exception 'invoice source conservation failed'; exception when check_violation then null; end;
   begin
     perform public.e10_org_allocate_invoice_to_po(o,il2,pol1,1,1,3,'target overrun','x3d1d-ip-over');
     raise exception 'target conservation failed'; exception when check_violation then null; end;
@@ -100,6 +127,33 @@ begin
   begin
     perform public.e10_org_release_invoice_from_po(o,il1,pol1,4,1,5,'excess release','x3d1d-ip-excess');
     raise exception 'excess release accepted'; exception when check_violation then null; end;
+  reset role;
+  update public.e10_suppliers set status='inactive' where id=supplier;
+  set local role authenticated;
+  begin
+    perform public.e10_org_allocate_invoice_to_po(o,il2,pol2,1,1,1,'inactive supplier','x3d1d-inactive-supplier');
+    raise exception 'inactive supplier accepted'; exception when insufficient_privilege then null; end;
+  reset role;
+  update public.e10_suppliers set status='active' where id=supplier;
+  update public.e10_product_configuration_versions set state='retired' where id=version_id;
+  set local role authenticated;
+  begin
+    perform public.e10_org_allocate_invoice_to_po(o,il2,pol2,1,1,1,'inactive configuration','x3d1d-inactive-config');
+    raise exception 'inactive configuration accepted'; exception when insufficient_privilege then null; end;
+  reset role;
+  update public.e10_product_configuration_versions set state='active' where id=version_id;
+  delete from public.e10_location_role_permissions p
+    where p.organization_id=o
+      and p.location_id='d31f0000-0000-4000-8000-000000000005'
+      and p.role_id='d31f0000-0000-4000-8000-000000000003';
+  set local role authenticated;
+  begin
+    perform public.e10_org_allocate_invoice_to_po(o,il2,pol2,1,1,1,'denied destination','x3d1d-denied-location');
+    raise exception 'denied destination accepted'; exception when insufficient_privilege then null; end;
+  reset role;
+  insert into public.e10_location_role_permissions(organization_id,location_id,role_id,can_receive)
+    values(o,location_id,role_id,true);
+  set local role authenticated;
 
   r:=public.e10_org_allocate_credit_to_invoice(o,cl,il1,1,4,20,'credit match','x3d1d-ci-1');
   if r->>'allocated_amount'<>'20' or r->>'supplier_credit_revision'<>'2'
@@ -110,9 +164,23 @@ begin
   begin
     perform public.e10_org_allocate_credit_to_invoice(o,cl,il1,3,5,1,'credit overrun','x3d1d-ci-over');
     raise exception 'credit conservation failed'; exception when check_violation then null; end;
+  begin
+    perform public.e10_org_allocate_credit_to_invoice(o,target_credit_line,il2,1,2,31,
+      'credit target overrun','x3d1d-ci-target-over');
+    raise exception 'credit target conservation failed'; exception when check_violation then null; end;
   r:=public.e10_org_release_credit_from_invoice(o,cl,il1,3,5,5,'credit release','x3d1d-ci-release');
   if r->>'allocated_amount'<>'15' or r->>'supplier_credit_revision'<>'4'
     or r->>'supplier_invoice_revision'<>'6' then raise exception 'credit release failed'; end if;
+  r:=public.e10_org_allocate_credit_to_invoice(o,null_credit_line,null_invoice_line,1,1,8,
+    'configuration-free match','x3d1d-null-allocate');
+  if r->>'allocated_amount'<>'8' then raise exception 'configuration-free match failed'; end if;
+  r:=public.e10_org_release_credit_from_invoice(o,null_credit_line,null_invoice_line,2,2,8,
+    'configuration-free release','x3d1d-null-release');
+  if r->>'allocated_amount'<>'0' then raise exception 'configuration-free release failed'; end if;
+  begin
+    perform public.e10_org_allocate_credit_to_invoice(o,null_credit_line,il1,3,6,1,
+      'mismatched optional config','x3d1d-null-mismatch');
+    raise exception 'mismatched optional configuration accepted'; exception when sqlstate '55000' then null; end;
   begin
     perform public.e10_org_allocate_invoice_to_po(o,il1,pol1,6,1,'NaN'::numeric,'bad','x3d1d-nan');
     raise exception 'NaN accepted'; exception when invalid_parameter_value then null; end;
@@ -131,16 +199,19 @@ begin
   if (select sum(allocated_quantity) from public.e10_invoice_po_allocations where organization_id=o and invoice_line_id=il1)<>8
     or (select sum(allocated_amount) from public.e10_credit_invoice_allocations where organization_id=o and credit_line_id=cl)<>25
     or (select count(*) from public.e10_invoice_po_allocation_events where organization_id=o)<>3
-    or (select count(*) from public.e10_credit_invoice_allocation_events where organization_id=o)<>3
-    or (select count(*) from public.e10_financial_allocation_commands where organization_id=o)<>6
+    or (select count(*) from public.e10_credit_invoice_allocation_events where organization_id=o)<>5
+    or (select count(*) from public.e10_financial_allocation_commands where organization_id=o)<>8
     or exists(select 1 from public.e10_financial_allocation_commands where organization_id=o
-      and idempotency_key in ('x3d1d-ip-over','x3d1d-ip-closed','x3d1d-ip-excess','x3d1d-ci-over','x3d1d-nan','x3d1d-stale','x3d1d-cross-org'))
+      and idempotency_key in ('x3d1d-ip-over','x3d1d-ip-closed','x3d1d-ip-excess',
+        'x3d1d-inactive-supplier','x3d1d-inactive-config','x3d1d-denied-location',
+        'x3d1d-ip-source-over','x3d1d-ci-over','x3d1d-ci-target-over','x3d1d-null-mismatch',
+        'x3d1d-nan','x3d1d-stale','x3d1d-cross-org'))
     or not exists(select 1 from public.e10_supplier_invoice_revisions where organization_id=o
       and supplier_invoice_id=inv1 and revision=2 and status='reviewed'
-      and jsonb_array_length(snapshot->'purchase_order_allocations')=1)
+      and snapshot->'purchase_order_allocations' @> '[{"allocated_quantity":6}]'::jsonb)
     or not exists(select 1 from public.e10_supplier_credit_revisions where organization_id=o
       and supplier_credit_id=credit and revision=2
-      and jsonb_array_length(snapshot->'invoice_allocations')=1)
+      and snapshot->'invoice_allocations' @> '[{"allocated_amount":20}]'::jsonb)
     or (select approved_revision from public.e10_supplier_invoices where id=inv1) is not null
     or (select approved_revision from public.e10_supplier_credits where id=credit) is not null then
     raise exception 'allocation evidence invalid';

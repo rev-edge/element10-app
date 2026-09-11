@@ -248,7 +248,8 @@ begin
     if p_operation='allocate' and (
       not exists(select 1 from public.e10_suppliers s where s.organization_id=p_org
         and s.id=source_line.supplier_id and s.status='active')
-      or not exists(select 1 from public.e10_product_configuration_versions v
+      or source_line.configuration_version_id is not null and not exists(
+        select 1 from public.e10_product_configuration_versions v
         where v.organization_id=p_org and v.id=source_line.configuration_version_id and v.state='active')
       or not exists(select 1 from public.e10_locations l where l.organization_id=p_org
         and l.id=target_line.destination_location_id and l.status='active')
@@ -343,7 +344,8 @@ begin
     if p_operation='allocate' and (
       not exists(select 1 from public.e10_suppliers s where s.organization_id=p_org
         and s.id=source_line.supplier_id and s.status='active')
-      or not exists(select 1 from public.e10_product_configuration_versions v
+      or source_line.configuration_version_id is not null and not exists(
+        select 1 from public.e10_product_configuration_versions v
         where v.organization_id=p_org and v.id=source_line.configuration_version_id and v.state='active')) then
       raise exception using errcode='42501',message='financial_allocation_current_eligibility_denied';
     end if;
