@@ -36,7 +36,7 @@ begin
  insert into public.e10_supplier_credit_lines(id,organization_id,supplier_credit_id,line_no,line_amount) values(cl,o,cr,1,12);
  insert into public.e10_credit_invoice_allocations values(o,cl,il,12,now());
  insert into public.e10_commercial_comments(id,organization_id,audience,body,purchase_order_id,created_by) values(ci,o,'internal','private note',po,'a7000000-0000-4000-8000-00000000e3a2');
- insert into public.e10_commercial_comments(organization_id,audience,body,purchase_order_id,supersedes_comment_id,created_by) values(o,'vendor','vendor-safe amendment',po,ci,'a7000000-0000-4000-8000-00000000e3a2');
+ insert into public.e10_commercial_comments(organization_id,audience,body,purchase_order_id,created_by) values(o,'vendor','vendor-safe instruction',po,'a7000000-0000-4000-8000-00000000e3a2');
  if (select count(*) from public.e10_commercial_comments where purchase_order_id=po and audience='internal')<>1 or (select count(*) from public.e10_commercial_comments where purchase_order_id=po and audience='vendor')<>1 then raise exception 'comment audiences collapsed'; end if;
  begin update public.e10_commercial_comments set body='mutated' where id=ci; raise exception 'comment update allowed'; exception when object_not_in_prerequisite_state then null; end;
  begin insert into public.e10_supplier_invoices(organization_id,supplier_id,status,currency,source_connection,external_document_id,payload_fingerprint) values(o,s,'draft','CAD','x3','invoice-1','different'); raise exception 'duplicate source accepted'; exception when unique_violation then null; end;

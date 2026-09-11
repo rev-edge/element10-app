@@ -30,17 +30,17 @@ begin
     (supplier,o,'X3e supplier','active'),('d3300000-0000-4000-8000-000000000011',foreign_org,'X3e foreign supplier','active');
   insert into public.e10_locations(id,organization_id,name,status) values
     (location_id,o,'X3e location','active'),('d3300000-0000-4000-8000-000000000012',foreign_org,'X3e foreign location','active');
-  insert into public.e10_purchase_orders(id,organization_id,supplier_id,destination_location_id,order_number,status,currency,revision,created_by)
-    values(po,o,supplier,location_id,'PO-X3E','approved','CAD',7,actor),
-      ('d3300000-0000-4000-8000-000000000013',o,supplier,location_id,'PO-X3E-2','draft','CAD',1,actor),
+  insert into public.e10_purchase_orders(id,organization_id,supplier_id,destination_location_id,order_number,status,currency,revision,approved_revision,approved_by,approved_at,created_by)
+    values(po,o,supplier,location_id,'PO-X3E','approved','CAD',7,7,actor,'2026-09-11T12:00:00Z',actor),
+      ('d3300000-0000-4000-8000-000000000013',o,supplier,location_id,'PO-X3E-2','draft','CAD',1,null,null,null,actor),
       ('d3300000-0000-4000-8000-000000000014',foreign_org,'d3300000-0000-4000-8000-000000000011',
-        'd3300000-0000-4000-8000-000000000012','PO-X3E-F','draft','CAD',1,actor);
-  insert into public.e10_supplier_invoices(id,organization_id,supplier_id,supplier_document_number,revision,status,currency,total_amount,created_by)
-    values('d3300000-0000-4000-8000-000000000015',o,supplier,'INV-X3E',4,'approved','CAD',25,actor);
+        'd3300000-0000-4000-8000-000000000012','PO-X3E-F','draft','CAD',1,null,null,null,actor);
+  insert into public.e10_supplier_invoices(id,organization_id,supplier_id,supplier_document_number,revision,status,currency,total_amount,approved_revision,approved_by,approved_at,created_by)
+    values('d3300000-0000-4000-8000-000000000015',o,supplier,'INV-X3E',4,'approved','CAD',25,4,actor,'2026-09-11T12:00:00Z',actor);
   insert into public.e10_stock_receipts(id,organization_id,supplier_id,destination_location_id,receipt_number,status,created_by)
     values('d3300000-0000-4000-8000-000000000016',o,supplier,location_id,'REC-X3E','posted',actor);
-  insert into public.e10_supplier_credits(id,organization_id,supplier_id,supplier_document_number,revision,status,currency,total_amount,created_by)
-    values('d3300000-0000-4000-8000-000000000017',o,supplier,'CR-X3E',3,'approved','CAD',5,actor);
+  insert into public.e10_supplier_credits(id,organization_id,supplier_id,supplier_document_number,revision,status,currency,total_amount,approved_revision,approved_by,approved_at,created_by)
+    values('d3300000-0000-4000-8000-000000000017',o,supplier,'CR-X3E',3,'approved','CAD',5,3,actor,'2026-09-11T12:00:00Z',actor);
 end $$;
 
 create temp table x3e_results(k text primary key,v jsonb);
@@ -105,7 +105,21 @@ begin
   end if;
   begin perform public.e10_org_list_commercial_comments(o,'purchase_order',po,101,null,null);
     raise exception 'oversized page accepted'; exception when sqlstate '22023' then null; end;
+  begin perform public.e10_org_list_commercial_comments(o,null,po,20,null,null);
+    raise exception 'NULL history kind accepted'; exception when sqlstate '22023' then null; end;
+  begin perform public.e10_org_list_commercial_comments(o,'not_a_document',po,20,null,null);
+    raise exception 'invalid history kind accepted'; exception when sqlstate '22023' then null; end;
+  begin perform public.e10_org_list_commercial_comments(o,'purchase_order',po,20,now(),null);
+    raise exception 'half cursor accepted'; exception when sqlstate '22023' then null; end;
+  begin perform public.e10_org_list_commercial_comments(o,'purchase_order',po,20,'infinity',gen_random_uuid());
+    raise exception 'nonfinite cursor accepted'; exception when sqlstate '22023' then null; end;
   vendor_output:=public.e10_org_vendor_comment_projection(o,'purchase_order',po,20);
+  begin perform public.e10_org_vendor_comment_projection(o,null,po,20);
+    raise exception 'NULL vendor kind accepted'; exception when sqlstate '22023' then null; end;
+  begin perform public.e10_org_vendor_comment_projection(o,'not_a_document',po,20);
+    raise exception 'invalid vendor kind accepted'; exception when sqlstate '22023' then null; end;
+  begin perform public.e10_org_vendor_comment_projection(o,'purchase_order',po,101);
+    raise exception 'oversized vendor page accepted'; exception when sqlstate '22023' then null; end;
   if internal_read::text not like '%SECRET DEAL NOTE%' or internal_read::text not like '%Deliver at loading bay A%'
     or internal_read::text not like '%Deliver at loading bay B%' then raise exception 'internal retained history incomplete: %',internal_read; end if;
   if vendor_output::text like '%SECRET DEAL NOTE%' or vendor_output::text like '%loading bay A%'
@@ -157,14 +171,14 @@ begin
     or exists(select 1 from public.e10_commercial_comments where id=original and commercial_event_id is null) then
     raise exception 'comment lineage or event linkage invalid';
   end if;
-  if (select revision from public.e10_purchase_orders where id=po)<>7
-    or (select status from public.e10_purchase_orders where id=po)<>'approved' then
+  if (select row(revision,status,approved_revision,approved_by,approved_at) from public.e10_purchase_orders where id=po)
+      is distinct from row(7,'approved'::text,7,'d3300000-0000-4000-8000-000000000003'::uuid,'2026-09-11T12:00:00Z'::timestamptz) then
     raise exception 'comment changed financial revision or approval';
   end if;
-  if (select revision from public.e10_supplier_invoices where id='d3300000-0000-4000-8000-000000000015')<>4
-    or (select status from public.e10_supplier_invoices where id='d3300000-0000-4000-8000-000000000015')<>'approved'
-    or (select revision from public.e10_supplier_credits where id='d3300000-0000-4000-8000-000000000017')<>3
-    or (select status from public.e10_supplier_credits where id='d3300000-0000-4000-8000-000000000017')<>'approved'
+  if (select row(revision,status,approved_revision,approved_by,approved_at) from public.e10_supplier_invoices where id='d3300000-0000-4000-8000-000000000015')
+      is distinct from row(4,'approved'::text,4,'d3300000-0000-4000-8000-000000000003'::uuid,'2026-09-11T12:00:00Z'::timestamptz)
+    or (select row(revision,status,approved_revision,approved_by,approved_at) from public.e10_supplier_credits where id='d3300000-0000-4000-8000-000000000017')
+      is distinct from row(3,'approved'::text,3,'d3300000-0000-4000-8000-000000000003'::uuid,'2026-09-11T12:00:00Z'::timestamptz)
     or (select status from public.e10_stock_receipts where id='d3300000-0000-4000-8000-000000000016')<>'posted' then
     raise exception 'comments changed invoice, credit or receipt state';
   end if;

@@ -295,7 +295,7 @@ create function public.e10_org_list_commercial_comments(
 declare rows jsonb;
 begin
   if auth.uid() is null or not e10.is_org_member(p_org) then raise exception using errcode='42501',message='commercial_comment_read_denied'; end if;
-  if p_document_kind not in ('purchase_order','supplier_invoice','stock_receipt','supplier_credit')
+  if p_document_kind is null or p_document_kind not in ('purchase_order','supplier_invoice','stock_receipt','supplier_credit')
     or p_document_id is null or p_limit is null or p_limit not between 1 and 100
     or ((p_before_created_at is null)<>(p_before_id is null))
     or (p_before_created_at is not null and not isfinite(p_before_created_at)) then
@@ -322,7 +322,7 @@ create function public.e10_org_vendor_comment_projection(
 declare document_status text; document_reference text; rows jsonb;
 begin
   if auth.uid() is null or not e10.is_org_member(p_org) then raise exception using errcode='42501',message='vendor_comment_projection_denied'; end if;
-  if p_document_kind not in ('purchase_order','supplier_invoice','stock_receipt','supplier_credit')
+  if p_document_kind is null or p_document_kind not in ('purchase_order','supplier_invoice','stock_receipt','supplier_credit')
     or p_document_id is null or p_limit is null or p_limit not between 1 and 100 then
     raise exception using errcode='22023',message='vendor_comment_projection_invalid';
   end if;

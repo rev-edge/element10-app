@@ -5,6 +5,7 @@ const run=Date.now().toString();
 const id=n=>`d3310000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const x={org:id(1),actor:id(2),role:id(3),supplier:id(4),location:id(5),po:id(6)};
 const timeoutMs=8000;
+const cleanupTables=['e10_commercial_events','e10_commercial_comment_commands','e10_commercial_comments','e10_purchase_orders','e10_locations','e10_suppliers','e10_organization_role_permissions','e10_organization_memberships','e10_organization_roles'];
 const admin=new Client({connectionString}),a=new Client({connectionString}),b=new Client({connectionString});
 async function claims(c){await c.query('set local role authenticated');await c.query("select set_config('request.jwt.claims',$1,true)",[JSON.stringify({sub:x.actor,role:'authenticated'})]);}
 async function bounded(p){let t;try{return await Promise.race([p,new Promise((_,reject)=>{t=setTimeout(()=>reject(Error('bounded X3e timeout')),timeoutMs)})]);}finally{clearTimeout(t)}}
@@ -77,9 +78,10 @@ async function main(){
 }
 async function cleanup(){
  await admin.query('begin');await admin.query("set local session_replication_role='replica'");
- for(const table of ['e10_commercial_events','e10_commercial_comment_commands','e10_commercial_comments','e10_purchase_orders','e10_locations','e10_suppliers','e10_organization_role_permissions','e10_organization_memberships','e10_organization_roles'])await admin.query(`delete from public.${table} where organization_id=$1`,[x.org]);
+ for(const table of cleanupTables)await admin.query(`delete from public.${table} where organization_id=$1`,[x.org]);
  await admin.query('delete from public.e10_organizations where id=$1',[x.org]);await admin.query('delete from auth.users where id=$1',[x.actor]);await admin.query('commit');
- const q=await admin.query('select (select count(*) from public.e10_organizations where id=$1)+(select count(*) from auth.users where id=$2)+(select count(*) from public.e10_commercial_comments where organization_id=$1) n',[x.org,x.actor]);
- if(Number(q.rows[0].n))throw Error(`X3e cleanup residue=${q.rows[0].n}`);
+ for(const table of cleanupTables){const q=await admin.query(`select count(*)::int n from public.${table} where organization_id=$1`,[x.org]);if(q.rows[0].n)throw Error(`X3e cleanup residue ${table}=${q.rows[0].n}`)}
+ const q=await admin.query('select (select count(*) from public.e10_organizations where id=$1)+(select count(*) from auth.users where id=$2) n',[x.org,x.actor]);
+ if(Number(q.rows[0].n))throw Error(`X3e identity cleanup residue=${q.rows[0].n}`);
 }
 (async()=>{try{await main();await Promise.allSettled([a.query('rollback'),b.query('rollback')]);await cleanup();console.log('TA-X3e concurrent single-successor and post-lock authorization: PASS (fixture-free)')}catch(e){await Promise.allSettled([a.query('rollback'),b.query('rollback')]);try{await cleanup()}catch(c){console.error(c)}console.error(e);process.exitCode=1}finally{await Promise.allSettled([admin.end(),a.end(),b.end()])}})();
