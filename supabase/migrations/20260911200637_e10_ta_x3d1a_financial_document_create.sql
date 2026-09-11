@@ -1,6 +1,11 @@
 -- TA-X3d.1a bounded supplier-invoice and supplier-credit creation.
 -- No PO, receipt, stock, lot, movement, payment or accounting side effect is created here.
 
+alter table public.e10_financial_document_reconciliation_cases
+  add column received_snapshot jsonb
+    check(received_snapshot is null or jsonb_typeof(received_snapshot)='object'
+      and octet_length(received_snapshot::text)<=262144);
+
 create table public.e10_financial_document_events (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references public.e10_organizations(id),
@@ -109,8 +114,10 @@ create function public._e10_org_create_financial_document_x3d1a(
 declare
   actor uuid:=auth.uid(); fp text; existing_cmd record; existing_doc record;
   doc_id uuid:=gen_random_uuid(); event_id uuid:=gen_random_uuid(); result jsonb; snapshot jsonb;
-  line record; line_count integer; line_id uuid; identity_kind text; normalized_number text;
-  existing_fp text; received_fp text; reconciliation_id uuid;
+  line record; line_count integer; line_id uuid; v_identity_kind text; normalized_number text;
+  existing_fp text; received_fp text; reconciliation_id uuid; document_count integer;
+  reconciliation_replay boolean;
+  incoming_snapshot jsonb;
 begin
   if actor is null or p_document_kind not in ('supplier_invoice','supplier_credit')
     or not exists(select 1 from public.e10_organizations where id=p_org and status='active')
@@ -140,15 +147,50 @@ begin
   end if;
   line_count:=jsonb_array_length(p_lines);
   if line_count<1 or line_count>200 then raise exception using errcode='22023',message='financial_document_lines_count_invalid'; end if;
+  for line in select x from jsonb_array_elements(p_lines) x loop
+    if jsonb_typeof(line.x) is distinct from 'object'
+      or jsonb_typeof(line.x->'id') is distinct from 'string'
+      or jsonb_typeof(line.x->'line_no') is distinct from 'number'
+      or jsonb_typeof(line.x->'line_amount') is distinct from 'number'
+      or line.x ? 'configuration_version_id' and jsonb_typeof(line.x->'configuration_version_id') not in ('string','null')
+      or line.x ? 'description' and jsonb_typeof(line.x->'description') not in ('string','null')
+      or length(coalesce(line.x->>'description',''))>2000
+      or p_document_kind='supplier_invoice' and line.x ? 'invoiced_quantity'
+        and jsonb_typeof(line.x->'invoiced_quantity') not in ('number','null')
+      or p_document_kind='supplier_invoice' and line.x ? 'unit_cost'
+        and jsonb_typeof(line.x->'unit_cost') not in ('number','null')
+      or p_document_kind='supplier_credit' and (line.x ? 'invoiced_quantity' or line.x ? 'unit_cost') then
+      raise exception using errcode='22023',message='financial_document_line_encoding_invalid';
+    end if;
+    line_id:=(line.x->>'id')::uuid;
+    if line_id is null or (line.x->>'line_no')::integer is null or (line.x->>'line_no')::integer<=0
+      or (line.x->>'line_amount')::numeric<0
+      or (line.x->>'line_amount')::numeric::text in ('NaN','Infinity','-Infinity')
+      or p_document_kind='supplier_invoice' and jsonb_typeof(line.x->'invoiced_quantity')='number'
+        and ((line.x->>'invoiced_quantity')::numeric<=0 or (line.x->>'invoiced_quantity')::numeric::text in ('NaN','Infinity','-Infinity'))
+      or p_document_kind='supplier_invoice' and jsonb_typeof(line.x->'unit_cost')='number'
+        and ((line.x->>'unit_cost')::numeric<0 or (line.x->>'unit_cost')::numeric::text in ('NaN','Infinity','-Infinity')) then
+      raise exception using errcode='22023',message='financial_document_line_value_invalid';
+    end if;
+  end loop;
   if (select count(*) from (select (x->>'id')::uuid from jsonb_array_elements(p_lines) x group by 1) q)<>line_count
     or (select count(*) from (select (x->>'line_no')::integer from jsonb_array_elements(p_lines) x group by 1) q)<>line_count then
     raise exception using errcode='22023',message='financial_document_line_identity_invalid';
   end if;
 
-  identity_kind:=case when p_source_connection is null then 'manual' else 'connected' end;
+  v_identity_kind:=case when p_source_connection is null then 'manual' else 'connected' end;
   normalized_number:=lower(btrim(p_supplier_document_number));
+  incoming_snapshot:=jsonb_build_object('document_kind',p_document_kind,'supplier_id',p_supplier_id,
+    'supplier_document_number',case when v_identity_kind='manual' then normalized_number
+      else nullif(btrim(p_supplier_document_number),'') end,'currency',p_currency,
+    'document_date',p_document_date,'total_amount',p_total_amount,
+    'source_connection',nullif(btrim(p_source_connection),''),
+    'external_document_id',nullif(btrim(p_external_document_id),''),
+    'source_payload_fingerprint',nullif(btrim(p_payload_fingerprint),''),
+    'duplicate_review_outcome',p_duplicate_review_outcome,
+    'duplicate_review_reason',nullif(btrim(p_duplicate_review_reason),''),'lines',p_lines);
   fp:=md5(jsonb_build_object('v','financial-document-create-v1','org',p_org,'kind',p_document_kind,
-    'supplier',p_supplier_id,'number',case when identity_kind='manual' then normalized_number
+    'supplier',p_supplier_id,'number',case when v_identity_kind='manual' then normalized_number
       else nullif(btrim(p_supplier_document_number),'') end,'currency',p_currency,
     'date',p_document_date,'total',p_total_amount,'source',nullif(btrim(p_source_connection),''),
     'external',nullif(btrim(p_external_document_id),''),'payload_fp',nullif(btrim(p_payload_fingerprint),''),
@@ -162,15 +204,17 @@ begin
     where c.organization_id=p_org and c.idempotency_key=p_idempotency_key;
   if found then
     if existing_cmd.request_fingerprint<>fp then raise exception using errcode='22023',message='idempotency_key_mismatch'; end if;
-    if auth.uid() is distinct from actor or not e10.is_org_member(p_org)
+    if auth.uid() is distinct from actor
+      or not exists(select 1 from public.e10_organizations where id=p_org and status='active')
+      or not e10.is_org_member(p_org)
       or not e10.has_org_cap(p_org,'act.purchasing_prepare') then
       raise exception using errcode='42501',message='financial_document_prepare_denied';
     end if;
     return existing_cmd.result||jsonb_build_object('replay',true);
   end if;
 
-  perform pg_advisory_xact_lock(hashtextextended(p_org::text||'|'||p_document_kind||'|'||identity_kind||'|'||
-    case when identity_kind='connected' then btrim(p_source_connection)||'|'||btrim(p_external_document_id)
+  perform pg_advisory_xact_lock(hashtextextended(p_org::text||'|'||p_document_kind||'|'||v_identity_kind||'|'||
+    case when v_identity_kind='connected' then btrim(p_source_connection)||'|'||btrim(p_external_document_id)
       else p_supplier_id::text||'|'||coalesce(normalized_number,'<missing-reviewed>') end,0));
   if auth.uid() is distinct from actor or not exists(select 1 from public.e10_organizations where id=p_org and status='active')
     or not e10.is_org_member(p_org) or not e10.has_org_cap(p_org,'act.purchasing_prepare') then
@@ -179,15 +223,33 @@ begin
   perform 1 from public.e10_suppliers where organization_id=p_org and id=p_supplier_id and status='active';
   if not found then raise exception using errcode='42501',message='financial_document_supplier_denied'; end if;
 
+  for line in select x from jsonb_array_elements(p_lines) x loop
+    if jsonb_typeof(line.x->'configuration_version_id')='string' and not exists(
+      select 1 from public.e10_product_configuration_versions
+      where organization_id=p_org and id=(line.x->>'configuration_version_id')::uuid and state='active') then
+      raise exception using errcode='42501',message='financial_document_configuration_denied';
+    end if;
+  end loop;
+
   if p_document_kind='supplier_invoice' then
+    select count(*) into document_count from public.e10_supplier_invoices
+      where organization_id=p_org and ((v_identity_kind='connected' and source_connection=btrim(p_source_connection)
+        and external_document_id=btrim(p_external_document_id)) or (v_identity_kind='manual' and source_connection is null
+        and supplier_id=p_supplier_id and lower(btrim(supplier_document_number))=normalized_number));
+    if document_count>1 then raise exception using errcode='23514',message='financial_document_identity_ambiguous'; end if;
     select id,payload_fingerprint,revision,status into existing_doc from public.e10_supplier_invoices
-      where organization_id=p_org and ((identity_kind='connected' and source_connection=btrim(p_source_connection)
-        and external_document_id=btrim(p_external_document_id)) or (identity_kind='manual' and source_connection is null
+      where organization_id=p_org and ((v_identity_kind='connected' and source_connection=btrim(p_source_connection)
+        and external_document_id=btrim(p_external_document_id)) or (v_identity_kind='manual' and source_connection is null
         and supplier_id=p_supplier_id and lower(btrim(supplier_document_number))=normalized_number)) limit 1;
   else
+    select count(*) into document_count from public.e10_supplier_credits
+      where organization_id=p_org and ((v_identity_kind='connected' and source_connection=btrim(p_source_connection)
+        and external_document_id=btrim(p_external_document_id)) or (v_identity_kind='manual' and source_connection is null
+        and supplier_id=p_supplier_id and lower(btrim(supplier_document_number))=normalized_number));
+    if document_count>1 then raise exception using errcode='23514',message='financial_document_identity_ambiguous'; end if;
     select id,payload_fingerprint,revision,status into existing_doc from public.e10_supplier_credits
-      where organization_id=p_org and ((identity_kind='connected' and source_connection=btrim(p_source_connection)
-        and external_document_id=btrim(p_external_document_id)) or (identity_kind='manual' and source_connection is null
+      where organization_id=p_org and ((v_identity_kind='connected' and source_connection=btrim(p_source_connection)
+        and external_document_id=btrim(p_external_document_id)) or (v_identity_kind='manual' and source_connection is null
         and supplier_id=p_supplier_id and lower(btrim(supplier_document_number))=normalized_number)) limit 1;
   end if;
   if found then
@@ -197,47 +259,38 @@ begin
         case when p_document_kind='supplier_invoice' then 'supplier_invoice_id' else 'supplier_credit_id' end,existing_doc.id,
         'status',existing_doc.status,'revision',existing_doc.revision);
     else
-      insert into public.e10_financial_document_reconciliation_cases(
-        organization_id,document_kind,identity_kind,source_connection,external_document_id,
-        supplier_id,normalized_document_number,existing_document_id,existing_fingerprint,
-        received_fingerprint,created_by)
-      values(p_org,p_document_kind,identity_kind,
-        case when identity_kind='connected' then btrim(p_source_connection) end,
-        case when identity_kind='connected' then btrim(p_external_document_id) end,
-        case when identity_kind='manual' then p_supplier_id end,
-        case when identity_kind='manual' then normalized_number end,
-        existing_doc.id,coalesce(existing_fp,'legacy-unfingerprinted'),received_fp,actor)
-      returning id into reconciliation_id;
+      select c.id into reconciliation_id from public.e10_financial_document_reconciliation_cases c
+      where c.organization_id=p_org and c.document_kind=p_document_kind
+        and c.identity_kind=v_identity_kind and c.existing_document_id=existing_doc.id
+        and c.received_fingerprint=received_fp
+        and (v_identity_kind='connected' and c.source_connection=btrim(p_source_connection)
+          and c.external_document_id=btrim(p_external_document_id)
+          or v_identity_kind='manual' and c.supplier_id=p_supplier_id
+          and c.normalized_document_number=normalized_number);
+      reconciliation_replay:=found;
+      if not found then
+        insert into public.e10_financial_document_reconciliation_cases(
+          organization_id,document_kind,identity_kind,source_connection,external_document_id,
+          supplier_id,normalized_document_number,existing_document_id,existing_fingerprint,
+          received_fingerprint,received_snapshot,created_by)
+        values(p_org,p_document_kind,v_identity_kind,
+          case when v_identity_kind='connected' then btrim(p_source_connection) end,
+          case when v_identity_kind='connected' then btrim(p_external_document_id) end,
+          case when v_identity_kind='manual' then p_supplier_id end,
+          case when v_identity_kind='manual' then normalized_number end,
+          existing_doc.id,coalesce(existing_fp,'legacy-unfingerprinted'),received_fp,incoming_snapshot,actor)
+        returning id into reconciliation_id;
+      end if;
       result:=jsonb_build_object('ok',false,'replay',false,'status','requires_review',
         case when p_document_kind='supplier_invoice' then 'supplier_invoice_id' else 'supplier_credit_id' end,existing_doc.id,
-        'revision',existing_doc.revision,'reconciliation_case_id',reconciliation_id);
+        'revision',existing_doc.revision,'reconciliation_case_id',reconciliation_id,
+        'reconciliation_replay',reconciliation_replay);
     end if;
     insert into public.e10_financial_document_commands(organization_id,idempotency_key,document_kind,operation,
       document_id,request_fingerprint,result,created_by)
     values(p_org,p_idempotency_key,p_document_kind,'create',existing_doc.id,fp,result,actor);
     return result;
   end if;
-
-  for line in select x from jsonb_array_elements(p_lines) x order by (x->>'line_no')::integer loop
-    line_id:=(line.x->>'id')::uuid;
-    if line_id is null or (line.x->>'line_no')::integer is null or (line.x->>'line_no')::integer<=0
-      or jsonb_typeof(line.x->'line_amount') is distinct from 'number'
-      or (line.x->>'line_amount')::numeric<0
-      or (line.x->>'line_amount')::numeric::text in ('NaN','Infinity','-Infinity')
-      or p_document_kind='supplier_invoice' and line.x ? 'invoiced_quantity'
-        and jsonb_typeof(line.x->'invoiced_quantity')<>'null'
-        and ((line.x->>'invoiced_quantity')::numeric<=0 or (line.x->>'invoiced_quantity')::numeric::text in ('NaN','Infinity','-Infinity'))
-      or p_document_kind='supplier_invoice' and line.x ? 'unit_cost'
-        and jsonb_typeof(line.x->'unit_cost')<>'null'
-        and ((line.x->>'unit_cost')::numeric<0 or (line.x->>'unit_cost')::numeric::text in ('NaN','Infinity','-Infinity')) then
-      raise exception using errcode='22023',message='financial_document_line_value_invalid';
-    end if;
-    if line.x ? 'configuration_version_id' and jsonb_typeof(line.x->'configuration_version_id')<>'null'
-      and not exists(select 1 from public.e10_product_configuration_versions
-        where organization_id=p_org and id=(line.x->>'configuration_version_id')::uuid and state='active') then
-      raise exception using errcode='42501',message='financial_document_configuration_denied';
-    end if;
-  end loop;
 
   if p_document_kind='supplier_invoice' then
     insert into public.e10_supplier_invoices(id,organization_id,supplier_id,supplier_document_number,revision,status,

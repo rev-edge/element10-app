@@ -46,6 +46,17 @@ function create(client, number, lineId, key) {
   );
 }
 
+function createConnected(client, total, key) {
+  return client.query(
+    `select public.e10_org_create_supplier_invoice(
+      $1,$2,null,'CAD',null,$3::numeric,'x3d1a-connection','x3d1a-external','source-fingerprint',null,null,
+      jsonb_build_array(jsonb_build_object('id','d3110000-0000-4000-8000-000000000007',
+        'line_no',1,'line_amount',$3::numeric)),$4
+    ) result`,
+    [ids.org, ids.supplier, total, key],
+  );
+}
+
 async function bounded(promise) {
   let timer;
   try {
@@ -95,6 +106,46 @@ async function main() {
   }
   console.log(`[proof] backend ${bPid} waited on the exact command key; one create and one replay`);
 
+  await a.query('begin');
+  await a.query(`select pg_advisory_xact_lock(hashtextextended($1,0))`, [`${ids.org}|financial-document-command|${commandKey}`]);
+  await b.query('begin');
+  await claims(b);
+  const inactivePid = (await b.query('select pg_backend_pid() pid')).rows[0].pid;
+  const inactiveReplay = create(b, `CMD-${run}`, ids.lineCommand, commandKey);
+  await waitBlocked(inactivePid);
+  await admin.query(`update public.e10_organizations set status='suspended' where id=$1`, [ids.org]);
+  await a.query('commit');
+  try {
+    await bounded(inactiveReplay);
+    throw new Error('command replay survived organization deactivation');
+  } catch (error) {
+    if (error.code !== '42501') throw error;
+  }
+  await b.query('rollback');
+  await admin.query(`update public.e10_organizations set status='active' where id=$1`, [ids.org]);
+  console.log(`[proof] replay backend ${inactivePid} reread organization status after exact command-lock wait`);
+
+  await a.query('begin');
+  await a.query(`select pg_advisory_xact_lock(hashtextextended($1,0))`, [`${ids.org}|financial-document-command|${commandKey}`]);
+  await b.query('begin');
+  await claims(b);
+  const permissionPid = (await b.query('select pg_backend_pid() pid')).rows[0].pid;
+  const permissionReplay = create(b, `CMD-${run}`, ids.lineCommand, commandKey);
+  await waitBlocked(permissionPid);
+  await admin.query(`delete from public.e10_organization_role_permissions
+    where organization_id=$1 and role_id=$2 and capability='act.purchasing_prepare'`, [ids.org, ids.role]);
+  await a.query('commit');
+  try {
+    await bounded(permissionReplay);
+    throw new Error('command replay survived capability revocation');
+  } catch (error) {
+    if (error.code !== '42501') throw error;
+  }
+  await b.query('rollback');
+  await admin.query(`insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed)
+    values($1,$2,'act.purchasing_prepare',true)`, [ids.org, ids.role]);
+  console.log(`[proof] replay backend ${permissionPid} reread capability after exact command-lock wait`);
+
   const identityNumber = `IDENTITY-${run}`;
   const keyA = `x3d1a-identity-a-${run}`;
   const keyB = `x3d1a-identity-b-${run}`;
@@ -124,7 +175,31 @@ async function main() {
   );
   if (count.rows[0].n !== 1) throw new Error(`identity race created ${count.rows[0].n} documents`);
   console.log(`[proof] backend ${identityPid} waited on the exact manual identity; two command keys converged on one document`);
-  console.log('TA-X3d.1a concurrent create: PASS (fixture-free)');
+
+  await a.query('begin');
+  await claims(a);
+  await createConnected(a, 10, `x3d1a-connected-original-${run}`);
+  await a.query('commit');
+  const connectedKeyA = `x3d1a-connected-conflict-a-${run}`;
+  const connectedKeyB = `x3d1a-connected-conflict-b-${run}`;
+  await a.query('begin');
+  await claims(a);
+  await a.query(`select pg_advisory_xact_lock(hashtextextended($1,0))`,
+    [`${ids.org}|supplier_invoice|connected|x3d1a-connection|x3d1a-external`]);
+  await b.query('begin');
+  await claims(b);
+  const conflictPid = (await b.query('select pg_backend_pid() pid')).rows[0].pid;
+  const blockedConflict = createConnected(b, 11, connectedKeyB);
+  await waitBlocked(conflictPid);
+  const conflictA = await createConnected(a, 11, connectedKeyA);
+  await a.query('commit');
+  const conflictB = await bounded(blockedConflict);
+  await b.query('commit');
+  if (conflictA.rows[0].result.reconciliation_case_id !== conflictB.rows[0].result.reconciliation_case_id
+    || conflictB.rows[0].result.reconciliation_replay !== true) {
+    throw new Error('concurrent connected conflicts did not converge on one reconciliation case');
+  }
+  console.log(`[proof] backend ${conflictPid} waited on connected identity; two conflict commands converged on one case`);
 }
 
 async function cleanup() {
@@ -144,14 +219,29 @@ async function cleanup() {
     await admin.query('delete from public.e10_organizations where id=$1', [ids.org]);
     await admin.query('delete from auth.users where id=$1', [ids.actor]);
     await admin.query('commit');
+    const residue = await admin.query(
+      `select (select count(*) from public.e10_organizations where id=$1)
+        +(select count(*) from auth.users where id=$2) n`, [ids.org, ids.actor],
+    );
+    if (Number(residue.rows[0].n) !== 0) throw new Error(`X3d.1a cleanup residue=${residue.rows[0].n}`);
   } catch (error) {
     try { await admin.query('rollback'); } catch {}
     throw error;
   }
 }
 
-main().finally(async () => {
-  await Promise.allSettled([a.query('rollback'), b.query('rollback')]);
-  try { await cleanup(); } catch (error) { console.error(error); process.exitCode = 1; }
-  await Promise.allSettled([admin.end(), a.end(), b.end()]);
-}).catch((error) => { console.error(error); process.exitCode = 1; });
+(async () => {
+  try {
+    await main();
+    await Promise.allSettled([a.query('rollback'), b.query('rollback')]);
+    await cleanup();
+    console.log('TA-X3d.1a concurrent create: PASS (fixture-free)');
+  } catch (error) {
+    await Promise.allSettled([a.query('rollback'), b.query('rollback')]);
+    try { await cleanup(); } catch (cleanupError) { console.error(cleanupError); }
+    console.error(error);
+    process.exitCode = 1;
+  } finally {
+    await Promise.allSettled([admin.end(), a.end(), b.end()]);
+  }
+})();

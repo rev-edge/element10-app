@@ -32,6 +32,11 @@ begin
     (id,organization_id,configuration_id,version_no,state,packaging_kind,base_unit,base_units_per_package)
     values('d3100000-0000-4000-8000-000000000022',o,'d3100000-0000-4000-8000-000000000021',
       1,'active','unit','unit',1);
+  set local session_replication_role='replica';
+  insert into public.e10_supplier_invoices(organization_id,supplier_id,supplier_document_number,currency,total_amount)
+    values(o,'d3100000-0000-4000-8000-000000000010','LEGACY-AMB','CAD',1),
+      (o,'d3100000-0000-4000-8000-000000000010',' legacy-amb ','CAD',2);
+  set local session_replication_role='origin';
 end $$;
 
 create temp table x3d1a_results(key text primary key,value jsonb);
@@ -45,8 +50,8 @@ set local role authenticated;
 do $$
 declare
   o constant uuid:='e1000000-0000-4000-8000-0000000000a6';
-  invoice_result jsonb; replay_result jsonb; identity_result jsonb; conflict_result jsonb;
-  credit_result jsonb; connected_result jsonb; connected_conflict jsonb;
+  invoice_result jsonb; replay_result jsonb; identity_result jsonb; conflict_result jsonb; conflict_replay jsonb;
+  credit_result jsonb; connected_result jsonb; connected_conflict jsonb; connected_conflict_replay jsonb;
   invoice_id uuid; credit_id uuid; precise numeric:=123.45678901234567890123456789;
   invoice_lines jsonb:=jsonb_build_array(jsonb_build_object(
     'id','d3100000-0000-4000-8000-000000000031','line_no',1,
@@ -83,6 +88,13 @@ begin
   if conflict_result->>'status'<>'requires_review' or conflict_result->>'ok'<>'false' then
     raise exception 'changed manual identity was not preserved for review: %',conflict_result;
   end if;
+  conflict_replay:=public.e10_org_create_supplier_invoice(o,
+    'd3100000-0000-4000-8000-000000000010','inv-x3d1a','CAD','2026-09-11',precise+1,
+    null,null,null,null,null,invoice_lines,'x3d1a-invoice-conflict-replay');
+  if conflict_replay->>'reconciliation_replay'<>'true'
+    or conflict_replay->>'reconciliation_case_id'<>conflict_result->>'reconciliation_case_id' then
+    raise exception 'manual reconciliation replay did not converge: %',conflict_replay;
+  end if;
 
   credit_result:=public.e10_org_create_supplier_credit(o,
     'd3100000-0000-4000-8000-000000000010',null,'CAD','2026-09-11',10.00000000000000000001,
@@ -105,6 +117,15 @@ begin
   if connected_conflict->>'status'<>'requires_review' then
     raise exception 'changed connected identity did not enter reconciliation';
   end if;
+  connected_conflict_replay:=public.e10_org_create_supplier_invoice(o,
+    'd3100000-0000-4000-8000-000000000010',null,'CAD','2026-09-11',21,
+    'provider-x','external-1','upstream-fp-2',null,null,
+    jsonb_build_array(jsonb_build_object('id','d3100000-0000-4000-8000-000000000033',
+      'line_no',1,'line_amount',21)),'x3d1a-connected-conflict-replay');
+  if connected_conflict_replay->>'reconciliation_replay'<>'true'
+    or connected_conflict_replay->>'reconciliation_case_id'<>connected_conflict->>'reconciliation_case_id' then
+    raise exception 'connected reconciliation replay did not converge';
+  end if;
 
   begin
     perform public.e10_org_create_supplier_invoice(o,'d3100000-0000-4000-8000-000000000010',
@@ -115,6 +136,21 @@ begin
     perform public.e10_org_create_supplier_invoice(o,'d3100000-0000-4000-8000-000000000010',
       null,'CAD',null,1,null,null,null,null,null,invoice_lines,'x3d1a-missing-identity');
     raise exception 'missing identity review accepted'; exception when sqlstate '22023' then null; end;
+  begin
+    perform public.e10_org_create_supplier_invoice(o,'d3100000-0000-4000-8000-000000000010',
+      'INV-X3D1A','CAD','2026-09-11',precise+2,null,null,null,null,null,
+      jsonb_build_array(jsonb_build_object('id','d3100000-0000-4000-8000-000000000031',
+        'line_no',1,'invoiced_quantity','2.5','unit_cost','12.50','line_amount',precise)),
+      'x3d1a-invalid-existing-lines');
+    raise exception 'invalid string numerics reached existing-identity reconciliation';
+  exception when sqlstate '22023' then null; end;
+  begin
+    perform public.e10_org_create_supplier_invoice(o,'d3100000-0000-4000-8000-000000000010',
+      'legacy-amb','CAD',null,3,null,null,null,null,null,
+      jsonb_build_array(jsonb_build_object('id','d3100000-0000-4000-8000-000000000040',
+        'line_no',1,'line_amount',3)),'x3d1a-ambiguous-legacy');
+    raise exception 'ambiguous legacy manual identity silently selected a target';
+  exception when check_violation then null; end;
   begin
     perform public.e10_org_create_supplier_invoice(o,'d3100000-0000-4000-8000-000000000011',
       'FOREIGN','CAD',null,1,null,null,null,null,null,invoice_lines,'x3d1a-foreign-supplier');
@@ -154,6 +190,18 @@ begin
     or (select count(*) from public.e10_financial_document_reconciliation_cases
       where existing_document_id=connected_id and identity_kind='connected')<>1 then
     raise exception 'identity conflict persistence or original preservation failed';
+  end if;
+  if (select (received_snapshot->>'total_amount')::numeric
+      from public.e10_financial_document_reconciliation_cases
+      where existing_document_id=invoice_id and identity_kind='manual')
+      <>124.45678901234567890123456789
+    or (select received_snapshot->'lines'->0->>'id'
+      from public.e10_financial_document_reconciliation_cases
+      where existing_document_id=invoice_id and identity_kind='manual')
+      <>'d3100000-0000-4000-8000-000000000031'
+    or exists(select 1 from public.e10_financial_document_commands
+      where idempotency_key='x3d1a-invalid-existing-lines') then
+    raise exception 'bounded incoming snapshot missing or invalid-line request wrote evidence';
   end if;
   if (select count(*) from public.e10_supplier_credit_lines
       where supplier_credit_id=credit_id and id='d3100000-0000-4000-8000-000000000032')<>1 then

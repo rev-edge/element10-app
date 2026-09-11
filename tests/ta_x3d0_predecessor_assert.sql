@@ -32,3 +32,20 @@ begin
 
   raise notice 'TA-X3d.0 predecessor upgrade: PASS (unresolved and duplicate legacy rows survive; new violations denied)';
 end $$;
+
+set role authenticated;
+do $$
+begin
+  perform set_config('request.jwt.claims',jsonb_build_object(
+    'sub','d3000000-0000-4000-8000-000000000005','role','authenticated')::text,true);
+  begin
+    perform public.e10_org_create_supplier_credit(
+      'e1000000-0000-4000-8000-0000000000a6','d3000000-0000-4000-8000-000000000001',
+      'legacy-dup','CAD',null,3,null,null,null,null,null,
+      jsonb_build_array(jsonb_build_object('id','d3000000-0000-4000-8000-000000000007',
+        'line_no',1,'line_amount',3)),'x3d-predecessor-ambiguous');
+    raise exception 'X3d.1a silently selected one predecessor duplicate';
+  exception when check_violation then null; end;
+  raise notice 'TA-X3d.1a predecessor ambiguity: PASS (deterministic denial, no arbitrary target)';
+end $$;
+reset role;
