@@ -133,6 +133,11 @@ begin
       invoice_lines #- '{1,invoiced_quantity}','omit receipt quantity','x3d1b-receipt-quantity-omitted');
     raise exception 'omitted receipt-allocated quantity accepted'; exception when sqlstate '55000' then null; end;
   begin
+    perform public.e10_org_amend_supplier_invoice(o,invoice_id,2,'CAD',null,160,
+      jsonb_set(invoice_lines,'{1,invoiced_quantity}','null'::jsonb),
+      'null receipt quantity','x3d1b-receipt-quantity-null');
+    raise exception 'null receipt-allocated quantity accepted'; exception when sqlstate '55000' then null; end;
+  begin
     perform public.e10_org_amend_supplier_invoice(o,invoice_id,2,'CAD',null,130,
       jsonb_build_array(jsonb_build_object('id',invoice_line,'line_no',1,
         'configuration_version_id',alt_version,'invoiced_quantity',6,'unit_cost',20,'line_amount',130)),
@@ -207,7 +212,8 @@ begin
     or (select count(*) from public.e10_financial_document_events where organization_id=o and operation='amend')<>2
     or exists(select 1 from public.e10_financial_document_commands where organization_id=o
       and idempotency_key in ('x3d1b-stale','x3d1b-reduce','x3d1b-po-quantity-omitted',
-        'x3d1b-po-quantity-null','x3d1b-receipt-quantity-omitted','x3d1b-config','x3d1b-receipt-reduce',
+        'x3d1b-po-quantity-null','x3d1b-receipt-quantity-omitted','x3d1b-receipt-quantity-null',
+        'x3d1b-config','x3d1b-receipt-reduce',
         'x3d1b-receipt-config','x3d1b-receipt-omit','x3d1b-currency',
         'x3d1b-reuse','x3d1b-credit-reduce','x3d1b-low','x3d1b-cross-org')) then
     raise exception 'amend durable evidence or rollback residue invalid';
