@@ -122,6 +122,14 @@ color/finish/rookie fields applicable to the group, `catalog_entity_count`,
 `complete_selected_source_sale_count`, and `price_availability`. Fields are
 typed JSON scalars or null, not caller-controlled payload fragments.
 
+`unknown_counts` counts result cohorts only for dimensions applicable to the
+selected grouping or monetary partition; non-applicable dimensions are null.
+It is not an entity or observation denominator. `exclusion_counts` is scoped to
+eligible canonical observations in the selected organization, exact kind,
+currency, finite window, cutoff, and resolved source universe. Version 1
+reports reviewed unknown-target exclusions and does not present itself as a
+complete breakdown of every row removed by every caller filter.
+
 Catalog scope retains matching catalog entities when there are no observations.
 Such rows report observed count zero, while a source-scoped complete zero is
 reported only as
