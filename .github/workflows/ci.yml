@@ -197,6 +197,10 @@ jobs:
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3a_purchasing_documents_test.sql
       - name: TA-X3b immutable commercial-document revisions
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3b_document_revisions_test.sql
+      - name: TA-X3c purchase-order lifecycle (authority, idempotency, CAS, immutable evidence)
+        run: |
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3c_purchase_order_lifecycle_test.sql
+          node tests/ta_x3c_purchase_order_concurrent_test.js
       - name: TA-X4a lot and reservation foundation
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x4a_lot_reservation_foundation_test.sql
       - name: TA-X4b atomic lot reservation writer
