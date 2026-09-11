@@ -44,7 +44,9 @@ is partitioned by the full condition-state, grader, grade, and grade-qualifier
 tuple in addition to the requested identity grouping. Unknown values remain a
 separate explicit tuple and never imply compatibility with a known cohort.
 Count-only requests may use any allowed grouping. Monetary metrics require a
-three-letter currency.
+three-letter currency. A count-only request may omit currency only when
+`p_source_mode='none'`; any source-scoped count also requires the exact
+three-letter currency used to resolve its source universe and coverage.
 
 `p_observation_kind` always selects one exact kind. The
 `completed_sale_observation` scope requires `completed_sale`. Sale count and
@@ -124,6 +126,16 @@ Missing observation amounts make that row's amount aggregates null and its
 price availability unavailable; they do not make an otherwise valid catalog
 query invalid. Amount sorts use deterministic `NULLS LAST` plus `cohort_key`,
 so no-observation catalog entries remain pageable.
+
+Copy and observation fact filters in catalog scope are existential filters over
+qualifying reviewed canonical observations for the catalog variant. They do not
+reinterpret catalog columns as historical evidence. Consequently a catalog
+query filtered to a reviewed grade, serial, condition, or jersey-match fact may
+return variants supported by matching observations, while a zero-observation
+variant does not match that evidence filter. Without those evidence filters,
+zero-observation catalog variants remain present. `exact_subject` remains
+invalid in catalog scope because catalog subject membership is not a reviewed
+copy-specific fact.
 
 ## Drill-down
 
