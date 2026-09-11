@@ -130,6 +130,10 @@ jobs:
         run: |
           node tests/ta_x6h_attendance_foundation_test.js
           node tests/ta_x6h_attendance_concurrent_test.js
+      - name: TA-X7a bounded attendance reporting gate
+        # Coverage is reviewed evidence, unknown is never zero, overlapping tabs union at session/customer grain,
+        # cursors bind the full query and dataset revision, and authorized-platform rows remain quarantined.
+        run: node tests/ta_x7a_attendance_reporting_test.js
       - name: A7 hostile two-org matrix (every identity class x both orgs x every census family, real JWTs, specific refusals)
         # docs/A7_HOSTILE_MATRIX.md proven: F1-F8 cross-org denials + legitimate positives under real authenticated JWTs;
         # ledger outlives items under a hostile identity; receipts server-only (no authenticated grant); anon zero access;
