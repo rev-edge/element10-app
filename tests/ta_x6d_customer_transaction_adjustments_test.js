@@ -9,6 +9,8 @@ const bounded = (p, ms = 8000) => Promise.race([
   p,
   new Promise((_, reject) => setTimeout(() => reject(new Error(`X6d adjustment timeout after ${ms}ms`)), ms)),
 ]);
+const outcome=p=>p.then(value=>({status:'fulfilled',value}),reason=>({status:'rejected',reason}));
+async function waitBlocked(client,pid,blocker,label){const until=Date.now()+8000;while(Date.now()<until){if((await client.query('select $1=any(pg_blocking_pids($2)) ok',[blocker,pid])).rows[0].ok)return;await new Promise(r=>setTimeout(r,25));}throw new Error(`timeout waiting for ${label}`);}
 
 function args(tx, line, suffix, kind, effect, merchandise, shipping, tax, sourceEvent = suffix, currency = 'CAD', reinstates = null, sourceComponent = suffix) {
   return [org, tx, line, kind, effect, currency, merchandise, shipping, tax,
@@ -23,6 +25,7 @@ async function main() {
   await Promise.all([admin.connect(), a.connect(), b.connect()]);
   let tx; let line; let line2; let otherTx; let otherLine; let secondTx; let secondLine;
   const draftIds = [];
+  const racePending=[];
   try {
     const baselineGrants = (await admin.query("select count(*)::int n from public.e10_organization_role_permissions where capability in ('act.adjust_customer_transactions','act.reconcile_customer_transactions')")).rows[0].n;
     if (Number(baselineGrants) !== 0) throw new Error(`adjust capability received ${baselineGrants} default grants`);
@@ -229,11 +232,16 @@ async function main() {
     const contestedDraft=(await a.query("select public.e10_org_create_customer_transaction_draft($1,$2,'CAD','2026-01-02T00:00:00Z','exact',$3,$4,$5) r",[org,ids.customer,`X6d ${run}`,JSON.stringify(contestedLines),`${run}-contested-draft`])).rows[0].r.draft_id;draftIds.push(contestedDraft);
     await a.query('select public.e10_org_approve_customer_transaction_draft($1,$2,1,$3)',[org,contestedDraft,`${run}-contested-approve`]);
     const contestedCase=(await a.query(openRecon,[org,'import','claim-file',`${run}-contested-event`,`${run}-contested-source`,'CAD',9,null,null,JSON.stringify({source:'same as pending post'}),`${run}-contested-open`])).rows[0].r;
-    const claimRace=await bounded(Promise.allSettled([
-      a.query(decideRecon,[org,contestedCase.case_id,0,'link','reviewed_match',tx,line,'reviewed same contribution','{}',`${run}-contested-link`]),
-      b.query('select public.e10_org_post_customer_transaction_draft($1,$2,1,$3)',[org,contestedDraft,`${run}-contested-post`]),
-    ]));
+    const distinctLink=outcome(a.query(decideRecon,[org,contestedCase.case_id,0,'link','reviewed_match',tx,line,'reviewed same contribution','{}',`${run}-contested-link`]));const distinctPost=outcome(b.query('select public.e10_org_post_customer_transaction_draft($1,$2,1,$3)',[org,contestedDraft,`${run}-contested-post`]));racePending.push(distinctLink,distinctPost);const claimRace=await bounded(Promise.all([distinctLink,distinctPost]));
     if(claimRace.filter(x=>x.status==='fulfilled').length!==1||claimRace.filter(x=>x.status==='rejected'&&x.reason.code==='23505').length!==1)throw new Error(`link-vs-post source claim race ${JSON.stringify(claimRace)}`);
+    const sameSource=`${run}-same-key-source`;const sameLines=[{purchase_kind:'retail',capture_source:'import',source_connection_id:'claim-file',source_line_id:sameSource,quantity:1,merchandise_gross:9,merchandise_discount:0}];
+    const sameDraft=(await a.query("select public.e10_org_create_customer_transaction_draft($1,$2,'CAD','2026-01-02T00:00:00Z','exact',$3,$4,$5) r",[org,ids.customer,`X6d same key ${run}`,JSON.stringify(sameLines),`${run}-same-key-draft`])).rows[0].r.draft_id;draftIds.push(sameDraft);await a.query('select public.e10_org_approve_customer_transaction_draft($1,$2,1,$3)',[org,sameDraft,`${run}-same-key-approve`]);const sameCase=(await a.query(openRecon,[org,'import','claim-file',`${run}-same-key-event`,sameSource,'CAD',9,null,null,'{}',`${run}-same-key-open`])).rows[0].r;
+    const raceKey=`${run}-same-key-race`;const adminPid=(await admin.query('select pg_backend_pid() pid')).rows[0].pid;const aPid=(await a.query('select pg_backend_pid() pid')).rows[0].pid;const bPid=(await b.query('select pg_backend_pid() pid')).rows[0].pid;
+    await admin.query('begin');await admin.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[`${org}|customer-commercial|${raceKey}`]);
+    const linkPending=outcome(a.query(decideRecon,[org,sameCase.case_id,0,'link','reviewed_match',tx,line2,'reviewed same-key contribution','{}',raceKey]));racePending.push(linkPending);await waitBlocked(admin,aPid,adminPid,'same-key decision');
+    const postPending=outcome(b.query('select public.e10_org_post_customer_transaction_draft($1,$2,1,$3)',[org,sameDraft,raceKey]));racePending.push(postPending);await waitBlocked(admin,bPid,adminPid,'same-key post');await admin.query('commit');
+    const sameKeyRace=await bounded(Promise.all([linkPending,postPending]));
+    if(sameKeyRace.filter(x=>x.status==='fulfilled').length!==1||sameKeyRace.filter(x=>x.status==='rejected'&&x.reason.code==='22023'&&x.reason.message==='idempotency_key_mismatch').length!==1)throw new Error(`same-key link-vs-post lock-order race ${JSON.stringify(sameKeyRace)}`);
     const reconProof=(await admin.query('select (select count(*)::int from public.e10_customer_transaction_evidence_links where transaction_line_id=$1) links,(select observed_merchandise_amount from public.e10_customer_transaction_reconciliation_cases where id=$2) observed,(select count(*)::int from public.e10_customer_transactions where organization_id=$3) tx_count',[line,recon.case_id,org])).rows[0];
     if(reconProof.links!==3||Number(reconProof.observed)!==31||reconProof.tx_count!==txCountBefore)throw new Error(`reconciliation changed contribution or lost discrepancy ${JSON.stringify(reconProof)}`);
     const reconSigs=['public.e10_org_open_customer_transaction_reconciliation(uuid,text,text,text,text,text,numeric,numeric,numeric,jsonb,text)','public.e10_org_decide_customer_transaction_reconciliation(uuid,uuid,integer,text,text,uuid,uuid,text,jsonb,text)','public.e10_org_list_customer_transaction_reconciliation(uuid,text,integer,timestamptz,uuid)'];
@@ -256,6 +264,8 @@ async function main() {
     if(finalizeAcl.anon||!finalizeAcl.auth)throw new Error(`wrong finalization RPC ACL ${JSON.stringify(finalizeAcl)}`);
     console.log('TA-X6d.3 customer reconciliation: PASS (unknown finalization, deterministic deltas, reviewed/durable links, ambiguity/discrepancy retention, one contribution, native trust, hostile tenant, races)');
   } finally {
+    await admin.query('rollback').catch(() => {});
+    await Promise.allSettled(racePending);
     await Promise.all([a.query('rollback').catch(() => {}), b.query('rollback').catch(() => {})]);
     await admin.query('begin').catch(() => {});
     await admin.query('set local session_replication_role=replica').catch(() => {});
