@@ -111,8 +111,16 @@ async function cleanup() {
   await admin.query('delete from auth.users where id=$1', [x.actor]); await admin.query('commit');
   const residue = await admin.query(`select
     (select count(*) from public.e10_supplier_invoices where organization_id=$1)+
+    (select count(*) from public.e10_supplier_invoice_lines where organization_id=$1)+
+    (select count(*) from public.e10_supplier_invoice_revisions where organization_id=$1)+
     (select count(*) from public.e10_financial_document_commands where organization_id=$1)+
-    (select count(*) from public.e10_organizations where id=$1)+(select count(*) from auth.users where id=$2) n`, [x.org, x.actor]);
+    (select count(*) from public.e10_financial_document_events where organization_id=$1)+
+    (select count(*) from public.e10_suppliers where organization_id=$1)+
+    (select count(*) from public.e10_organization_role_permissions where organization_id=$1)+
+    (select count(*) from public.e10_organization_memberships where organization_id=$1)+
+    (select count(*) from public.e10_organization_roles where organization_id=$1)+
+    (select count(*) from public.e10_organizations where id=$1)+
+    (select count(*) from auth.users where id=$2) n`, [x.org, x.actor]);
   if (Number(residue.rows[0].n)) throw new Error(`X3d.1c cleanup residue=${residue.rows[0].n}`);
 }
 

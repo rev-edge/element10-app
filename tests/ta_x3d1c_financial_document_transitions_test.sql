@@ -44,7 +44,8 @@ begin
   insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed) values
     (o,all_role,'act.purchasing_prepare',true),(o,all_role,'act.purchasing_approve',true),
     (o,all_role,'act.purchasing_cancel',true),(o,prepare_role,'act.purchasing_prepare',true),
-    (o,suspended_role,'act.purchasing_prepare',true);
+    (o,suspended_role,'act.purchasing_prepare',true),
+    (other_org,other_role,'act.purchasing_prepare',true);
   insert into public.e10_suppliers(id,organization_id,name,status) values(supplier,o,'X3d1c supplier','active');
   insert into public.e10_product_masters(id,organization_id,name) values(product_id,o,'X3d1c product');
   insert into public.e10_product_configurations(id,organization_id,product_master_id,name)
@@ -82,6 +83,10 @@ begin
   if replay->>'replay'<>'true' or replay->>'revision'<>'2' then raise exception 'review replay failed: %',replay; end if;
   result:=public.e10_org_approve_supplier_invoice(o,invoice_id,2,'invoice approved','x3d1c-invoice-approve');
   if result->>'status'<>'approved' or result->>'revision'<>'3' then raise exception 'invoice approve failed: %',result; end if;
+  replay:=public.e10_org_review_supplier_invoice(o,invoice_id,1,'invoice reviewed','x3d1c-invoice-review');
+  if replay->>'replay'<>'true' or replay->>'revision'<>'2' then
+    raise exception 'historical review replay failed after approval: %',replay;
+  end if;
   begin
     perform public.e10_org_approve_supplier_invoice(o,invoice_id,2,'stale','x3d1c-invoice-stale');
     raise exception 'stale approval accepted'; exception when sqlstate '40001' then null; end;
@@ -96,10 +101,18 @@ begin
   if result->>'status'<>'reviewed' or result->>'revision'<>'2' then raise exception 'credit review failed'; end if;
   result:=public.e10_org_approve_supplier_credit(o,credit_id,2,'credit approved','x3d1c-credit-approve');
   if result->>'status'<>'approved' or result->>'revision'<>'3' then raise exception 'credit approve failed'; end if;
-  result:=public.e10_org_void_supplier_invoice(o,void_invoice,1,'unused invoice void','x3d1c-invoice-void');
-  if result->>'status'<>'void' or result->>'revision'<>'2' then raise exception 'invoice void failed'; end if;
+  result:=public.e10_org_review_supplier_invoice(o,void_invoice,1,'invoice reviewed before void','x3d1c-void-invoice-review');
+  if result->>'status'<>'reviewed' or result->>'revision'<>'2' then raise exception 'void-invoice review failed'; end if;
+  result:=public.e10_org_void_supplier_invoice(o,void_invoice,2,'reviewed invoice void','x3d1c-invoice-void');
+  if result->>'status'<>'void' or result->>'revision'<>'3' then raise exception 'reviewed invoice void failed'; end if;
+  begin
+    perform public.e10_org_approve_supplier_credit(o,void_credit,1,'draft cannot approve','x3d1c-draft-approve');
+    raise exception 'draft credit approved'; exception when sqlstate '55000' then null; end;
   result:=public.e10_org_void_supplier_credit(o,void_credit,1,'unused credit void','x3d1c-credit-void');
   if result->>'status'<>'void' or result->>'revision'<>'2' then raise exception 'credit void failed'; end if;
+  begin
+    perform public.e10_org_void_supplier_credit(o,void_credit,2,'repeat void','x3d1c-repeat-void');
+    raise exception 'void credit voided again'; exception when sqlstate '55000' then null; end;
 
   perform set_config('request.jwt.claims',jsonb_build_object('sub',prepare_only,'role','authenticated')::text,true);
   begin
@@ -122,19 +135,25 @@ begin
     raise exception 'cross-org transition accepted'; exception when insufficient_privilege then null; end;
   reset role;
 
-  if (select approved_revision from public.e10_supplier_invoices where id=invoice_id)<>3
-    or (select approved_by from public.e10_supplier_invoices where id=invoice_id)<>actor
-    or (select voided_by from public.e10_supplier_invoices where id=void_invoice)<>actor
-    or (select approved_revision from public.e10_supplier_credits where id=credit_id)<>3
-    or (select voided_by from public.e10_supplier_credits where id=void_credit)<>actor
+  if (select approved_revision from public.e10_supplier_invoices where id=invoice_id) is distinct from 3
+    or (select approved_by from public.e10_supplier_invoices where id=invoice_id) is distinct from actor
+    or (select approved_at from public.e10_supplier_invoices where id=invoice_id) is null
+    or (select voided_by from public.e10_supplier_invoices where id=void_invoice) is distinct from actor
+    or (select voided_at from public.e10_supplier_invoices where id=void_invoice) is null
+    or (select approved_revision from public.e10_supplier_credits where id=credit_id) is distinct from 3
+    or (select approved_by from public.e10_supplier_credits where id=credit_id) is distinct from actor
+    or (select approved_at from public.e10_supplier_credits where id=credit_id) is null
+    or (select voided_by from public.e10_supplier_credits where id=void_credit) is distinct from actor
+    or (select voided_at from public.e10_supplier_credits where id=void_credit) is null
     or (select count(*) from public.e10_supplier_invoice_revisions
-      where organization_id=o and supplier_invoice_id in (invoice_id,void_invoice))<>3
+      where organization_id=o and supplier_invoice_id in (invoice_id,void_invoice))<>4
     or (select count(*) from public.e10_supplier_credit_revisions
       where organization_id=o and supplier_credit_id in (credit_id,void_credit))<>3
-    or (select count(*) from public.e10_financial_document_events where organization_id=o)<>6
+    or (select count(*) from public.e10_financial_document_events where organization_id=o)<>7
     or exists(select 1 from public.e10_financial_document_commands where organization_id=o
       and idempotency_key in ('x3d1c-invoice-stale','x3d1c-invoice-invalid','x3d1c-prepare-approve',
-        'x3d1c-prepare-void','x3d1c-suspended','x3d1c-no-membership','x3d1c-cross-org')) then
+        'x3d1c-draft-approve','x3d1c-repeat-void','x3d1c-prepare-void','x3d1c-suspended',
+        'x3d1c-no-membership','x3d1c-cross-org')) then
     raise exception 'transition evidence or failure residue invalid';
   end if;
   set constraints all immediate;
@@ -253,7 +272,17 @@ do $$ begin
       where id='d31d0000-0000-4000-8000-000000000015') is not null
     or exists(select 1 from public.e10_financial_document_commands
       where idempotency_key in ('x3d1c-credit-block-invoice','x3d1c-credit-block-credit',
-        'x3d1c-po-block','x3d1c-receipt-block')) then
+        'x3d1c-po-block','x3d1c-receipt-block'))
+    or not exists(select 1 from public.e10_supplier_invoice_revisions
+      where organization_id='d31d0000-0000-4000-8000-000000000001'
+        and supplier_invoice_id='d31d0000-0000-4000-8000-000000000011'
+        and revision=3 and status='approved'
+        and snapshot->>'revision'='3' and snapshot->>'status'='approved')
+    or not exists(select 1 from public.e10_supplier_credit_revisions
+      where organization_id='d31d0000-0000-4000-8000-000000000001'
+        and supplier_credit_id='d31d0000-0000-4000-8000-000000000015'
+        and revision=3 and status='approved'
+        and snapshot->>'revision'='3' and snapshot->>'status'='approved') then
     raise exception 'void allocation barrier residue or approval invalidation failed';
   end if;
   set constraints all immediate;
