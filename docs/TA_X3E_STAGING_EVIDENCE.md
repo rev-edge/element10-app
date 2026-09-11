@@ -10,11 +10,13 @@ Migration: `20260911213745_e10_ta_x3e_commercial_comments.sql`
 - Local full migration replay: passed.
 - Local focused tests: X3a predecessor, X3e functional, X3e concurrency, X5i event envelope, and default privileges passed.
 - Exact-head CI: run `34651256183`, attempt 2 succeeded. Attempt 1 failed in the pre-existing X7a attendance timing test with `attendance_dataset_revision_stale`; the implementation was unchanged for the successful retry.
-- Staging target was proven as database `postgres`, user `postgres`, with schema `e10` present and migration ledger count zero before apply.
+- Staging target was proven as database `postgres`, user `postgres`, with schema `e10` present and count zero for migration version `20260911213745` before apply.
 - Apply used the explicit staging session pooler for project `csmbjfmoxkexcyssntbg`; no bare linked-project command was used.
 - Ledger row: `20260911213745 | e10_ta_x3e_commercial_comments | explicit staging transaction; source commit d01728dd88e692ff6f8b00d304925bd6e03dfc3a`.
 
 ## Staging behavior
+
+Evidence commit: `2444b8f`.
 
 - `tests/ta_x3a_purchasing_documents_test.sql`: passed.
 - `tests/ta_x3e_commercial_comments_test.sql`: passed.
