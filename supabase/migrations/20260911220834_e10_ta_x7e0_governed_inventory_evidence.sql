@@ -20,6 +20,7 @@ create table public.e10_unique_item_grade_assessments(
    or(action='assert'and condition_state in('raw','graded')
      and(condition_state='raw'and grader_code is null and grade_label is null and grade_qualifier is null
        or condition_state='graded'and length(btrim(grader_code))between 1 and 50 and length(btrim(grade_label))between 1 and 50))),
+ check(action='revoke'or action='assert'and condition_state is not null),
  check(length(btrim(method))between 1 and 100 and length(btrim(method_version))between 1 and 100),
  check(source_connection_id is null or length(btrim(source_connection_id))between 1 and 500),
  check(source_reference is null or length(btrim(source_reference))between 1 and 2000),
@@ -53,6 +54,7 @@ create table public.e10_catalog_population_snapshots(
      and condition_state in('raw','graded','all_conditions')
      and(condition_state in('raw','all_conditions')and grader_code is null and grade_label is null and grade_qualifier is null
        or condition_state='graded'and length(btrim(grader_code))between 1 and 50 and length(btrim(grade_label))between 1 and 50))),
+ check(action='revoke'or action='assert'and condition_state is not null and population_count is not null and population_scope is not null),
  check(length(btrim(method))between 1 and 100 and length(btrim(method_version))between 1 and 100),
  check(source_connection_id is null or length(btrim(source_connection_id))between 1 and 500),
  check(source_reference is null or length(btrim(source_reference))between 1 and 2000),
@@ -88,6 +90,7 @@ create table public.e10_valuation_evidence(
      and condition_state in('raw','graded','all_conditions')
      and(condition_state in('raw','all_conditions')and grader_code is null and grade_label is null and grade_qualifier is null
        or condition_state='graded'and length(btrim(grader_code))between 1 and 50 and length(btrim(grade_label))between 1 and 50))),
+ check(action='revoke'or action='assert'and condition_state is not null and currency is not null and amount is not null),
  check(length(btrim(method))between 1 and 100 and length(btrim(method_version))between 1 and 100),
  check(source_connection_id is null or length(btrim(source_connection_id))between 1 and 500),
  check(source_reference is null or length(btrim(source_reference))between 1 and 2000),
@@ -104,7 +107,7 @@ create table public.e10_inventory_disposition_links(
  id uuid primary key default gen_random_uuid(),organization_id uuid not null,
  disposition_key uuid not null,unique_item_id uuid not null,origin_event_id uuid not null,
  revision bigint not null check(revision>0),action text not null check(action in('assert','revoke')),
- disposition_kind text,disposed_at timestamptz,disposed_at_precision text,
+ disposition_kind text,disposed_at timestamptz,disposed_at_precision text not null,
  customer_transaction_id uuid,market_observation_id uuid,commercial_event_id uuid,
  supersedes_link_id uuid,reason text not null,evidence jsonb not null,
  idempotency_key text not null,request_fingerprint text not null,reviewed_by uuid references auth.users(id),
@@ -121,10 +124,12 @@ create table public.e10_inventory_disposition_links(
  check((disposed_at_precision='unknown'and disposed_at is null)or(disposed_at_precision in('exact','date')and disposed_at is not null and isfinite(disposed_at))),
  check((action='revoke'and disposition_kind is null and num_nonnulls(customer_transaction_id,market_observation_id,commercial_event_id)=0)
    or(action='assert'and disposition_kind in('sale','disposal','return')and num_nonnulls(customer_transaction_id,market_observation_id,commercial_event_id)=1)),
+ check(action='revoke'or action='assert'and disposition_kind is not null),
  check(length(btrim(reason))between 1 and 2000),check(jsonb_typeof(evidence)='object'and octet_length(evidence::text)<=65536),
  check(length(btrim(idempotency_key))between 1 and 500 and btrim(request_fingerprint)<>'')
 );
 create unique index e10_inventory_disposition_successor_uq on public.e10_inventory_disposition_links(organization_id,supersedes_link_id)where supersedes_link_id is not null;
+create unique index e10_inventory_disposition_episode_root_uq on public.e10_inventory_disposition_links(organization_id,unique_item_id,origin_event_id)where supersedes_link_id is null;
 create index e10_inventory_disposition_item_time_idx on public.e10_inventory_disposition_links(organization_id,unique_item_id,disposed_at desc,recorded_at desc,id);
 
 create table public.e10_inventory_reporting_revisions(
