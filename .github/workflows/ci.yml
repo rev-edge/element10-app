@@ -122,6 +122,10 @@ jobs:
         run: node tests/ta_x6e_customer_resolution_test.js
       - name: TA-X6f selective posted customer attribution gate
         run: node tests/ta_x6f_posted_customer_attribution_test.js
+      - name: TA-X6g atomic native break-sale capture gate
+        run: |
+          node tests/ta_x6g_native_break_sale_test.js
+          node tests/ta_x6g_native_break_sale_adversarial_test.js
       - name: A7 hostile two-org matrix (every identity class x both orgs x every census family, real JWTs, specific refusals)
         # docs/A7_HOSTILE_MATRIX.md proven: F1-F8 cross-org denials + legitimate positives under real authenticated JWTs;
         # ledger outlives items under a hostile identity; receipts server-only (no authenticated grant); anon zero access;
