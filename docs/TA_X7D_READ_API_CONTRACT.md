@@ -197,7 +197,10 @@ Cursors are random server-side identifiers. Their precise typed sort position,
 parent cohort when applicable, fingerprint, caller, organization, and revisions
 are stored in service-only tables with bounded row count and expiry. Query
 contexts and cursors have an implementation-enforced maximum lifetime and are
-deleted or made unusable after expiry. A cursor is rejected if
+deleted or made unusable after expiry. The v1 bounds are a 15-minute lifetime,
+100 live query contexts and 1,000 live cursors per actor and organization, and
+100,000 eligible cohort keys per context. A request exceeding a bound is
+rejected and never truncated. A cursor is rejected if
 it is missing, expired, belongs to another caller or organization, is for the
 other endpoint, has stale revisions, or does not match the recomputed query
 fingerprint. The client never supplies decoded timestamp or numeric positions.
