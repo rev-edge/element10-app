@@ -179,3 +179,5 @@ grant execute on function public.e10_platform_review_player_affiliation(uuid,uui
 
 comment on table public.e10_player_affiliation_decisions is 'Reviewed dated player-team evidence. Stable player identity is independent of current affiliation.';
 comment on table public.e10_catalog_variant_subject_context_decisions is 'Reviewed release/card depiction context. Never derived from a player current-team value.';
+comment on function public.e10_catalog_player_affiliations(uuid,date,date,integer) is 'Bounded current-leaf history query. Date windows are half-open [from,to); overlapping legitimate affiliations are returned independently. Maximum 200 rows; callers narrow the window for further history.';
+comment on function public.e10_platform_review_player_affiliation(uuid,uuid,uuid,text,text,date,date,bigint,text,text,text,text,jsonb,text) is 'Reviewed affiliation chain. Player, team and effective_from identify a chain; correcting one of those fields requires revoking the prior chain and asserting a new lineage.';
