@@ -273,7 +273,9 @@ eligible observed count, linked duplicate count, and unknown/excluded counts.
 
 ## Bounded APIs and cursor/revision contract
 
-Add dedicated allow-listed `act.view_market_analytics`, with no default grants.
+Define the reserved capability identifier `act.view_market_analytics`, with no
+default grants, through the existing `e10.has_org_cap` and organization role
+permission mechanism. X7d does not introduce a separate capability catalog.
 Authenticated reads require active membership plus that capability. It does not
 grant direct table access or customer financial/contact access.
 
@@ -312,14 +314,18 @@ statement-safe and must not fan out by organization for a global catalog change.
 
 ### X7d.0: reviewed semantics and revision control
 
-- Add the two new capabilities without grants.
+- Define and document the reserved capability identifiers
+  `act.view_market_analytics` and `act.curate_market_analytics`; enforce them
+  through the existing `e10.has_org_cap` and organization role permission
+  mechanism, with no seeded/default grants.
 - Add controlled facet taxonomy, separately authorized global facet decisions,
   tenant-private overrides, copy/observation facts, observation-equivalence,
   and coverage decision structures, their current service-only views, writers,
   organization/global revision rows, and bounded revision triggers.
 - Prove CAS, replay/mismatch, cycle/depth defense, correction eligibility,
   cross-org denial, global-versus-tenant authority and precedence, typed amount
-  basis, no automatic equivalence, and no direct client table access.
+  basis, no automatic equivalence, no direct client table access, absent grant
+  denial, explicit same-organization role grant access, and denial after revoke.
 
 Stop for independent review before the projection or reads.
 
