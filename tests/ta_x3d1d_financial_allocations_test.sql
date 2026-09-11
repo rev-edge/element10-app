@@ -34,6 +34,8 @@ begin
     values(o,role_id,'act.purchasing_prepare',true);
   insert into public.e10_suppliers(id,organization_id,name,status) values(supplier,o,'X3d1d supplier','active');
   insert into public.e10_locations(id,organization_id,name,status) values(location_id,o,'X3d1d location','active');
+  insert into public.e10_location_role_permissions(organization_id,location_id,role_id,can_receive)
+    values(o,location_id,role_id,true);
   insert into public.e10_product_masters(id,organization_id,name) values(product_id,o,'X3d1d product');
   insert into public.e10_product_configurations(id,organization_id,product_master_id,name)
     values(config_id,o,product_id,'X3d1d config');

@@ -19,6 +19,7 @@ async function setup(){
  await admin.query("insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed) values($1,$2,'act.purchasing_prepare',true)",[x.org,x.role]);
  await admin.query("insert into public.e10_suppliers(id,organization_id,name,status) values($1,$2,'supplier','active')",[x.supplier,x.org]);
  await admin.query("insert into public.e10_locations(id,organization_id,name,status) values($1,$2,'location','active')",[x.location,x.org]);
+ await admin.query('insert into public.e10_location_role_permissions(organization_id,location_id,role_id,can_receive) values($1,$2,$3,true)',[x.org,x.location,x.role]);
  await admin.query("insert into public.e10_product_masters(id,organization_id,name) values($1,$2,'product')",[x.product,x.org]);
  await admin.query("insert into public.e10_product_configurations(id,organization_id,product_master_id,name) values($1,$2,$3,'config')",[x.config,x.org,x.product]);
  await admin.query("insert into public.e10_product_configuration_versions(id,organization_id,configuration_id,version_no,state,packaging_kind,base_unit,base_units_per_package) values($1,$2,$3,1,'active','unit','unit',1)",[x.version,x.org,x.config]);

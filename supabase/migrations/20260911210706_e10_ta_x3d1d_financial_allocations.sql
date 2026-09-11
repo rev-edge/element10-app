@@ -69,6 +69,59 @@ end $$;
 revoke all on function e10.financial_document_snapshot(uuid,text,uuid) from public,anon,authenticated;
 grant execute on function e10.financial_document_snapshot(uuid,text,uuid) to service_role;
 
+-- Document advisory locks serialize every writer that can change matching.
+-- Do not additionally lock invoice/credit allocation rows from both endpoints:
+-- crossmatched graphs can otherwise acquire those rows in opposite order.
+create or replace function e10.lock_financial_document(
+  p_org uuid,p_document_kind text,p_document_id uuid
+) returns void language plpgsql security definer set search_path=public as $$
+declare r record;
+begin
+  perform pg_advisory_xact_lock(hashtextextended(
+    p_org::text||'|financial-document|'||p_document_kind||'|'||p_document_id::text,0));
+  if p_document_kind='supplier_invoice' then
+    perform 1 from public.e10_supplier_invoices where organization_id=p_org and id=p_document_id for update;
+    if not found then raise exception using errcode='42501',message='supplier_invoice_access_denied'; end if;
+    for r in select id from public.e10_supplier_invoice_lines
+      where organization_id=p_org and supplier_invoice_id=p_document_id order by id for update
+    loop perform r.id; end loop;
+    for r in select a.receipt_line_id,a.invoice_line_id from public.e10_receipt_invoice_allocations a
+      join public.e10_supplier_invoice_lines l on l.organization_id=a.organization_id and l.id=a.invoice_line_id
+      where l.organization_id=p_org and l.supplier_invoice_id=p_document_id
+      order by a.receipt_line_id,a.invoice_line_id for update of a
+    loop perform r.invoice_line_id; end loop;
+  elsif p_document_kind='supplier_credit' then
+    perform 1 from public.e10_supplier_credits where organization_id=p_org and id=p_document_id for update;
+    if not found then raise exception using errcode='42501',message='supplier_credit_access_denied'; end if;
+    for r in select id from public.e10_supplier_credit_lines
+      where organization_id=p_org and supplier_credit_id=p_document_id order by id for update
+    loop perform r.id; end loop;
+  else
+    raise exception using errcode='22023',message='financial_document_kind_invalid';
+  end if;
+end $$;
+
+create or replace function e10.lock_purchase_order(p_org uuid,p_purchase_order_id uuid) returns void
+language plpgsql security definer set search_path=public as $$
+declare r record;
+begin
+  perform pg_advisory_xact_lock(hashtextextended(p_org::text||'|purchase-order|'||p_purchase_order_id::text,0));
+  perform 1 from public.e10_purchase_orders where organization_id=p_org and id=p_purchase_order_id for update;
+  if not found then raise exception using errcode='42501',message='purchase_order_access_denied'; end if;
+  for r in select id from public.e10_purchase_order_lines
+    where organization_id=p_org and purchase_order_id=p_purchase_order_id order by id for update
+  loop perform r.id; end loop;
+  for r in select a.receipt_line_id,a.purchase_order_line_id from public.e10_receipt_po_allocations a
+    join public.e10_purchase_order_lines l on l.organization_id=a.organization_id and l.id=a.purchase_order_line_id
+    where l.organization_id=p_org and l.purchase_order_id=p_purchase_order_id
+    order by a.receipt_line_id,a.purchase_order_line_id for update of a
+  loop perform r.receipt_line_id; end loop;
+  for r in select a.id from public.e10_expected_inventory_allocations a
+    join public.e10_purchase_order_lines l on l.organization_id=a.organization_id and l.id=a.purchase_order_line_id
+    where l.organization_id=p_org and l.purchase_order_id=p_purchase_order_id order by a.id for update of a
+  loop perform r.id; end loop;
+end $$;
+
 -- Acquire every logical document lock before either existing helper locks rows.
 -- This prevents invoice/credit pair operations from holding allocation rows
 -- while waiting for the other document header.
@@ -176,7 +229,7 @@ begin
     join public.e10_supplier_invoices d
       on d.organization_id=l.organization_id and d.id=l.supplier_invoice_id
     where l.organization_id=p_org and l.id=p_source_line_id;
-    select l.*,d.supplier_id,d.currency,d.revision,d.status
+    select l.*,d.supplier_id,d.currency,d.revision,d.status,d.destination_location_id
       into target_line
     from public.e10_purchase_order_lines l
     join public.e10_purchase_orders d
@@ -184,12 +237,23 @@ begin
     where l.organization_id=p_org and l.id=p_target_line_id;
     if source_line.id is null or target_line.id is null
       or source_line.state<>'active' or target_line.state<>'active'
-      or source_line.status='void' or target_line.status not in ('submitted','approved')
+      or source_line.status='void'
+      or p_operation='allocate' and target_line.status not in ('submitted','approved')
       or source_line.supplier_id<>target_line.supplier_id
       or source_line.currency<>target_line.currency
       or source_line.configuration_version_id is distinct from target_line.configuration_version_id
       or source_line.invoiced_quantity is null then
       raise exception using errcode='55000',message='financial_allocation_incompatible';
+    end if;
+    if p_operation='allocate' and (
+      not exists(select 1 from public.e10_suppliers s where s.organization_id=p_org
+        and s.id=source_line.supplier_id and s.status='active')
+      or not exists(select 1 from public.e10_product_configuration_versions v
+        where v.organization_id=p_org and v.id=source_line.configuration_version_id and v.state='active')
+      or not exists(select 1 from public.e10_locations l where l.organization_id=p_org
+        and l.id=target_line.destination_location_id and l.status='active')
+      or not e10.can_receive_at(p_org,target_line.destination_location_id)) then
+      raise exception using errcode='42501',message='financial_allocation_current_eligibility_denied';
     end if;
     if source_line.revision<>p_expected_source_revision
       or target_line.revision<>p_expected_target_revision then
@@ -275,6 +339,13 @@ begin
       or source_line.currency<>target_line.currency
       or source_line.configuration_version_id is distinct from target_line.configuration_version_id then
       raise exception using errcode='55000',message='financial_allocation_incompatible';
+    end if;
+    if p_operation='allocate' and (
+      not exists(select 1 from public.e10_suppliers s where s.organization_id=p_org
+        and s.id=source_line.supplier_id and s.status='active')
+      or not exists(select 1 from public.e10_product_configuration_versions v
+        where v.organization_id=p_org and v.id=source_line.configuration_version_id and v.state='active')) then
+      raise exception using errcode='42501',message='financial_allocation_current_eligibility_denied';
     end if;
     if source_line.revision<>p_expected_source_revision
       or target_line.revision<>p_expected_target_revision then
