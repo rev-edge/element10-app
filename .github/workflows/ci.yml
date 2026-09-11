@@ -143,6 +143,11 @@ jobs:
           node tests/ta_x7b_spend_reporting_test.js
           node tests/ta_x7b_spend_reporting_concurrent_test.js
           node tests/ta_x7b_spend_lifecycle_test.js
+      - name: TA-X7c provider normalization policy control gate
+        # Policy decisions are immutable/CAS-bound, born locked, and seed no provider enablement or role grant.
+        run: |
+          node tests/ta_x7c_provider_policy_test.js
+          node tests/ta_x7c_provider_policy_concurrent_test.js
       - name: A7 hostile two-org matrix (every identity class x both orgs x every census family, real JWTs, specific refusals)
         # docs/A7_HOSTILE_MATRIX.md proven: F1-F8 cross-org denials + legitimate positives under real authenticated JWTs;
         # ledger outlives items under a hostile identity; receipts server-only (no authenticated grant); anon zero access;
