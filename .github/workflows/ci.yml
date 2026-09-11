@@ -187,6 +187,10 @@ jobs:
         # multi-subject cards, revisioned provider mappings, active-version barcode reuse, and physical
         # identity survival after the linked legacy inventory row is deleted.
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x1_identity_foundation_test.sql
+      - name: TA-X1b governed dated player affiliations and depicted-team context
+        run: |
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x1b_player_affiliations_test.sql
+          node tests/ta_x1b_player_affiliation_concurrent_test.js
       - name: TA-X2 location and supplier foundation (authorized destinations, offerings, hostile tenant boundary)
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x2_location_supplier_test.sql
       - name: TA-X3a purchasing documents (separate objects, allocations, comments, source dedup)
