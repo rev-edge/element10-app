@@ -79,6 +79,10 @@ Unknown governed values do not match exact filters. Subject filtering uses
 existence and does not multiply observations. Transaction filters run before
 grouping. Aggregate filters run after the full filtered group is computed.
 Owned-copy and observation counts are aggregated independently.
+In catalog scope, `owned_copy_count` is organization inventory context for the
+catalog variants in that result cohort. It does not claim those copies share an
+observation-specific grade, serial, condition, or jersey fact used to qualify
+the market-evidence cohort. Copy-specific matching belongs to `owned` scope.
 
 `release_year` is mutually exclusive with either year-range bound. Range bounds
 are inclusive. `subject_id` matches membership in the variant's subject array.

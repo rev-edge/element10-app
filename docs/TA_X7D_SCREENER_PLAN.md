@@ -165,8 +165,10 @@ The public query accepts one explicit scope:
   owned by the organization. It never includes asks, estimates, or acquisition
   costs.
 
-Catalog scope has no copy-level serial identity, so a serial numerator filter is
-invalid for catalog scope rather than guessed from a variant or title.
+Catalog scope has no copy-level serial identity. A serial numerator filter is
+therefore an existential filter over a qualifying reviewed canonical
+observation for the variant, never a guess from the variant, title, or an
+unrelated owned copy. A zero-observation catalog entity cannot match it.
 
 Grouping is caller-selected from an allow-list, including catalog variant,
 variant plus raw/graded state, variant plus grader and categorical grade,
