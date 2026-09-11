@@ -58,17 +58,26 @@ language sql stable security definer set search_path=public as $$
    sum(case when allocated_total<=accepted_quantity then allocated_quantity when n=1 then accepted_quantity end)accepted_quantity,
    bool_or(allocated_total>accepted_quantity and n>1)ambiguous
   from receipt_allocations group by purchase_order_line_id
- ),open_lines as(
-  select l.estimated_unit_cost,
-   case when coalesce(r.ambiguous,false)then null else greatest(l.ordered_quantity-coalesce(r.accepted_quantity,0),0)end outstanding,
-   coalesce(r.ambiguous,false)ambiguous
-  from public.e10_purchase_order_lines l left join received r on r.purchase_order_line_id=l.id
+ ),lines as(
+  select l.ordered_quantity,l.estimated_unit_cost,
+   case when po.status not in('submitted','approved')then 0
+    when coalesce(r.ambiguous,false)then null else greatest(l.ordered_quantity-coalesce(r.accepted_quantity,0),0)end outstanding,
+   po.status in('submitted','approved')and coalesce(r.ambiguous,false)ambiguous
+  from public.e10_purchase_order_lines l join public.e10_purchase_orders po on(po.organization_id,po.id)=(l.organization_id,l.purchase_order_id)
+  left join received r on r.purchase_order_line_id=l.id
   where l.organization_id=p_org and l.purchase_order_id=p_purchase_order and l.state='active'
- ),stats as(select coalesce(sum(outstanding*estimated_unit_cost)filter(where not ambiguous and outstanding>0 and estimated_unit_cost is not null),0)known,
+ ),stats as(select
+  coalesce(sum(ordered_quantity*estimated_unit_cost)filter(where estimated_unit_cost is not null),0)ordered_known,
+  count(*)filter(where estimated_unit_cost is null)ordered_unknown_lines,
+  coalesce(sum(outstanding*estimated_unit_cost)filter(where not ambiguous and outstanding>0 and estimated_unit_cost is not null),0)known,
   count(*)filter(where not ambiguous and outstanding>0 and estimated_unit_cost is null)unknown_lines,
   coalesce(sum(outstanding)filter(where not ambiguous and outstanding>0 and estimated_unit_cost is null),0)unknown_quantity,
-  count(*)filter(where ambiguous)ambiguous_lines from open_lines)
- select jsonb_build_object('known_subtotal',known,'unknown_outstanding_line_count',unknown_lines,
+  count(*)filter(where ambiguous)ambiguous_lines from lines)
+ select jsonb_build_object(
+  'ordered_known_subtotal',ordered_known,'ordered_unknown_line_count',ordered_unknown_lines,
+  'ordered_status',case when ordered_unknown_lines>0 then'incomplete'else'complete'end,
+  'ordered_estimate',case when ordered_unknown_lines=0 then ordered_known end,
+  'known_subtotal',known,'unknown_outstanding_line_count',unknown_lines,
   'unknown_outstanding_quantity',unknown_quantity,'ambiguous_allocation_line_count',ambiguous_lines,
   'status',case when unknown_lines>0 or ambiguous_lines>0 then'incomplete'else'complete'end,
   'estimate',case when unknown_lines=0 and ambiguous_lines=0 then known end)from stats
@@ -91,7 +100,7 @@ begin
   begin c:=e10.inventory_cursor_decode(p_org,p_cursor);cursor_at:=(c->>'at')::timestamptz;cursor_kind:=c->>'kind';cursor_id:=(c->>'id')::uuid;
    if c->>'scope'is distinct from'supplier-workspace-v1'or(c->>'supplier_id')::uuid is distinct from p_supplier_id
     or(c->>'financial')::boolean is distinct from can_fin or cursor_at is null or not isfinite(cursor_at)
-    or cursor_kind not in('purchase_order','stock_receipt','supplier_invoice','supplier_credit')or cursor_id is null
+    or cursor_kind is null or cursor_kind not in('purchase_order','stock_receipt','supplier_invoice','supplier_credit')or cursor_id is null
    then raise exception using errcode='22023',message='supplier_workspace_cursor_mismatch';end if;
   exception when others then raise exception using errcode='22023',message='supplier_workspace_cursor_invalid';end;
  end if;
@@ -105,12 +114,18 @@ begin
  hydrated as(select h.*,
   case h.kind
    when'purchase_order'then(select jsonb_build_object('kind',h.kind,'id',po.id,'supplier_id',po.supplier_id,'status',po.status,'revision',po.revision,'order_number',po.order_number,'destination_location_id',po.destination_location_id,'expected_at',po.expected_at,'created_at',po.created_at,'currency',po.currency,
-    'financial_access',case when can_fin then'authorized'else'not_authorized'end,'estimated_known_subtotal',case when can_fin then ps.pstat->'known_subtotal'end,
-    'estimated_unknown_line_count',case when can_fin then ps.pstat->'unknown_outstanding_line_count'end,
-    'estimated_unknown_quantity',case when can_fin then ps.pstat->'unknown_outstanding_quantity'end,
-    'estimated_ambiguous_line_count',case when can_fin then ps.pstat->'ambiguous_allocation_line_count'end,
-    'estimated_status',case when can_fin then ps.pstat->>'status'else'not_authorized'end,
-    'estimated_total',case when can_fin then ps.pstat->'estimate'end,'line_count',x.line_count,'line_ids',x.line_ids,'line_ids_truncated',x.line_count>20,'payment_status','unavailable_not_modeled')
+    'financial_access',case when can_fin then'authorized'else'not_authorized'end,
+    'ordered_estimate_known_subtotal',case when can_fin then ps.pstat->'ordered_known_subtotal'end,
+    'ordered_estimate_unknown_line_count',case when can_fin then ps.pstat->'ordered_unknown_line_count'end,
+    'ordered_estimate_status',case when can_fin then ps.pstat->>'ordered_status'else'not_authorized'end,
+    'ordered_estimate_total',case when can_fin then ps.pstat->'ordered_estimate'end,
+    'open_commitment_known_subtotal',case when can_fin then ps.pstat->'known_subtotal'end,
+    'open_commitment_unknown_line_count',case when can_fin then ps.pstat->'unknown_outstanding_line_count'end,
+    'open_commitment_unknown_quantity',case when can_fin then ps.pstat->'unknown_outstanding_quantity'end,
+    'open_commitment_ambiguous_line_count',case when can_fin then ps.pstat->'ambiguous_allocation_line_count'end,
+    'open_commitment_status',case when can_fin then ps.pstat->>'status'else'not_authorized'end,
+    'open_commitment_estimate',case when can_fin then ps.pstat->'estimate'end,
+    'line_count',x.line_count,'line_ids',x.line_ids,'line_ids_truncated',x.line_count>20,'payment_status','unavailable_not_modeled')
     from public.e10_purchase_orders po
     cross join lateral(select e10.purchase_order_open_commitment_summary(p_org,h.id)pstat)ps
     cross join lateral(select count(*)line_count,coalesce((select jsonb_agg(q.id order by q.line_no,q.id)from(select id,line_no from public.e10_purchase_order_lines where organization_id=p_org and purchase_order_id=h.id order by line_no,id limit 20)q),'[]')line_ids

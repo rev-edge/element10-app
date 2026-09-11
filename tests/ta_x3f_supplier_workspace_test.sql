@@ -2,9 +2,11 @@
 begin;
 do $$
 declare o uuid:=gen_random_uuid();o2 uuid:=gen_random_uuid();actor uuid:=gen_random_uuid();ordinary uuid:=gen_random_uuid();admin_user uuid:=gen_random_uuid();suspended uuid:=gen_random_uuid();no_member uuid:=gen_random_uuid();multi uuid:=gen_random_uuid();foreign_user uuid:=gen_random_uuid();
- role_fin uuid:=gen_random_uuid();role_plain uuid:=gen_random_uuid();role_admin uuid:=gen_random_uuid();role_foreign uuid:=gen_random_uuid();supplier uuid:=gen_random_uuid();supplier2 uuid:=gen_random_uuid();supplier_unknown uuid:=gen_random_uuid();supplier_full uuid:=gen_random_uuid();supplier_other uuid:=gen_random_uuid();loc uuid:=gen_random_uuid();
+ role_fin uuid:=gen_random_uuid();role_plain uuid:=gen_random_uuid();role_admin uuid:=gen_random_uuid();role_foreign uuid:=gen_random_uuid();supplier uuid:=gen_random_uuid();supplier2 uuid:=gen_random_uuid();supplier_unknown uuid:=gen_random_uuid();supplier_full uuid:=gen_random_uuid();supplier_other uuid:=gen_random_uuid();supplier_states uuid:=gen_random_uuid();loc uuid:=gen_random_uuid();
  product uuid:=gen_random_uuid();config uuid:=gen_random_uuid();version_id uuid:=gen_random_uuid();version2 uuid:=gen_random_uuid();po uuid:=gen_random_uuid();pol uuid:=gen_random_uuid();pol_unknown uuid:=gen_random_uuid();receipt uuid:=gen_random_uuid();rl uuid:=gen_random_uuid();
  po_u uuid:=gen_random_uuid();pol_u uuid:=gen_random_uuid();po_f uuid:=gen_random_uuid();pol_f uuid:=gen_random_uuid();receipt_f uuid:=gen_random_uuid();rl_f uuid:=gen_random_uuid();
+ po_draft uuid:=gen_random_uuid();po_submitted uuid:=gen_random_uuid();po_approved uuid:=gen_random_uuid();po_cancelled uuid:=gen_random_uuid();po_closed uuid:=gen_random_uuid();
+ pol_draft uuid:=gen_random_uuid();pol_submitted uuid:=gen_random_uuid();pol_approved uuid:=gen_random_uuid();pol_cancelled uuid:=gen_random_uuid();pol_closed uuid:=gen_random_uuid();receipt_state uuid:=gen_random_uuid();rl_state uuid:=gen_random_uuid();
  invoice_id uuid:=gen_random_uuid();invoice_usd uuid:=gen_random_uuid();il uuid:=gen_random_uuid();credit_id uuid:=gen_random_uuid();cl uuid:=gen_random_uuid();
  r2 uuid:=gen_random_uuid();rl2 uuid:=gen_random_uuid();rrev uuid:=gen_random_uuid();rlrev uuid:=gen_random_uuid();rzero uuid:=gen_random_uuid();rlzero uuid:=gen_random_uuid();rnone uuid:=gen_random_uuid();rlnone uuid:=gen_random_uuid();rfuture uuid:=gen_random_uuid();rlfuture uuid:=gen_random_uuid();rusd uuid:=gen_random_uuid();rlusd uuid:=gen_random_uuid();rconfig uuid:=gen_random_uuid();rlconfig uuid:=gen_random_uuid();rother uuid:=gen_random_uuid();rlother uuid:=gen_random_uuid();
  j jsonb;j2 jsonb;s jsonb;s_usd jsonb;po_body jsonb;summary_full jsonb;cursor_value text;
@@ -15,7 +17,7 @@ begin
  insert into public.e10_organization_memberships(organization_id,user_id,role_id,status)values(o,actor,role_fin,'active'),(o,ordinary,role_plain,'active'),(o,admin_user,role_admin,'active'),(o,suspended,role_fin,'suspended'),(o,multi,role_fin,'active'),(o2,multi,role_foreign,'active'),(o2,foreign_user,role_foreign,'active');
  insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed)values(o,role_fin,'financial.actual_cost.read',true);
  insert into public.e10_locations(id,organization_id,code,name,status)values(loc,o,'X3F','X3f','active');
- insert into public.e10_suppliers(id,organization_id,code,name,status)values(supplier,o,'X3F-S','Supplier','active'),(supplier_unknown,o,'X3F-U','Unknown supplier','active'),(supplier_full,o,'X3F-C','Complete supplier','active'),(supplier_other,o,'X3F-O','Other supplier','active'),(supplier2,o2,'X3F-F','Foreign','active');
+ insert into public.e10_suppliers(id,organization_id,code,name,status)values(supplier,o,'X3F-S','Supplier','active'),(supplier_unknown,o,'X3F-U','Unknown supplier','active'),(supplier_full,o,'X3F-C','Complete supplier','active'),(supplier_other,o,'X3F-O','Other supplier','active'),(supplier_states,o,'X3F-ST','State supplier','active'),(supplier2,o2,'X3F-F','Foreign','active');
  insert into public.e10_product_masters(id,organization_id,name,status)values(product,o,'X3f product','active');
  insert into public.e10_product_configurations(id,organization_id,product_master_id,name,status)values(config,o,product,'X3f config','active');
  insert into public.e10_product_configuration_versions(id,organization_id,configuration_id,version_no,state,packaging_kind,base_unit,base_units_per_package)values(version_id,o,config,1,'active','unit','unit',1),(version2,o,config,2,'retired','unit','unit',1);
@@ -44,12 +46,28 @@ begin
  insert into public.e10_stock_receipt_lines(id,organization_id,stock_receipt_id,configuration_version_id,line_no,received_quantity,accepted_quantity)values(rl_f,o,receipt_f,version_id,1,3,3);
  insert into public.e10_receipt_po_allocations(organization_id,receipt_line_id,purchase_order_line_id,allocated_quantity)values(o,rl_f,pol_f,3);
 
+ insert into public.e10_purchase_orders(id,organization_id,supplier_id,destination_location_id,order_number,status,currency,created_by,created_at)values
+  (po_draft,o,supplier_states,loc,'X3F-DRAFT','draft','CAD',actor,'2026-01-01'),
+  (po_submitted,o,supplier_states,loc,'X3F-SUBMITTED','submitted','CAD',actor,'2026-01-02'),
+  (po_approved,o,supplier_states,loc,'X3F-APPROVED','approved','CAD',actor,'2026-01-03'),
+  (po_cancelled,o,supplier_states,loc,'X3F-CANCELLED','cancelled','CAD',actor,'2026-01-04'),
+  (po_closed,o,supplier_states,loc,'X3F-CLOSED','closed','CAD',actor,'2026-01-05');
+ insert into public.e10_purchase_order_lines(id,organization_id,purchase_order_id,configuration_version_id,line_no,ordered_quantity,estimated_unit_cost)values
+  (pol_draft,o,po_draft,version_id,1,2,10),(pol_submitted,o,po_submitted,version_id,1,3,10),(pol_approved,o,po_approved,version_id,1,4,10),
+  (pol_cancelled,o,po_cancelled,version_id,1,5,10),(pol_closed,o,po_closed,version_id,1,6,10);
+ insert into public.e10_stock_receipts(id,organization_id,supplier_id,destination_location_id,receipt_number,status,received_at,created_by,created_at)
+  values(receipt_state,o,supplier_states,loc,'X3F-ST-R','posted','2026-01-06',actor,'2026-01-06');
+ insert into public.e10_stock_receipt_lines(id,organization_id,stock_receipt_id,configuration_version_id,line_no,received_quantity,accepted_quantity,actual_unit_cost,currency)
+  values(rl_state,o,receipt_state,version_id,1,1,1,10,'CAD');
+ insert into public.e10_receipt_po_allocations(organization_id,receipt_line_id,purchase_order_line_id,allocated_quantity)values(o,rl_state,pol_approved,1);
+
  perform set_config('request.jwt.claims',jsonb_build_object('sub',ordinary,'role','authenticated')::text,true);set local role authenticated;
  j:=public.e10_org_supplier_workspace(o,supplier,100,null);
  if j->>'financial_access'is distinct from'not_authorized'or j->'financial_summary'is distinct from'null'::jsonb or jsonb_array_length(j->'items')is distinct from 2
   or exists(select 1 from jsonb_array_elements(j->'items')x where x->>'kind'in('supplier_invoice','supplier_credit'))
-  or exists(select 1 from jsonb_array_elements(j->'items')x where x->>'estimated_total'is not null or x->>'estimated_known_subtotal'is not null
-   or x->>'estimated_unknown_line_count'is not null or x->>'estimated_unknown_quantity'is not null or x->>'accepted_quantity'is not null)
+  or exists(select 1 from jsonb_array_elements(j->'items')x where x->>'ordered_estimate_total'is not null or x->>'ordered_estimate_known_subtotal'is not null
+   or x->>'open_commitment_estimate'is not null or x->>'open_commitment_known_subtotal'is not null
+   or x->>'open_commitment_unknown_line_count'is not null or x->>'open_commitment_unknown_quantity'is not null or x->>'accepted_quantity'is not null)
   then raise exception'ordinary member financial leak %',j;end if;
  begin perform public.e10_org_supplier_actual_cost_history(o,supplier,version_id,'CAD','2026-02-01',10,null);raise exception'ordinary actual cost allowed';exception when insufficient_privilege then null;end;
  reset role;
@@ -73,9 +91,11 @@ begin
   or(s->>'approved_credit_amount')::numeric is distinct from 10 or(s->>'allocated_approved_credit_amount')::numeric is distinct from 4 or(s->>'net_approved_invoice_amount')::numeric is distinct from 46
   or(s->>'unused_approved_credit_amount')::numeric is distinct from 6 or(s_usd->>'approved_invoice_amount')::numeric is distinct from 20
   or(s_usd->>'approved_credit_amount')::numeric is distinct from 0 or j->>'payment_status'is distinct from'unavailable_not_modeled'
-  or po_body->>'estimated_status'is distinct from'incomplete'or(po_body->>'estimated_known_subtotal')::numeric is distinct from 30
-  or(po_body->>'estimated_unknown_line_count')::integer is distinct from 1 or(po_body->>'estimated_unknown_quantity')::numeric is distinct from 2
-  or po_body->'estimated_total'is distinct from'null'::jsonb
+  or po_body->>'ordered_estimate_status'is distinct from'incomplete'or(po_body->>'ordered_estimate_known_subtotal')::numeric is distinct from 50
+  or(po_body->>'ordered_estimate_unknown_line_count')::integer is distinct from 1 or po_body->'ordered_estimate_total'is distinct from'null'::jsonb
+  or po_body->>'open_commitment_status'is distinct from'incomplete'or(po_body->>'open_commitment_known_subtotal')::numeric is distinct from 30
+  or(po_body->>'open_commitment_unknown_line_count')::integer is distinct from 1 or(po_body->>'open_commitment_unknown_quantity')::numeric is distinct from 2
+  or po_body->'open_commitment_estimate'is distinct from'null'::jsonb
   or exists(select 1 from jsonb_array_elements(j->'items')x where x->>'payment_status'is distinct from'unavailable_not_modeled')
   then raise exception'financial workspace invalid %',j;end if;
  if not exists(select 1 from jsonb_array_elements(j->'items')x where x->>'kind'='purchase_order'and(x->'line_ids')@>jsonb_build_array(pol))
@@ -88,10 +108,25 @@ begin
  if jsonb_array_length(j2->'items')is distinct from 1 or j2#>>'{items,0,id}'is not distinct from j#>>'{items,0,id}'or j2->'financial_summary'is distinct from summary_full then raise exception'page two invalid % %',j,j2;end if;
  j:=public.e10_org_supplier_workspace(o,supplier_unknown,10,null);select value into s from jsonb_array_elements(j->'financial_summary')where value->>'currency'='CAD';select value into po_body from jsonb_array_elements(j->'items')where value->>'kind'='purchase_order';
  if s->>'open_commitment_status'is distinct from'incomplete'or(s->>'open_commitment_known_subtotal')::numeric is distinct from 0 or(s->>'open_commitment_unknown_line_count')::integer is distinct from 1 or s->'open_commitment_estimate'is distinct from'null'::jsonb
-  or po_body->>'estimated_status'is distinct from'incomplete'or(po_body->>'estimated_unknown_line_count')::integer is distinct from 1 or po_body->'estimated_total'is distinct from'null'::jsonb then raise exception'all-unknown commitment not fail-closed %',j;end if;
+  or po_body->>'ordered_estimate_status'is distinct from'incomplete'or(po_body->>'ordered_estimate_unknown_line_count')::integer is distinct from 1 or po_body->'ordered_estimate_total'is distinct from'null'::jsonb
+  or po_body->>'open_commitment_status'is distinct from'incomplete'or(po_body->>'open_commitment_unknown_line_count')::integer is distinct from 1 or po_body->'open_commitment_estimate'is distinct from'null'::jsonb then raise exception'all-unknown commitment not fail-closed %',j;end if;
  j:=public.e10_org_supplier_workspace(o,supplier_full,10,null);select value into s from jsonb_array_elements(j->'financial_summary')where value->>'currency'='CAD';select value into po_body from jsonb_array_elements(j->'items')where value->>'kind'='purchase_order';
  if s->>'open_commitment_status'is distinct from'complete'or(s->>'open_commitment_unknown_line_count')::integer is distinct from 0 or(s->>'open_commitment_estimate')::numeric is distinct from 0
-  or po_body->>'estimated_status'is distinct from'complete'or(po_body->>'estimated_unknown_line_count')::integer is distinct from 0 or(po_body->>'estimated_total')::numeric is distinct from 0 then raise exception'fully received unknown commitment not zero %',j;end if;
+  or po_body->>'ordered_estimate_status'is distinct from'incomplete'or(po_body->>'ordered_estimate_unknown_line_count')::integer is distinct from 1 or po_body->'ordered_estimate_total'is distinct from'null'::jsonb
+  or po_body->>'open_commitment_status'is distinct from'complete'or(po_body->>'open_commitment_unknown_line_count')::integer is distinct from 0 or(po_body->>'open_commitment_estimate')::numeric is distinct from 0 then raise exception'fully received unknown commitment not zero %',j;end if;
+
+ j:=public.e10_org_supplier_workspace(o,supplier_states,20,null);select value into s from jsonb_array_elements(j->'financial_summary')where value->>'currency'='CAD';
+ if(s->>'open_commitment_estimate')::numeric is distinct from 60 then raise exception'header-state supplier open commitment invalid %',j;end if;
+ select value into po_body from jsonb_array_elements(j->'items')where value->>'id'=po_draft::text;
+ if(po_body->>'ordered_estimate_total')::numeric is distinct from 20 or(po_body->>'open_commitment_estimate')::numeric is distinct from 0 then raise exception'draft PO estimate split invalid %',po_body;end if;
+ select value into po_body from jsonb_array_elements(j->'items')where value->>'id'=po_submitted::text;
+ if(po_body->>'ordered_estimate_total')::numeric is distinct from 30 or(po_body->>'open_commitment_estimate')::numeric is distinct from 30 then raise exception'submitted PO estimate split invalid %',po_body;end if;
+ select value into po_body from jsonb_array_elements(j->'items')where value->>'id'=po_approved::text;
+ if(po_body->>'ordered_estimate_total')::numeric is distinct from 40 or(po_body->>'open_commitment_estimate')::numeric is distinct from 30 then raise exception'approved partial PO estimate split invalid %',po_body;end if;
+ select value into po_body from jsonb_array_elements(j->'items')where value->>'id'=po_cancelled::text;
+ if(po_body->>'ordered_estimate_total')::numeric is distinct from 50 or(po_body->>'open_commitment_estimate')::numeric is distinct from 0 then raise exception'cancelled PO estimate split invalid %',po_body;end if;
+ select value into po_body from jsonb_array_elements(j->'items')where value->>'id'=po_closed::text;
+ if(po_body->>'ordered_estimate_total')::numeric is distinct from 60 or(po_body->>'open_commitment_estimate')::numeric is distinct from 0 then raise exception'closed PO estimate split invalid %',po_body;end if;
 
  reset role;
  insert into public.e10_stock_receipts(id,organization_id,supplier_id,destination_location_id,status,received_at,created_by,created_at)values
