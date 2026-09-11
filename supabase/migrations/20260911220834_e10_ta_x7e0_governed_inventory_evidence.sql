@@ -19,7 +19,7 @@ create table public.e10_unique_item_grade_assessments(
  check((action='revoke'and num_nonnulls(condition_state,grader_code,grade_label,grade_qualifier,autograph_designation)=0)
    or(action='assert'and condition_state in('raw','graded')
      and(condition_state='raw'and grader_code is null and grade_label is null and grade_qualifier is null
-       or condition_state='graded'and length(btrim(grader_code))between 1 and 50 and length(btrim(grade_label))between 1 and 50))),
+       or condition_state='graded'and grader_code is not null and grade_label is not null and length(btrim(grader_code))between 1 and 50 and length(btrim(grade_label))between 1 and 50))),
  check(action='revoke'or action='assert'and condition_state is not null),
  check(length(btrim(method))between 1 and 100 and length(btrim(method_version))between 1 and 100),
  check(source_connection_id is null or length(btrim(source_connection_id))between 1 and 500),
@@ -53,7 +53,7 @@ create table public.e10_catalog_population_snapshots(
    or(action='assert'and population_count>=0 and length(btrim(population_scope))between 1 and 200
      and condition_state in('raw','graded','all_conditions')
      and(condition_state in('raw','all_conditions')and grader_code is null and grade_label is null and grade_qualifier is null
-       or condition_state='graded'and length(btrim(grader_code))between 1 and 50 and length(btrim(grade_label))between 1 and 50))),
+       or condition_state='graded'and grader_code is not null and grade_label is not null and length(btrim(grader_code))between 1 and 50 and length(btrim(grade_label))between 1 and 50))),
  check(action='revoke'or action='assert'and condition_state is not null and population_count is not null and population_scope is not null),
  check(length(btrim(method))between 1 and 100 and length(btrim(method_version))between 1 and 100),
  check(source_connection_id is null or length(btrim(source_connection_id))between 1 and 500),
@@ -89,7 +89,7 @@ create table public.e10_valuation_evidence(
    or(action='assert'and currency~'^[A-Z]{3}$'and amount>=0 and amount::text not in('NaN','Infinity','-Infinity')
      and condition_state in('raw','graded','all_conditions')
      and(condition_state in('raw','all_conditions')and grader_code is null and grade_label is null and grade_qualifier is null
-       or condition_state='graded'and length(btrim(grader_code))between 1 and 50 and length(btrim(grade_label))between 1 and 50))),
+       or condition_state='graded'and grader_code is not null and grade_label is not null and length(btrim(grader_code))between 1 and 50 and length(btrim(grade_label))between 1 and 50))),
  check(action='revoke'or action='assert'and condition_state is not null and currency is not null and amount is not null),
  check(length(btrim(method))between 1 and 100 and length(btrim(method_version))between 1 and 100),
  check(source_connection_id is null or length(btrim(source_connection_id))between 1 and 500),

@@ -52,33 +52,46 @@ revoke all on public.e10_current_inventory_lifecycle_events from public,anon,aut
 grant select on public.e10_current_inventory_lifecycle_events to service_role;
 
 create or replace view public.e10_current_inventory_disposition_links with(security_invoker=true)as
-select d.*from public.e10_inventory_disposition_links d
-join public.e10_current_inventory_lifecycle_events origin on origin.organization_id=d.organization_id and origin.id=d.origin_event_id and origin.unique_item_id=d.unique_item_id and origin.event_type in('acquisition','receipt')
+with origin_map as(
+ select o.organization_id,o.unique_item_id,o.id source_origin_event_id,
+  coalesce((select a.id from public.e10_current_inventory_lifecycle_events a where a.organization_id=o.organization_id and a.unique_item_id=o.unique_item_id and a.event_type='acquisition'and a.correlation_id is not null and a.correlation_id=o.correlation_id order by a.occurred_at,a.recorded_at,a.id limit 1),o.id)episode_origin_event_id
+ from public.e10_current_inventory_lifecycle_events o where o.event_type in('acquisition','receipt')
+)
+select d.*,m.episode_origin_event_id from public.e10_inventory_disposition_links d
+join origin_map m on m.organization_id=d.organization_id and m.source_origin_event_id=d.origin_event_id and m.unique_item_id=d.unique_item_id
 where d.action='assert'and not exists(select 1 from public.e10_inventory_disposition_links n where n.organization_id=d.organization_id and n.supersedes_link_id=d.id)
 and(
- d.customer_transaction_id is not null and d.disposition_kind='sale'and exists(select 1 from public.e10_customer_transactions t join public.e10_customer_transaction_lines l on l.organization_id=t.organization_id and l.transaction_id=t.id where t.organization_id=d.organization_id and t.id=d.customer_transaction_id and l.unique_item_id=d.unique_item_id and t.occurred_at=d.disposed_at
+ d.customer_transaction_id is not null and d.disposition_kind='sale'and exists(select 1 from public.e10_customer_transactions t join public.e10_customer_transaction_lines l on l.organization_id=t.organization_id and l.transaction_id=t.id where t.organization_id=d.organization_id and t.id=d.customer_transaction_id and l.unique_item_id=d.unique_item_id and t.occurred_at=d.disposed_at and t.occurred_at_precision=d.disposed_at_precision
   and not exists(select 1 from public.e10_customer_transaction_adjustments c where c.organization_id=l.organization_id and c.transaction_line_id=l.id and c.adjustment_kind='cancellation'and not exists(select 1 from public.e10_customer_transaction_adjustments r where r.organization_id=c.organization_id and r.reinstates_cancellation_id=c.id)))
- or d.market_observation_id is not null and d.disposition_kind='sale'and exists(select 1 from public.e10_current_market_observations m where m.organization_id=d.organization_id and m.id=d.market_observation_id and m.unique_item_id=d.unique_item_id and m.observation_kind='completed_sale'and m.source_kind in('manual','csv')and m.occurred_at=d.disposed_at)
- or d.commercial_event_id is not null and d.disposition_kind='return'and exists(select 1 from public.e10_current_inventory_lifecycle_events e where e.organization_id=d.organization_id and e.id=d.commercial_event_id and e.unique_item_id=d.unique_item_id and e.event_type='return'and e.occurred_at=d.disposed_at)
+ or d.market_observation_id is not null and d.disposition_kind='sale'and d.disposed_at_precision='exact'and exists(select 1 from public.e10_current_market_observations m where m.organization_id=d.organization_id and m.id=d.market_observation_id and m.unique_item_id=d.unique_item_id and m.observation_kind='completed_sale'and m.source_kind in('manual','csv')and m.occurred_at=d.disposed_at)
+ or d.commercial_event_id is not null and d.disposition_kind in('return','disposal')and exists(select 1 from public.e10_current_inventory_lifecycle_events e where e.organization_id=d.organization_id and e.id=d.commercial_event_id and e.unique_item_id=d.unique_item_id and e.event_type=case when d.disposition_kind='return'then'return'else'fulfillment'end and e.occurred_at=d.disposed_at and e.occurred_at_precision=d.disposed_at_precision)
 );
 
 create view public.e10_current_inventory_dispositions with(security_invoker=true)as
 with primary_origins as(
  select e.*from public.e10_current_inventory_lifecycle_events e
  where e.event_type='acquisition'or e.event_type='receipt'and not exists(select 1 from public.e10_current_inventory_lifecycle_events a where a.organization_id=e.organization_id and a.unique_item_id=e.unique_item_id and a.event_type='acquisition'and a.correlation_id is not null and a.correlation_id=e.correlation_id)
-),native_sales as(
+),native_attributed as(
  select t.organization_id,l.unique_item_id,o.id origin_event_id,t.id customer_transaction_id,t.occurred_at disposed_at,t.occurred_at_precision disposed_at_precision,
-  row_number()over(partition by t.organization_id,t.id,l.unique_item_id order by o.occurred_at desc,o.recorded_at desc,o.id desc)rn
+  t.posted_at,t.commercial_event_id,
+  row_number()over(partition by t.organization_id,t.id,l.id order by o.occurred_at desc,o.recorded_at desc,o.id desc)origin_rank
  from public.e10_customer_transactions t join public.e10_customer_transaction_lines l on l.organization_id=t.organization_id and l.transaction_id=t.id
  join primary_origins o on o.organization_id=t.organization_id and o.unique_item_id=l.unique_item_id and o.occurred_at<=t.occurred_at
  where not exists(select 1 from public.e10_customer_transaction_adjustments c where c.organization_id=l.organization_id and c.transaction_line_id=l.id and c.adjustment_kind='cancellation'and not exists(select 1 from public.e10_customer_transaction_adjustments r where r.organization_id=c.organization_id and r.reinstates_cancellation_id=c.id))
+),native_sale_candidates as(
+ select n.*,
+  row_number()over(partition by n.organization_id,n.unique_item_id,n.origin_event_id order by n.disposed_at,n.posted_at,n.customer_transaction_id)rn,
+  count(*)over(partition by n.organization_id,n.unique_item_id,n.origin_event_id)candidate_count
+ from native_attributed n where n.origin_rank=1
+),native_sales as(
+ select*from native_sale_candidates n where n.rn=1 and n.candidate_count=1
 )
-select d.organization_id,d.unique_item_id,d.origin_event_id,d.id disposition_link_id,d.disposition_kind,d.disposed_at,d.disposed_at_precision,d.recorded_at,d.customer_transaction_id,d.market_observation_id,d.commercial_event_id,'reviewed_link'::text source_basis
+select d.organization_id,d.unique_item_id,d.episode_origin_event_id as origin_event_id,d.id disposition_link_id,d.disposition_kind,d.disposed_at,d.disposed_at_precision,d.recorded_at,d.customer_transaction_id,d.market_observation_id,d.commercial_event_id,'reviewed_link'::text source_basis
 from public.e10_current_inventory_disposition_links d
 union all
-select n.organization_id,n.unique_item_id,n.origin_event_id,null::uuid,'sale',n.disposed_at,n.disposed_at_precision,t.posted_at,n.customer_transaction_id,null::uuid,t.commercial_event_id,'trusted_posted_transaction'
-from native_sales n join public.e10_customer_transactions t on t.organization_id=n.organization_id and t.id=n.customer_transaction_id
-where n.rn=1 and not exists(select 1 from public.e10_current_inventory_disposition_links d where d.organization_id=n.organization_id and d.unique_item_id=n.unique_item_id and d.origin_event_id=n.origin_event_id);
+select n.organization_id,n.unique_item_id,n.origin_event_id,null::uuid,'sale',n.disposed_at,n.disposed_at_precision,n.posted_at,n.customer_transaction_id,null::uuid,n.commercial_event_id,'trusted_posted_transaction'
+from native_sales n
+where not exists(select 1 from public.e10_current_inventory_disposition_links d where d.organization_id=n.organization_id and d.unique_item_id=n.unique_item_id and d.episode_origin_event_id=n.origin_event_id);
 revoke all on public.e10_current_inventory_disposition_links,public.e10_current_inventory_dispositions from public,anon,authenticated;
 grant select on public.e10_current_inventory_disposition_links,public.e10_current_inventory_dispositions to service_role;
 
@@ -112,14 +125,20 @@ begin
   select e.*from public.e10_commercial_events e where e.organization_id=p_org
    and e.event_type in('acquisition','receipt','listing_created','listing_published','listing_paused','listing_resumed','listing_ended','listing_relisted','sale_committed','fulfillment','return')
    and not exists(select 1 from public.e10_commercial_events n where n.organization_id=e.organization_id and n.corrects_event_id=e.id)
+   and(p_unique_item_id is null or e.subject_type='unique_item'and e.subject_id=p_unique_item_id::text or e.subject_type='inventory_item'and exists(select 1 from public.e10_unique_items u where u.organization_id=e.organization_id and u.id=p_unique_item_id and u.inventory_item_id=e.subject_id))
  )select jsonb_build_object(
+  'scope',case when p_unique_item_id is null then'organization'else'unique_item'end,
   'missing_occurrence_count',count(*)filter(where occurred_at is null or occurred_at_precision='unknown'),
   'ambiguous_identity_count',count(*)filter(where subject_type='unique_item'and subject_id!~*'^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'or subject_type='inventory_item'and(select count(*)from public.e10_unique_items u where u.organization_id=current_raw.organization_id and u.inventory_item_id=current_raw.subject_id)<>1)
  )into exclusions from current_raw;
 
  with ev as materialized(select*from public.e10_current_inventory_lifecycle_events where organization_id=p_org and occurred_at<=p_as_of and(p_unique_item_id is null or unique_item_id=p_unique_item_id)),
  origins as materialized(
-  select e.*,lead(e.occurred_at)over(partition by e.unique_item_id order by e.occurred_at,e.recorded_at,e.id)next_origin_at,
+  select e.*,
+   case when e.event_type='receipt'then e.occurred_at else(select r.occurred_at from ev r where r.unique_item_id=e.unique_item_id and r.event_type='receipt'and r.correlation_id is not null and r.correlation_id=e.correlation_id order by r.occurred_at,r.recorded_at,r.id limit 1)end receipt_at,
+   case when e.event_type='receipt'then e.recorded_at else(select r.recorded_at from ev r where r.unique_item_id=e.unique_item_id and r.event_type='receipt'and r.correlation_id is not null and r.correlation_id=e.correlation_id order by r.occurred_at,r.recorded_at,r.id limit 1)end receipt_recorded_at,
+   case when e.event_type='receipt'then e.occurred_at_precision else(select r.occurred_at_precision from ev r where r.unique_item_id=e.unique_item_id and r.event_type='receipt'and r.correlation_id is not null and r.correlation_id=e.correlation_id order by r.occurred_at,r.recorded_at,r.id limit 1)end receipt_precision,
+   lead(e.occurred_at)over(partition by e.unique_item_id order by e.occurred_at,e.recorded_at,e.id)next_origin_at,
    lead(e.recorded_at)over(partition by e.unique_item_id order by e.occurred_at,e.recorded_at,e.id)next_origin_recorded_at,
    lead(e.id)over(partition by e.unique_item_id order by e.occurred_at,e.recorded_at,e.id)next_origin_id
   from ev e where e.event_type='acquisition'or e.event_type='receipt'and not exists(
@@ -150,13 +169,14 @@ begin
  select coalesce((select max(full_count)from page),0),(select count(*)from page)>p_limit,
   coalesce(jsonb_agg(jsonb_build_object(
    'unique_item_id',unique_item_id,'origin_event_id',id,'origin_kind',event_type,'origin_at',occurred_at,'origin_precision',occurred_at_precision,
+   'acquired_at',case when event_type='acquisition'then occurred_at end,'received_at',receipt_at,'receipt_recorded_at',receipt_recorded_at,'receipt_precision',receipt_precision,
    'origin_recorded_at',recorded_at,'disposition_link_id',disposition_link_id,'disposition_kind',disposition_kind,'disposed_at',disposed_at,'disposition_recorded_at',disposition_recorded_at,'disposition_source_basis',source_basis,'censored',censored,
    'inventory_age_seconds',case when occurred_at_precision='exact'and(disposed_at is null or disposed_at_precision='exact')and not overlapping_origin then extract(epoch from episode_end-occurred_at)end,
    'intake_delay_seconds',case when occurred_at_precision='exact'and listing_precision_exact and first_published_at is not null and not overlapping_origin then extract(epoch from first_published_at-occurred_at)end,
-   'first_list_to_end_seconds',case when first_published_at is not null and listing_precision_exact and(disposition_link_id is null or disposed_at_precision='exact')and not overlapping_origin then extract(epoch from episode_end-first_published_at)end,
-   'active_exposure_seconds',case when listing_precision_exact and not overlapping_origin then active_seconds end,
+   'first_list_to_end_seconds',case when first_published_at is not null and listing_precision_exact and(disposed_at is null or disposed_at_precision='exact')and not overlapping_origin then extract(epoch from episode_end-first_published_at)end,
+   'active_exposure_seconds',case when occurred_at_precision='exact'and listing_precision_exact and(disposed_at is null or disposed_at_precision='exact')and not overlapping_origin then active_seconds end,
    'first_published_at',first_published_at,'overlapping_origin',overlapping_origin,
-   'availability',case when overlapping_origin then'episode_ambiguous'when occurred_at_precision<>'exact'or coalesce(listing_precision_exact,true)=false then'precision_unavailable'else'available'end,
+   'availability',case when overlapping_origin then'episode_ambiguous'when occurred_at_precision<>'exact'or coalesce(listing_precision_exact,true)=false or disposed_at is not null and disposed_at_precision<>'exact'then'precision_unavailable'else'available'end,
    'contributing_event_ids',coalesce(to_jsonb(event_ids[1:100]),'[]'::jsonb),'contributing_event_count',event_count,'contributing_events_truncated',event_count>100
   )order by unique_item_id,id),'[]'::jsonb),
   (select unique_item_id from shown order by unique_item_id desc,id desc limit 1),(select id from shown order by unique_item_id desc,id desc limit 1)
