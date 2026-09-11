@@ -70,4 +70,15 @@ No production write, `main` merge, UI change, live-feed work, monitor, chatbot, 
 
 ## Acceptance boundary
 
-This evidence closes TA-X7e staging verification only. It does not by itself declare the complete TA-X1 through TA-X8 objective finished.
+The outside reviewer independently accepted this staging checkpoint at exact
+commit `5d9da22ac3a8f7dc3d2df524909cd5706141ebba`. The review independently
+confirmed CI run `34657638742` attempt 1 at the exact SHA; all four staging
+ledger rows; table RLS and client-grant denial; public API ACLs and fixed search
+paths; the episode-mismatch and unresolved-valuation guards in stored function
+definitions; zero fixture residue; advisor counts; the tenant-zero `35/41`
+inventory sentinel; and the production read-only state. The reviewer made no
+file or database change and did not claim to rerun the mutating suites.
+
+This acceptance closes TA-X7e staging verification only. It does not declare
+the complete TA-X1 through TA-X8 objective finished. X3f supplier reads, the
+approved X4 remainder, X8 seams, and final coverage/integration handoff remain.
