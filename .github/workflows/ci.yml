@@ -221,6 +221,10 @@ jobs:
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3d1d_allocation_lifecycle_test.sql
           node tests/ta_x3d1d_financial_allocations_concurrent_test.js
           node tests/ta_x3d1d_allocation_workflow_races_test.js
+      - name: TA-X3e append-only audience-safe purchasing comments
+        run: |
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3e_commercial_comments_test.sql
+          node tests/ta_x3e_commercial_comments_concurrent_test.js
       - name: TA-X4a lot and reservation foundation
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x4a_lot_reservation_foundation_test.sql
       - name: TA-X4b atomic lot reservation writer
