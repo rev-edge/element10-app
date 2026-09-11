@@ -79,8 +79,21 @@ begin
   begin
     perform public.e10_org_allocate_invoice_to_po(o,il2,pol1,1,1,3,'target overrun','x3d1d-ip-over');
     raise exception 'target conservation failed'; exception when check_violation then null; end;
+  reset role;
+  update public.e10_product_configuration_versions set state='retired' where id=version_id;
+  update public.e10_purchase_orders set status='closed' where id=po1;
+  set local role authenticated;
+  replay:=public.e10_org_allocate_invoice_to_po(o,il1,pol1,1,1,6,'first partial','x3d1d-ip-1');
+  if replay->>'replay'<>'true' then raise exception 'historical replay was coupled to current eligibility'; end if;
+  begin
+    perform public.e10_org_allocate_invoice_to_po(o,il1,pol1,3,1,1,'closed target','x3d1d-ip-closed');
+    raise exception 'new allocation accepted against closed/retired target'; exception when sqlstate '55000' then null; end;
   r:=public.e10_org_release_invoice_from_po(o,il1,pol1,3,1,2,'partial release','x3d1d-ip-release');
   if r->>'allocated_quantity'<>'4' or r->>'supplier_invoice_revision'<>'4' then raise exception 'release failed'; end if;
+  reset role;
+  update public.e10_product_configuration_versions set state='active' where id=version_id;
+  update public.e10_purchase_orders set status='approved' where id=po1;
+  set local role authenticated;
   begin
     perform public.e10_org_release_invoice_from_po(o,il1,pol1,4,1,5,'excess release','x3d1d-ip-excess');
     raise exception 'excess release accepted'; exception when check_violation then null; end;
@@ -115,7 +128,7 @@ begin
     or (select count(*) from public.e10_credit_invoice_allocation_events where organization_id=o)<>3
     or (select count(*) from public.e10_financial_allocation_commands where organization_id=o)<>6
     or exists(select 1 from public.e10_financial_allocation_commands where organization_id=o
-      and idempotency_key in ('x3d1d-ip-over','x3d1d-ip-excess','x3d1d-ci-over','x3d1d-nan','x3d1d-stale'))
+      and idempotency_key in ('x3d1d-ip-over','x3d1d-ip-closed','x3d1d-ip-excess','x3d1d-ci-over','x3d1d-nan','x3d1d-stale'))
     or not exists(select 1 from public.e10_supplier_invoice_revisions where organization_id=o
       and supplier_invoice_id=inv1 and revision=2 and status='reviewed'
       and jsonb_array_length(snapshot->'purchase_order_allocations')=1)
