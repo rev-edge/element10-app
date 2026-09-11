@@ -21,7 +21,7 @@ The controlling requirements are `TA_X7_REPORTING_PLAN.md` X7e,
   returned only when the caller also holds this capability. No role assignment
   is inferred.
 - All public RPCs are explicit-org, `SECURITY DEFINER`, anon/PUBLIC closed,
-  self-authorizing at entry and after the report snapshot lock. Internal
+  and self-authorizing under the read command snapshot. Internal
   helpers and source relations are client-closed and service-only.
 
 ## X7e.0: governed evidence and revisions
@@ -41,7 +41,14 @@ Add immutable, organization-owned relations:
    exactly one unique item or catalog variant. Store method and version,
    currency, amount, observed and recorded timestamps, source, input evidence,
    review status, and supersession. It is never a completed sale.
-4. `e10_inventory_reporting_revisions`: one monotonic revision per
+4. `e10_inventory_disposition_links`: immutable reviewed linkage from an
+   organization-owned physical copy and ownership episode to exactly one
+   trusted native transaction/disposal event or reviewed manual/imported shop
+   sale observation. The link stores disposition kind, occurrence time,
+   reviewer, reason, source provenance, revision, supersession, and
+   idempotency fingerprint. An external completed-sale observation is never
+   sufficient by itself, even when it names the same copy or serial.
+5. `e10_inventory_reporting_revisions`: one monotonic revision per
    organization. Triggers advance it for every dependency named below. Writers
    do not pre-lock this row before their source row, avoiding a reverse
    revision-to-source lock order.
@@ -88,9 +95,12 @@ precision exclusion. Ambiguous quantity or identity is excluded with a counted r
 events are keyed by copy, `listing_id`, and channel. `listing_published` and
 `listing_resumed` open an interval. `listing_paused`, `listing_ended`, or a
 qualifying final sale closes it. `sale_committed` alone is provisional and does
-not establish final sale. Final sale requires a linked posted customer
-transaction for the same organization/copy, or an eligible completed-sale
-market observation with exact copy identity. Release, return, resale, and
+not establish final sale. Final sale requires either an existing trusted native
+link from the same ownership episode to a posted customer transaction, or a
+current reviewed `e10_inventory_disposition_links` row that binds a
+manual/imported shop-sale observation or disposal event to that episode.
+Org-plus-copy identity, serial identity, or an external completed-sale comp
+alone never proves this tenant disposed of its holding. Release, return, resale, and
 reacquisition start or end distinct ownership episodes only where linked
 evidence resolves the same copy and chronology. Ambiguous/unmatched transitions
 are excluded; the projection never spans earliest acquisition to latest resale
@@ -149,22 +159,27 @@ Add three JSON RPCs:
 
 All cursors bind organization, normalized request fingerprint, metric version,
 cutoff(s), and organization revision. Each RPC executes as one top-level SQL
-statement, so PostgreSQL supplies one command snapshot. It reads the revision,
-all source facts, and the same revision again within that snapshot without a
-`FOR SHARE` lock. A concurrent writer is therefore either wholly absent or
-wholly visible; its trigger advances the revision in its own transaction. A
+statement and is declared `STABLE`; every relational helper it invokes is SQL
+or PL/pgSQL `STABLE` and performs no writes, locks, or calls to volatile source
+helpers. PostgreSQL therefore supplies the command-start snapshot to all source
+reads. The RPC reads the revision and all source facts in that snapshot without
+a `FOR SHARE` lock. A concurrent writer is either wholly absent or wholly
+visible; its trigger advances the revision in its own transaction. A
 follow-on page compares its cursor with the then-current committed revision and
-rejects stale state. Authorization is checked before source work and again
-immediately before return. This avoids the revision-to-source/source-to-revision
-deadlock cycle while preserving snapshot consistency.
+rejects stale state. Read authorization is defined at the command snapshot; a
+revocation committed during a running read takes effect on the next command or
+page, which must deny it. Evidence writers retain their fresh post-lock
+authorization recheck. This avoids the revision-to-source/source-to-revision
+deadlock cycle while preserving a precise snapshot contract.
 
 Revision invalidators include commercial events and their corrections/schema
 eligibility links; unique-item identity and inventory-item attachment; inventory
 quantity/ownership state; lots, receipts, reversals, and lot-cost evidence;
 posted transaction lines and attribution/correction/finalization facts used for
 sale finality; market observations, supersessions, reviewed facts and
-equivalences; grade assessments; population snapshots; valuation evidence; and
-any reviewed applicability or source-status row consumed by the projection.
+equivalences; grade assessments; population snapshots; valuation evidence;
+inventory disposition links; and any reviewed applicability or source-status
+row consumed by the projection.
 Full-dataset filtering and aggregation precede pagination. No materialized
 aggregate is authoritative.
 
@@ -182,12 +197,13 @@ aggregate is authoritative.
 | Valuation | Method/version/currency/cutoff/freshness bind result; stale or absent evidence yields unvalued. |
 | Portfolio movement | Acquisition contribution and estimate movement are distinct; adding a copy cannot appear as appreciation. |
 | Feed independence | Manual/import evidence works with zero connector rows. |
-| Access | Hostile organization, missing market capability, missing cost capability, NULL/unbounded input, foreign cursor, stale revision, and post-lock revocation fail closed with positive controls. |
+| Access | Hostile organization, missing market capability, missing cost capability, NULL/unbounded input, foreign cursor, stale revision, and next-command revocation fail closed with positive controls. |
 | Integrity | Same-key replay stable; different payload rejected; concurrent successors have one winner; update/delete denied. |
 | Applicability | Raw, PSA 9, and PSA 10 remain distinct; regrade changes only later-cutoff applicability; unknown/ambiguous provider dimensions are unavailable. |
 | Episodes | Sale/disposal/reacquisition does not bridge ownership episodes; provisional sale does not close one. |
+| Sale ownership | Same-copy external completed-sale evidence without a reviewed local disposition link does not close the tenant holding; reviewed manual/imported shop sale can close it without a connector. |
 | Portfolio arithmetic | Added copy with unchanged comparable values is acquisition only; sold and reacquired copy is not appreciation; totals precede a 200-row detail page. |
-| Snapshot race | An ordinary source writer blocked mid-transaction cannot produce mixed source/revision output; its commit makes the prior cursor stale. |
+| Snapshot race | A STABLE read sees one command snapshot during an ordinary writer commit; the next page sees the revision change. Revocation committed mid-read applies to and denies the next command/page. |
 | Cleanup | Every run-owned row removed and tenant-zero sentinel unchanged. |
 
 ## Delivery and stop boundary
