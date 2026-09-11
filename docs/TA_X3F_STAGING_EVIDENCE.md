@@ -86,4 +86,6 @@ Together these records supersede stale "remaining" prose inside older checkpoint
 
 ## Acceptance boundary
 
+The outside reviewer independently accepted this staging checkpoint at exact evidence commit `612257e88c4b005cc865865d917ac5f43280d187`, with implementation `9afb7336e4ea53b8a7f17b99ca7d588f3eecc0f5`. The review independently confirmed exact-head CI run `34659442363`; the staging ledger row; valid indexes; function volatility, security mode, search path, and ACLs; stored active-organization, ordered/open split, and null-cursor-kind guards; zero X3f fixture residue; 35/41/9 tenant-zero sentinels; advisor counts; and the production read-only state. The reviewer made no file or database changes and did not claim to rerun the remote mutating suites.
+
 This closes TA-X3f through staging. It does not declare the complete TA-X1 through TA-X8 objective finished. The approved X4 remainder, X8 seams, and final coverage/integration handoff remain.
