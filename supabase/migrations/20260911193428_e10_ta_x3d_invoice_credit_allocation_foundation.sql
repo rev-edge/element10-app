@@ -12,20 +12,14 @@ alter table public.e10_supplier_invoices
   add column duplicate_review_outcome text
     check(duplicate_review_outcome in ('confirmed_distinct','possible_duplicate_accepted')),
   add column duplicate_review_reason text,
+  add column identity_legacy_unresolved_at timestamptz,
   add constraint e10_supplier_invoices_review_state_chk check(
-    status<>'reviewed' or ((reviewed_by is null and reviewed_at is null)
-      or (reviewed_by is not null and reviewed_at is not null))),
+    num_nonnulls(reviewed_by,reviewed_at) in (0,2)),
   add constraint e10_supplier_invoices_approval_state_chk check(
-    status<>'approved' or ((approved_revision is null and approved_by is null and approved_at is null)
-      or (approved_revision=revision and approved_by is not null and approved_at is not null))),
+    num_nonnulls(approved_revision,approved_by,approved_at) in (0,3)
+    and (approved_revision is null or approved_revision=revision)),
   add constraint e10_supplier_invoices_void_state_chk check(
-    status<>'void' or ((voided_by is null and voided_at is null)
-      or (voided_by is not null and voided_at is not null))),
-  add constraint e10_supplier_invoices_manual_identity_chk check(
-    source_connection is not null
-    or (supplier_document_number is not null and btrim(supplier_document_number)<>'')
-    or (duplicate_review_outcome is not null and duplicate_review_reason is not null
-      and btrim(duplicate_review_reason)<>''));
+    num_nonnulls(voided_by,voided_at) in (0,2));
 
 alter table public.e10_supplier_credits
   add column reviewed_by uuid references auth.users(id),
@@ -38,27 +32,70 @@ alter table public.e10_supplier_credits
   add column duplicate_review_outcome text
     check(duplicate_review_outcome in ('confirmed_distinct','possible_duplicate_accepted')),
   add column duplicate_review_reason text,
+  add column identity_legacy_unresolved_at timestamptz,
   add constraint e10_supplier_credits_review_state_chk check(
-    status<>'reviewed' or ((reviewed_by is null and reviewed_at is null)
-      or (reviewed_by is not null and reviewed_at is not null))),
+    num_nonnulls(reviewed_by,reviewed_at) in (0,2)),
   add constraint e10_supplier_credits_approval_state_chk check(
-    status<>'approved' or ((approved_revision is null and approved_by is null and approved_at is null)
-      or (approved_revision=revision and approved_by is not null and approved_at is not null))),
+    num_nonnulls(approved_revision,approved_by,approved_at) in (0,3)
+    and (approved_revision is null or approved_revision=revision)),
   add constraint e10_supplier_credits_void_state_chk check(
-    status<>'void' or ((voided_by is null and voided_at is null)
-      or (voided_by is not null and voided_at is not null))),
+    num_nonnulls(voided_by,voided_at) in (0,2));
+
+update public.e10_supplier_invoices set identity_legacy_unresolved_at=transaction_timestamp()
+where source_connection is null and nullif(btrim(supplier_document_number),'') is null;
+update public.e10_supplier_credits set identity_legacy_unresolved_at=transaction_timestamp()
+where source_connection is null and nullif(btrim(supplier_document_number),'') is null;
+
+alter table public.e10_supplier_invoices
+  add constraint e10_supplier_invoices_manual_identity_chk check(
+    source_connection is not null
+    or nullif(btrim(supplier_document_number),'') is not null
+    or (duplicate_review_outcome is not null and duplicate_review_reason is not null
+      and btrim(duplicate_review_reason)<>'' and identity_legacy_unresolved_at is null)
+    or (identity_legacy_unresolved_at is not null and duplicate_review_outcome is null
+      and duplicate_review_reason is null));
+alter table public.e10_supplier_credits
   add constraint e10_supplier_credits_manual_identity_chk check(
     source_connection is not null
-    or (supplier_document_number is not null and btrim(supplier_document_number)<>'')
+    or nullif(btrim(supplier_document_number),'') is not null
     or (duplicate_review_outcome is not null and duplicate_review_reason is not null
-      and btrim(duplicate_review_reason)<>''));
+      and btrim(duplicate_review_reason)<>'' and identity_legacy_unresolved_at is null)
+    or (identity_legacy_unresolved_at is not null and duplicate_review_outcome is null
+      and duplicate_review_reason is null));
 
-create unique index e10_supplier_invoices_manual_identity_uq
+create index e10_supplier_invoices_manual_identity_idx
   on public.e10_supplier_invoices(organization_id,supplier_id,lower(btrim(supplier_document_number)))
   where source_connection is null and supplier_document_number is not null and btrim(supplier_document_number)<>'';
-create unique index e10_supplier_credits_manual_identity_uq
+create index e10_supplier_credits_manual_identity_idx
   on public.e10_supplier_credits(organization_id,supplier_id,lower(btrim(supplier_document_number)))
   where source_connection is null and supplier_document_number is not null and btrim(supplier_document_number)<>'';
+
+create function e10.guard_financial_manual_identity() returns trigger
+language plpgsql security definer set search_path=public as $$
+declare v_kind text:=tg_argv[0];
+begin
+  if new.source_connection is null and nullif(btrim(new.supplier_document_number),'') is not null then
+    perform pg_advisory_xact_lock(hashtextextended(new.organization_id::text||'|'||v_kind||'|manual|'||
+      new.supplier_id::text||'|'||lower(btrim(new.supplier_document_number)),0));
+    if (v_kind='supplier_invoice' and exists(select 1 from public.e10_supplier_invoices d
+        where d.organization_id=new.organization_id and d.supplier_id=new.supplier_id
+          and d.source_connection is null and lower(btrim(d.supplier_document_number))=lower(btrim(new.supplier_document_number))
+          and d.id<>new.id))
+      or (v_kind='supplier_credit' and exists(select 1 from public.e10_supplier_credits d
+        where d.organization_id=new.organization_id and d.supplier_id=new.supplier_id
+          and d.source_connection is null and lower(btrim(d.supplier_document_number))=lower(btrim(new.supplier_document_number))
+          and d.id<>new.id)) then
+      raise exception using errcode='23505',message='financial_manual_identity_conflict';
+    end if;
+  end if;
+  return new;
+end $$;
+create trigger e10_supplier_invoices_manual_identity_trg before insert or update of
+  organization_id,supplier_id,supplier_document_number,source_connection on public.e10_supplier_invoices
+  for each row execute function e10.guard_financial_manual_identity('supplier_invoice');
+create trigger e10_supplier_credits_manual_identity_trg before insert or update of
+  organization_id,supplier_id,supplier_document_number,source_connection on public.e10_supplier_credits
+  for each row execute function e10.guard_financial_manual_identity('supplier_credit');
 
 alter table public.e10_supplier_invoice_lines
   add column state text not null default 'active' check(state in ('active','cancelled'));
@@ -89,16 +126,19 @@ create table public.e10_financial_document_commands (
   created_by uuid references auth.users(id),
   created_at timestamptz not null default now(),
   primary key(organization_id,idempotency_key),
-  check((document_kind='supplier_invoice' and result->>'supplier_invoice_id'=document_id::text)
-    or (document_kind='supplier_credit' and result->>'supplier_credit_id'=document_id::text))
+  check((document_kind='supplier_invoice' and coalesce(result->>'supplier_invoice_id','')=document_id::text)
+    or (document_kind='supplier_credit' and coalesce(result->>'supplier_credit_id','')=document_id::text))
 );
 
 create table public.e10_financial_document_reconciliation_cases (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references public.e10_organizations(id),
   document_kind text not null check(document_kind in ('supplier_invoice','supplier_credit')),
-  source_connection text not null check(btrim(source_connection)<>''),
-  external_document_id text not null check(btrim(external_document_id)<>''),
+  identity_kind text not null check(identity_kind in ('connected','manual')),
+  source_connection text,
+  external_document_id text,
+  supplier_id uuid,
+  normalized_document_number text,
   existing_document_id uuid not null,
   existing_fingerprint text not null check(btrim(existing_fingerprint)<>''),
   received_fingerprint text not null check(btrim(received_fingerprint)<>''),
@@ -106,9 +146,23 @@ create table public.e10_financial_document_reconciliation_cases (
   created_by uuid references auth.users(id),
   created_at timestamptz not null default now(),
   unique(organization_id,id),
-  unique(organization_id,document_kind,source_connection,external_document_id,received_fingerprint),
-  check(existing_fingerprint<>received_fingerprint)
+  check(existing_fingerprint<>received_fingerprint),
+  check((identity_kind='connected' and source_connection is not null and btrim(source_connection)<>''
+      and external_document_id is not null and btrim(external_document_id)<>''
+      and supplier_id is null and normalized_document_number is null)
+    or (identity_kind='manual' and source_connection is null and external_document_id is null
+      and supplier_id is not null and normalized_document_number is not null
+      and btrim(normalized_document_number)<>'' and normalized_document_number=lower(btrim(normalized_document_number)))),
+  foreign key(organization_id,supplier_id) references public.e10_suppliers(organization_id,id)
 );
+create unique index e10_financial_reconciliation_connected_uq
+  on public.e10_financial_document_reconciliation_cases
+    (organization_id,document_kind,source_connection,external_document_id,received_fingerprint)
+  where identity_kind='connected';
+create unique index e10_financial_reconciliation_manual_uq
+  on public.e10_financial_document_reconciliation_cases
+    (organization_id,document_kind,supplier_id,normalized_document_number,received_fingerprint)
+  where identity_kind='manual';
 
 create table public.e10_financial_allocation_commands (
   organization_id uuid not null references public.e10_organizations(id),
@@ -175,8 +229,7 @@ alter table public.e10_financial_allocation_commands
     references public.e10_invoice_po_allocation_events(organization_id,id)
     deferrable initially deferred,
   add constraint e10_financial_allocation_commands_event_kind_chk check(
-    (allocation_kind='invoice_to_po' and result->>'allocation_event_id'=allocation_event_id::text)
-    or (allocation_kind='credit_to_invoice' and result->>'allocation_event_id'=allocation_event_id::text));
+    coalesce(result->>'allocation_event_id','')=allocation_event_id::text);
 
 -- The second event-kind FK cannot be expressed conditionally. A trigger validates the target table.
 alter table public.e10_financial_allocation_commands
@@ -199,9 +252,83 @@ begin
   return new;
 end $$;
 
+create function e10.guard_financial_document_command() returns trigger
+language plpgsql security definer set search_path=public as $$
+begin
+  if (new.document_kind='supplier_invoice' and (
+      new.result->>'supplier_invoice_id' is distinct from new.document_id::text
+      or not exists(select 1 from public.e10_supplier_invoices d
+        where d.organization_id=new.organization_id and d.id=new.document_id)))
+    or (new.document_kind='supplier_credit' and (
+      new.result->>'supplier_credit_id' is distinct from new.document_id::text
+      or not exists(select 1 from public.e10_supplier_credits d
+        where d.organization_id=new.organization_id and d.id=new.document_id))) then
+    raise exception using errcode='23514',message='financial_document_command_target_invalid';
+  end if;
+  return new;
+end $$;
+
+create function e10.guard_financial_reconciliation_case() returns trigger
+language plpgsql security definer set search_path=public as $$
+begin
+  if (new.document_kind='supplier_invoice' and not exists(
+      select 1 from public.e10_supplier_invoices d where d.organization_id=new.organization_id
+        and d.id=new.existing_document_id
+        and ((new.identity_kind='connected' and d.source_connection=new.source_connection
+          and d.external_document_id=new.external_document_id)
+          or (new.identity_kind='manual' and d.supplier_id=new.supplier_id
+            and lower(btrim(d.supplier_document_number))=new.normalized_document_number))))
+    or (new.document_kind='supplier_credit' and not exists(
+      select 1 from public.e10_supplier_credits d where d.organization_id=new.organization_id
+        and d.id=new.existing_document_id
+        and ((new.identity_kind='connected' and d.source_connection=new.source_connection
+          and d.external_document_id=new.external_document_id)
+          or (new.identity_kind='manual' and d.supplier_id=new.supplier_id
+            and lower(btrim(d.supplier_document_number))=new.normalized_document_number)))) then
+    raise exception using errcode='23514',message='financial_reconciliation_target_invalid';
+  end if;
+  return new;
+end $$;
+
+create function e10.guard_invoice_po_allocation_event() returns trigger
+language plpgsql security definer set search_path=public as $$
+begin
+  if not exists(select 1 from public.e10_financial_allocation_commands c
+    where c.organization_id=new.organization_id and c.idempotency_key=new.command_idempotency_key
+      and c.allocation_kind='invoice_to_po' and c.operation=new.operation
+      and c.allocation_event_id=new.id and c.result->>'allocation_event_id'=new.id::text) then
+    raise exception using errcode='23514',message='invoice_po_allocation_event_command_invalid';
+  end if;
+  return new;
+end $$;
+
+create function e10.guard_credit_invoice_allocation_event() returns trigger
+language plpgsql security definer set search_path=public as $$
+begin
+  if not exists(select 1 from public.e10_financial_allocation_commands c
+    where c.organization_id=new.organization_id and c.idempotency_key=new.command_idempotency_key
+      and c.allocation_kind='credit_to_invoice' and c.operation=new.operation
+      and c.allocation_event_id=new.id and c.result->>'allocation_event_id'=new.id::text) then
+    raise exception using errcode='23514',message='credit_invoice_allocation_event_command_invalid';
+  end if;
+  return new;
+end $$;
+
 create constraint trigger e10_financial_allocation_command_event_trg
   after insert on public.e10_financial_allocation_commands deferrable initially deferred
   for each row execute function e10.guard_financial_allocation_command();
+create constraint trigger e10_financial_document_command_target_trg
+  after insert on public.e10_financial_document_commands deferrable initially deferred
+  for each row execute function e10.guard_financial_document_command();
+create constraint trigger e10_financial_reconciliation_target_trg
+  after insert on public.e10_financial_document_reconciliation_cases deferrable initially deferred
+  for each row execute function e10.guard_financial_reconciliation_case();
+create constraint trigger e10_invoice_po_allocation_event_command_trg
+  after insert on public.e10_invoice_po_allocation_events deferrable initially deferred
+  for each row execute function e10.guard_invoice_po_allocation_event();
+create constraint trigger e10_credit_invoice_allocation_event_command_trg
+  after insert on public.e10_credit_invoice_allocation_events deferrable initially deferred
+  for each row execute function e10.guard_credit_invoice_allocation_event();
 
 do $$ declare t text; begin
   foreach t in array array[
@@ -216,12 +343,22 @@ do $$ declare t text; begin
   end loop;
 end $$;
 
+revoke all on function e10.guard_financial_manual_identity() from public,anon,authenticated;
 revoke all on function e10.guard_financial_allocation_command() from public,anon,authenticated;
+revoke all on function e10.guard_financial_document_command() from public,anon,authenticated;
+revoke all on function e10.guard_financial_reconciliation_case() from public,anon,authenticated;
+revoke all on function e10.guard_invoice_po_allocation_event() from public,anon,authenticated;
+revoke all on function e10.guard_credit_invoice_allocation_event() from public,anon,authenticated;
+grant execute on function e10.guard_financial_manual_identity() to service_role;
 grant execute on function e10.guard_financial_allocation_command() to service_role;
+grant execute on function e10.guard_financial_document_command() to service_role;
+grant execute on function e10.guard_financial_reconciliation_case() to service_role;
+grant execute on function e10.guard_invoice_po_allocation_event() to service_role;
+grant execute on function e10.guard_credit_invoice_allocation_event() to service_role;
 
 create index e10_financial_document_reconciliation_cases_source_idx
   on public.e10_financial_document_reconciliation_cases
-    (organization_id,document_kind,source_connection,external_document_id,created_at desc,id);
+    (organization_id,document_kind,identity_kind,source_connection,external_document_id,created_at desc,id);
 create index e10_invoice_po_allocation_events_invoice_idx
   on public.e10_invoice_po_allocation_events(organization_id,invoice_line_id,created_at,id);
 create index e10_invoice_po_allocation_events_po_idx
