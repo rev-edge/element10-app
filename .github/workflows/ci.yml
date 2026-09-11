@@ -209,6 +209,10 @@ jobs:
         run: |
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3d1a_financial_document_create_test.sql
           node tests/ta_x3d1a_financial_document_create_concurrent_test.js
+      - name: TA-X3d.1b CAS invoice and credit amendment
+        run: |
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3d1b_financial_document_amend_test.sql
+          node tests/ta_x3d1b_financial_document_amend_concurrent_test.js
       - name: TA-X4a lot and reservation foundation
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x4a_lot_reservation_foundation_test.sql
       - name: TA-X4b atomic lot reservation writer
