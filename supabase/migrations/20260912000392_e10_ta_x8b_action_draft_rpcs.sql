@@ -45,8 +45,9 @@ returns jsonb language plpgsql security definer set search_path=public as $$
 declare actor uuid:=auth.uid();d uuid:=gen_random_uuid();snap jsonb;fp text;old jsonb;result jsonb;begin
  if actor is null or not exists(select 1 from public.e10_organizations where id=p_org and status='active')or not e10.is_org_member(p_org)or not e10.has_org_cap(p_org,e10.x8b_capability(p_operation,'prepare'))then raise exception using errcode='42501',message='action_prepare_denied';end if;
  fp:=encode(extensions.digest(convert_to(jsonb_build_object('v','x8-action-create-v1','operation',p_operation,'values',p_values,'provenance',p_field_provenance,'sources',p_source_references)::text,'UTF8'),'sha256'),'hex');
- old:=e10.x8b_command(p_org,p_idempotency_key,'create',null,fp);if old is not null then return old;end if;
+ old:=e10.x8b_command(p_org,p_idempotency_key,'create',null,fp);
  if auth.uid()is distinct from actor or not exists(select 1 from public.e10_organizations where id=p_org and status='active')or not e10.is_org_member(p_org)or not e10.has_org_cap(p_org,e10.x8b_capability(p_operation,'prepare'))then raise exception using errcode='42501',message='action_prepare_denied';end if;
+ if old is not null then return old;end if;
  snap:=e10.x8b_proposal_snapshot(p_org,p_operation,p_values,p_field_provenance,p_source_references);
  insert into public.e10_action_drafts(id,organization_id,created_by,operation)values(d,p_org,actor,p_operation);
  insert into public.e10_action_draft_revisions values(p_org,d,1,p_operation,snap->'values',array(select jsonb_array_elements_text(snap->'missing_fields')),p_field_provenance,p_source_references,snap->>'reference_fingerprint',fp,actor,statement_timestamp());
@@ -57,9 +58,10 @@ end $$;
 create function public.e10_org_amend_action_draft(p_org uuid,p_draft_id uuid,p_expected_revision integer,p_values jsonb,p_field_provenance jsonb,p_source_references jsonb,p_idempotency_key text)
 returns jsonb language plpgsql security definer set search_path=public as $$
 declare d record;snap jsonb;fp text;old jsonb;result jsonb;nextrev integer;begin
+ if p_expected_revision is null or p_expected_revision<=0 then raise exception using errcode='22023',message='action_revision_invalid';end if;
  if not e10.x8b_authorized(p_org,p_draft_id,'amend')then raise exception using errcode='42501',message='action_amend_denied';end if;
  fp:=encode(extensions.digest(convert_to(jsonb_build_object('v','x8-action-amend-v1','draft',p_draft_id,'expected',p_expected_revision,'values',p_values,'provenance',p_field_provenance,'sources',p_source_references)::text,'UTF8'),'sha256'),'hex');old:=e10.x8b_command(p_org,p_idempotency_key,'amend',p_draft_id,fp);if old is not null then if not e10.x8b_authorized(p_org,p_draft_id,'amend')then raise exception using errcode='42501',message='action_amend_denied';end if;return old;end if;
- select * into d from public.e10_action_drafts where organization_id=p_org and id=p_draft_id for update;if not found or d.status not in('draft','approved')or d.current_revision<>p_expected_revision then raise exception using errcode='40001',message='action_revision_or_state_conflict';end if;if not e10.x8b_authorized(p_org,p_draft_id,'amend')then raise exception using errcode='42501',message='action_amend_denied';end if;
+ select * into d from public.e10_action_drafts where organization_id=p_org and id=p_draft_id for update;if not e10.x8b_authorized(p_org,p_draft_id,'amend')then raise exception using errcode='42501',message='action_amend_denied';end if;if not found or d.status not in('draft','approved')or d.current_revision<>p_expected_revision then raise exception using errcode='40001',message='action_revision_or_state_conflict';end if;
  snap:=e10.x8b_proposal_snapshot(p_org,d.operation,p_values,p_field_provenance,p_source_references);nextrev:=p_expected_revision+1;
  insert into public.e10_action_draft_revisions values(p_org,p_draft_id,nextrev,d.operation,snap->'values',array(select jsonb_array_elements_text(snap->'missing_fields')),p_field_provenance,p_source_references,snap->>'reference_fingerprint',fp,auth.uid(),statement_timestamp());
  update public.e10_action_drafts set current_revision=nextrev,status='draft',approved_revision=null,updated_at=statement_timestamp()where organization_id=p_org and id=p_draft_id;
