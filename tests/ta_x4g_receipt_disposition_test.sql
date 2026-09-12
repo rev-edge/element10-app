@@ -3,10 +3,10 @@ begin;
 do $$
 #variable_conflict use_variable
 declare
- o uuid:='e1000000-0000-4000-8000-0000000000a6';foreign_org uuid:=gen_random_uuid();actor uuid:=gen_random_uuid();role_id uuid:=gen_random_uuid();foreign_role uuid:=gen_random_uuid();
+ o uuid:='e1000000-0000-4000-8000-0000000000a6';foreign_org uuid:=gen_random_uuid();actor uuid:=gen_random_uuid();role_id uuid:=gen_random_uuid();foreign_role uuid:=gen_random_uuid();foreign_decision uuid:=gen_random_uuid();
  supplier uuid:=gen_random_uuid();location_id uuid:=gen_random_uuid();product_id uuid:=gen_random_uuid();config_id uuid:=gen_random_uuid();
  po_id uuid:=gen_random_uuid();po_line uuid:=gen_random_uuid();invoice_id uuid:=gen_random_uuid();invoice_line uuid:=gen_random_uuid();session_id uuid:=gen_random_uuid();item_id text:='x4g-'||gen_random_uuid();floor_item text:='x4g-floor-'||gen_random_uuid();
- receipt jsonb;accept1 jsonb;damage1 jsonb;correct1 jsonb;correct2 jsonb;replay jsonb;reversal jsonb;
+ receipt jsonb;accept1 jsonb;damage1 jsonb;correct1 jsonb;correct2 jsonb;replay jsonb;reversal jsonb;reversal_replay jsonb;
  receipt_id uuid;line_id uuid;lot_id uuid;floor_receipt jsonb;floor_decision jsonb;floor_reservation jsonb;q record;summary jsonb;cost jsonb;n bigint;
 begin
  insert into auth.users(id,instance_id,aud,role,email,created_at,updated_at)
@@ -105,8 +105,28 @@ begin
  if (select allocated_quantity from public.e10_receipt_invoice_allocations where organization_id=o and receipt_line_id=line_id)<>5 then
   raise exception 'physical invoice allocation changed during disposition';end if;
 
+ insert into public.e10_organizations(id,slug,name)values(foreign_org,'x4g-'||substr(foreign_org::text,1,8),'Foreign X4g');
+ insert into public.e10_organization_roles(id,organization_id,key,name,is_system)
+ values(foreign_role,foreign_org,'x4g-foreign','Foreign X4g reviewer',false);
+ insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed)
+ values(foreign_org,foreign_role,'act.resolve_recovery',true);
+ insert into public.e10_organization_memberships(organization_id,user_id,role_id,status)
+ values(foreign_org,actor,foreign_role,'active');
+ set local session_replication_role=replica;
+ insert into public.e10_receipt_disposition_decisions(id,organization_id,stock_receipt_id,stock_receipt_line_id,
+  inventory_lot_id,root_decision_id,revision,action,quantity,reason,decided_by)
+ values(foreign_decision,foreign_org,gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),foreign_decision,1,'accept',1,'foreign fixture',actor);
+ set local session_replication_role=origin;
+ set local role authenticated;
+ begin
+  perform public.e10_org_review_receipt_disposition(o,line_id,'accept',1,foreign_decision,1,'foreign predecessor','x4g-local-line-foreign-predecessor');
+  raise exception 'genuine other-org predecessor accepted for local line';
+ exception when insufficient_privilege then null;end;
+ reset role;
+
  set local role authenticated;
  reversal:=public.e10_org_reverse_receipt_batch(o,receipt_id,'reverse after disposition','x4g-reverse');
+ reversal_replay:=public.e10_org_reverse_receipt_batch(o,receipt_id,'reverse after disposition','x4g-reverse');
  begin
   perform public.e10_org_review_receipt_disposition(o,line_id,'accept',1,null,0,'too late','x4g-after-reverse');
   raise exception 'post-reversal disposition accepted';
@@ -123,6 +143,9 @@ begin
   or (select count(*) from public.e10_stock_receipt_reversals where organization_id=o and stock_receipt_id=receipt_id)<>1
   or (select count(*) from public.e10_commercial_events where organization_id=o
     and payload->>'receipt_line_id'=line_id::text and payload->>'source_action'='reverse')<>1
+  or not (reversal_replay->>'replay')::boolean
+  or (select count(*) from public.e10_inventory_movements where organization_id=o
+    and idempotency_key=o::text||':receipt-reversal-batch:x4g-reverse:'||line_id)<>1
   or not exists(select 1 from public.e10_commercial_events reverse_event
     join public.e10_commercial_events disposition_event on disposition_event.id=reverse_event.corrects_event_id
     where reverse_event.organization_id=o and reverse_event.payload->>'receipt_line_id'=line_id::text
@@ -135,13 +158,6 @@ begin
  begin delete from public.e10_receipt_disposition_commands where organization_id=o and idempotency_key='x4g-accept-1';
   raise exception 'disposition command delete accepted';exception when sqlstate '55000' then null;end;
 
- insert into public.e10_organizations(id,slug,name)values(foreign_org,'x4g-'||substr(foreign_org::text,1,8),'Foreign X4g');
- insert into public.e10_organization_roles(id,organization_id,key,name,is_system)
- values(foreign_role,foreign_org,'x4g-foreign','Foreign X4g reviewer',false);
- insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed)
- values(foreign_org,foreign_role,'act.resolve_recovery',true);
- insert into public.e10_organization_memberships(organization_id,user_id,role_id,status)
- values(foreign_org,actor,foreign_role,'active');
  set local role authenticated;
  begin
   perform public.e10_org_review_receipt_disposition(foreign_org,line_id,'accept',1,null,0,'foreign','x4g-foreign');
@@ -168,7 +184,7 @@ begin
  begin perform public.e10_org_review_receipt_disposition(o,(floor_receipt#>>'{lines,0,receipt_line_id}')::uuid,
   'accept',1,(floor_decision->>'decision_id')::uuid,1,'below active floor','x4g-floor-correct-active');
   raise exception 'correction crossed active reservation floor';exception when sqlstate '55000' then null;end;
- perform public.e10_org_lot_consume(o,(floor_reservation->>'reservation_id')::uuid,1,'x4g-floor-consume');
+ perform public.e10_org_lot_consume(o,(floor_reservation->>'reservation_id')::uuid,2,'x4g-floor-consume');
  begin perform public.e10_org_review_receipt_disposition(o,(floor_receipt#>>'{lines,0,receipt_line_id}')::uuid,
   'accept',1,(floor_decision->>'decision_id')::uuid,1,'below consumed floor','x4g-floor-correct-consumed');
   raise exception 'correction crossed consumed reservation floor';exception when sqlstate '55000' then null;end;
@@ -178,6 +194,29 @@ begin
  set local role authenticated;
  begin perform public.e10_org_lot_reserve(o,(floor_receipt#>>'{lines,0,lot_id}')::uuid,1,session_id,'x4g-diverged-reserve');
   raise exception 'diverged receipt-lot projection remained reservable';exception when sqlstate '55000' then null;end;
+ reset role;
+ perform set_config('request.jwt.claims',jsonb_build_object('sub',gen_random_uuid(),'role','authenticated')::text,true);
+ set local role authenticated;
+ begin perform public.e10_org_lot_reserve(o,(floor_receipt#>>'{lines,0,lot_id}')::uuid,1,session_id,'x4g-nonmember-present');
+  raise exception 'nonmember learned present diverged lot state';exception when insufficient_privilege then null;end;
+ begin perform public.e10_org_lot_reserve(o,gen_random_uuid(),1,session_id,'x4g-nonmember-missing');
+  raise exception 'nonmember learned missing lot state';exception when insufficient_privilege then null;end;
+ reset role;
+ perform set_config('request.jwt.claims',jsonb_build_object('sub',actor,'role','authenticated')::text,true);
+ update public.e10_organizations set status='suspended' where id=o;
+ set local role authenticated;
+ begin perform public.e10_org_lot_reserve(o,(floor_receipt#>>'{lines,0,lot_id}')::uuid,1,session_id,'x4g-inactive-org-present');
+  raise exception 'inactive org exposed present lot';exception when insufficient_privilege then null;end;
+ begin perform public.e10_org_lot_reserve(o,gen_random_uuid(),1,session_id,'x4g-inactive-org-missing');
+  raise exception 'inactive org exposed missing lot';exception when insufficient_privilege then null;end;
+ reset role;
+ update public.e10_organizations set status='active' where id=o;
+ delete from public.e10_organization_role_permissions p where p.organization_id=o and p.role_id=role_id and p.capability='act.reserve_inventory';
+ set local role authenticated;
+ begin perform public.e10_org_lot_reserve(o,(floor_receipt#>>'{lines,0,lot_id}')::uuid,1,session_id,'x4g-revoked-present');
+  raise exception 'revoked capability exposed present lot';exception when insufficient_privilege then null;end;
+ begin perform public.e10_org_lot_reserve(o,gen_random_uuid(),1,session_id,'x4g-revoked-missing');
+  raise exception 'revoked capability exposed missing lot';exception when insufficient_privilege then null;end;
  reset role;
  raise notice 'TA-X4g reviewed receipt disposition: PASS';
 end $$;
