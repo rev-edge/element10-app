@@ -56,6 +56,9 @@ async function main(){const s=new Client({connectionString:db}),a=new Client({co
   const cutoff='2026-01-20T00:00:00Z',from='2026-01-05T00:00:00Z',to='2026-01-19T00:00:00Z';
   let rows=(await a.query(report,[x.org,from,to,cutoff,'UTC',1,x.customer,'companion','companion',54,null,null,null])).rows;
   if(rows.length!==2||Number(rows[0].distinct_attended_sessions)!==4||Number(rows[0].observed_attendance_seconds)!==2400||Number(rows[0].attended_customer_sessions)!==4||Number(rows[0].average_observed_seconds_per_customer_session)!==600||Number(rows[1].distinct_attended_sessions)!==0||Number(rows[1].observed_attendance_seconds)!==600||Number(rows[1].attended_customer_sessions)!==1||Number(rows[1].average_observed_seconds_per_customer_session)!==600||Number(rows[0].complete_window_average_sessions_per_week)!==2||rows.some(r=>r.coverage_status!=='complete'))throw Error('weekly union/zero/average failed '+JSON.stringify(rows));
+  const x8ctx=(await a.query("select public.e10_org_create_query_context($1,'workspace',600,$2) r",[x.org,'x8-x7a-'+x.run])).rows[0].r.context_id;
+  const x8weekly=(await a.query('select public.e10_org_typed_query($1,$2,$3,$4) j',[x.org,x8ctx,'attendance.weekly',{from,to,observation_cutoff:cutoff,timezone:'UTC',week_start:1,customer:x.customer,source_class:'companion',provider_key:'companion',limit:54}])).rows[0].j;
+  if(x8weekly.operation!=='attendance.weekly'||x8weekly.grain!=='customer_local_calendar_week'||x8weekly.result.items.length!==2)throw Error('X8 attendance weekly dispatch failed '+JSON.stringify(x8weekly));
   if(rows.some(r=>r.session_count_grain!=='distinct_session'||r.duration_grain!=='customer_session_attendee_seconds'))throw Error('metric grain missing');
   const rev=Number(rows[0].dataset_revision),fp=rows[0].query_fingerprint;
   const d1=(await a.query(detail,[x.org,from,to,cutoff,x.customer,'companion','companion',1,null,null,null,null])).rows[0];

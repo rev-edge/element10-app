@@ -15,12 +15,15 @@ begin
  set local role authenticated;
  j:=public.e10_org_typed_query(o,cid,'inventory.page','{"limit":10,"filters":{}}');
  if j->>'version'<>'x8-query-v1'or j->>'operation'<>'inventory.page'or j->>'organization_id'<>o::text or j->>'context_id'<>cid::text or j->>'grain'<>'inventory_item'or j#>>'{result,items,0,id}'<>'x8ad-item'then raise exception'inventory page envelope invalid %',j;end if;
+ if not(j->'unknowns'@>'["as_of","cutoff","coverage","metric_definition"]'::jsonb)then raise exception'envelope unknown metadata incomplete %',j->'unknowns';end if;
  if j#>'{result,items,0}'?'cost'or j#>'{result,items,0}'?'value'or j#>'{result,items,0}'?'secret'or j#>'{result,items,0}'?'email'then raise exception'inventory private field leaked %',j;end if;
  j:=public.e10_org_typed_query(o,cid,'inventory.history','{"limit":10}');
  if j->>'grain'<>'inventory_movement'or j#>>'{result,movements,0,item_id}'is distinct from'x8ad-item'then raise exception'inventory history envelope invalid %',j;end if;
  if j#>'{result,movements,0}'?'note'or j#>'{result,movements,0}'?'meta'then raise exception'movement private field leaked %',j;end if;
  begin perform public.e10_org_typed_query(o,cid,'inventory.page','{"limit":10,"sql":"select 1"}');raise exception'unknown argument accepted';exception when invalid_parameter_value then null;end;
  begin perform public.e10_org_typed_query(o,cid,'inventory.page','{"limit":null,"filters":{}}');raise exception'null limit accepted';exception when invalid_parameter_value then null;end;
+ begin perform public.e10_org_typed_query(o,cid,'inventory.page','{"limit":"10","filters":{}}');raise exception'string limit accepted';exception when invalid_parameter_value then null;end;
+ begin perform public.e10_org_typed_query(o,cid,'inventory.page','{"limit":10,"filters":{"q":{"nested":"object"}}}');raise exception'object filter scalar accepted';exception when invalid_parameter_value then null;end;
  begin perform public.e10_org_typed_query(o,cid,'inventory.page','{"limit":10,"filters":{"unknown_filter":true}}');raise exception'unknown nested filter accepted';exception when invalid_parameter_value then null;end;
  begin perform public.e10_org_typed_query(o,cid,'arbitrary.sql','{}');raise exception'unknown operation accepted';exception when invalid_parameter_value then null;end;
  begin perform public.e10_org_typed_query(o,cid,'inventory.page',jsonb_build_object('limit',10,'filters',jsonb_build_object('q',repeat('x',2001))));raise exception'oversized nested string accepted';exception when invalid_parameter_value then null;end;

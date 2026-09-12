@@ -9,7 +9,7 @@ declare o uuid:=gen_random_uuid();o2 uuid:=gen_random_uuid();actor uuid:=gen_ran
  pol_draft uuid:=gen_random_uuid();pol_submitted uuid:=gen_random_uuid();pol_approved uuid:=gen_random_uuid();pol_cancelled uuid:=gen_random_uuid();pol_closed uuid:=gen_random_uuid();receipt_state uuid:=gen_random_uuid();rl_state uuid:=gen_random_uuid();
  invoice_id uuid:=gen_random_uuid();invoice_usd uuid:=gen_random_uuid();il uuid:=gen_random_uuid();credit_id uuid:=gen_random_uuid();cl uuid:=gen_random_uuid();
  r2 uuid:=gen_random_uuid();rl2 uuid:=gen_random_uuid();rrev uuid:=gen_random_uuid();rlrev uuid:=gen_random_uuid();rzero uuid:=gen_random_uuid();rlzero uuid:=gen_random_uuid();rnone uuid:=gen_random_uuid();rlnone uuid:=gen_random_uuid();rfuture uuid:=gen_random_uuid();rlfuture uuid:=gen_random_uuid();rusd uuid:=gen_random_uuid();rlusd uuid:=gen_random_uuid();rconfig uuid:=gen_random_uuid();rlconfig uuid:=gen_random_uuid();rother uuid:=gen_random_uuid();rlother uuid:=gen_random_uuid();
- j jsonb;j2 jsonb;s jsonb;s_usd jsonb;po_body jsonb;summary_full jsonb;cursor_value text;
+ j jsonb;j2 jsonb;s jsonb;s_usd jsonb;po_body jsonb;summary_full jsonb;cursor_value text;x8ctx uuid;
 begin
  insert into auth.users(id,instance_id,aud,role,email,created_at,updated_at)select u,'00000000-0000-0000-0000-000000000000','authenticated','authenticated',u||'@x3f.invalid',now(),now()from unnest(array[actor,ordinary,admin_user,suspended,no_member,multi,foreign_user])u;
  insert into public.e10_organizations(id,slug,name)values(o,'x3f-'||substr(o::text,1,8),'X3f'),(o2,'x3g-'||substr(o2::text,1,8),'X3f foreign');
@@ -83,6 +83,9 @@ begin
  reset role;
 
  perform set_config('request.jwt.claims',jsonb_build_object('sub',actor,'role','authenticated')::text,true);set local role authenticated;
+ x8ctx:=(public.e10_org_create_query_context(o,'workspace',600,'x8-x3f')->>'context_id')::uuid;
+ j:=public.e10_org_typed_query(o,x8ctx,'supplier.workspace',jsonb_build_object('supplier_id',supplier,'limit',100));if j->>'grain'<>'supplier_document'or jsonb_array_length(j#>'{result,items}')<>5 then raise exception'X8 supplier workspace dispatch %',j;end if;
+ j:=public.e10_org_typed_query(o,x8ctx,'supplier.actual_cost_history',jsonb_build_object('supplier_id',supplier,'configuration_version_id',version_id,'currency','CAD','as_of','2026-02-01T00:00:00Z','limit',10));if j->>'grain'<>'accepted_receipt_cost_evidence'or jsonb_array_length(j#>'{result,items}')<1 then raise exception'X8 supplier cost dispatch %',j;end if;
  j:=public.e10_org_supplier_workspace(o,supplier,100,null);summary_full:=j->'financial_summary';select value into s from jsonb_array_elements(summary_full)where value->>'currency'='CAD';select value into s_usd from jsonb_array_elements(summary_full)where value->>'currency'='USD';select value into po_body from jsonb_array_elements(j->'items')where value->>'kind'='purchase_order';
  if j->>'financial_access'is distinct from'authorized'or jsonb_array_length(j->'items')is distinct from 5 or s is null or s_usd is null
   or s->>'open_commitment_status'is distinct from'incomplete'or(s->>'open_commitment_known_subtotal')::numeric is distinct from 30

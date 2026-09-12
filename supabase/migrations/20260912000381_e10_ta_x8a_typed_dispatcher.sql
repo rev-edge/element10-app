@@ -18,9 +18,24 @@ end $$;
 
 create function e10.x8_assert_args(p_args jsonb,p_allowed text[])
 returns void language plpgsql immutable security definer set search_path=public as $$
+declare arg_key text;arg_value jsonb;arg_type text;
 begin
- if p_args is null or jsonb_typeof(p_args)<>'object'or octet_length(p_args::text)>65536 or exists(select 1 from jsonb_object_keys(p_args)k where not(k=any(p_allowed)))then raise exception using errcode='22023',message='x8_query_args_invalid';end if;
+ if p_args is null or jsonb_typeof(p_args)<>'object'or octet_length(p_args::text)>65536 or exists(select 1 from jsonb_object_keys(p_args)as supplied(key)where not(supplied.key=any(p_allowed)))then raise exception using errcode='22023',message='x8_query_args_invalid';end if;
  perform e10.x8_validate_json(p_args,0);
+ for arg_key,arg_value in select key,value from jsonb_each(p_args)loop
+  if arg_value='null'::jsonb then continue;end if;arg_type:=jsonb_typeof(arg_value);
+  if arg_key=any(array['limit','week_start','freshness_days','expected_dataset_revision'])and(arg_type<>'number'or(arg_value#>>'{}')!~'^[0-9]+$')then raise exception using errcode='22023',message='x8_query_args_invalid';end if;
+  if arg_key='filters'and arg_type<>'object'then raise exception using errcode='22023',message='x8_query_args_invalid';end if;
+  if arg_key='source_connections'and(arg_type<>'array'or exists(select 1 from jsonb_array_elements(arg_value)e where jsonb_typeof(e)<>'string'))then raise exception using errcode='22023',message='x8_query_args_invalid';end if;
+  if arg_key<>all(array['limit','week_start','freshness_days','expected_dataset_revision','filters','source_connections'])and arg_type<>'string'then raise exception using errcode='22023',message='x8_query_args_invalid';end if;
+ end loop;
+ if p_args?'filters'then
+  for arg_key,arg_value in select key,value from jsonb_each(p_args->'filters')loop
+   if arg_value='null'::jsonb then continue;end if;arg_type:=jsonb_typeof(arg_value);
+   if arg_key='year'and arg_type not in('string','number')then raise exception using errcode='22023',message='x8_query_args_invalid';end if;
+   if arg_key<>'year'and arg_type<>'string'then raise exception using errcode='22023',message='x8_query_args_invalid';end if;
+  end loop;
+ end if;
 end $$;
 
 create function e10.x8_redact_inventory_result(p_result jsonb)
@@ -36,15 +51,15 @@ returns jsonb language sql stable security definer set search_path=public as $$
  select jsonb_build_object(
   'version','x8-query-v1','operation',p_operation,'organization_id',p_org,'context_id',p_context,
   'query_fingerprint',coalesce(p_result->>'query_fingerprint',p_result->>'request_fingerprint',encode(sha256(convert_to(jsonb_build_object('v','x8-query-v1','org',p_org,'actor',auth.uid(),'operation',p_operation,'args',p_args)::text,'UTF8')),'hex')),
-  'as_of',coalesce(p_result->'as_of',p_args->'as_of'),'cutoff',coalesce(p_result->'observation_cutoff',p_result->'closing_cutoff',p_args->'observation_cutoff',p_args->'closing_cutoff'),
+  'as_of',coalesce(nullif(p_result->'as_of','null'::jsonb),nullif(p_args->'as_of','null'::jsonb)),'cutoff',coalesce(nullif(p_result->'observation_cutoff','null'::jsonb),nullif(p_result->'closing_cutoff','null'::jsonb),nullif(p_args->'observation_cutoff','null'::jsonb),nullif(p_args->'closing_cutoff','null'::jsonb)),
   'grain',p_grain,'units',coalesce(p_units,'null'::jsonb),'metric_definition',coalesce(p_result->'metric_version','null'::jsonb),
-  'coverage',coalesce(p_result->'coverage',p_result->'summary'->'coverage','null'::jsonb),
+  'coverage',coalesce(nullif(p_result->'coverage','null'::jsonb),nullif(p_result->'summary'->'coverage','null'::jsonb),'null'::jsonb),
   'sources',coalesce(p_result->'sources','[]'::jsonb),'unknowns',coalesce(p_unknowns,'[]'::jsonb)
-   ||case when coalesce(p_result->'as_of',p_args->'as_of')is null then'["as_of"]'::jsonb else'[]'::jsonb end
-   ||case when coalesce(p_result->'observation_cutoff',p_result->'closing_cutoff',p_args->'observation_cutoff',p_args->'closing_cutoff')is null then'["cutoff"]'::jsonb else'[]'::jsonb end
+   ||case when coalesce(nullif(p_result->'as_of','null'::jsonb),nullif(p_args->'as_of','null'::jsonb))is null then'["as_of"]'::jsonb else'[]'::jsonb end
+   ||case when coalesce(nullif(p_result->'observation_cutoff','null'::jsonb),nullif(p_result->'closing_cutoff','null'::jsonb),nullif(p_args->'observation_cutoff','null'::jsonb),nullif(p_args->'closing_cutoff','null'::jsonb))is null then'["cutoff"]'::jsonb else'[]'::jsonb end
    ||case when p_units is null or p_units='null'::jsonb then'["units"]'::jsonb else'[]'::jsonb end
-   ||case when p_result->'metric_version'is null then'["metric_definition"]'::jsonb else'[]'::jsonb end
-   ||case when coalesce(p_result->'coverage',p_result->'summary'->'coverage')is null then'["coverage"]'::jsonb else'[]'::jsonb end,
+   ||case when nullif(p_result->'metric_version','null'::jsonb)is null then'["metric_definition"]'::jsonb else'[]'::jsonb end
+   ||case when coalesce(nullif(p_result->'coverage','null'::jsonb),nullif(p_result->'summary'->'coverage','null'::jsonb))is null then'["coverage"]'::jsonb else'[]'::jsonb end,
   'result',p_result)
 $$;
 

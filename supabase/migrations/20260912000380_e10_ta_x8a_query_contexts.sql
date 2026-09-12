@@ -36,7 +36,7 @@ grant select,insert,update on public.e10_query_contexts to service_role;
 grant select,insert on public.e10_query_context_commands to service_role;
 
 create function e10.reject_query_context_command_change()returns trigger language plpgsql security definer set search_path=public as $$
-begin if tg_op='DELETE'and current_setting('e10.query_context_retention_purge',true)='on'then return old;end if;raise exception using errcode='55000',message='query_context_command_immutable';end $$;
+begin if tg_op='DELETE'and(current_setting('e10.query_context_retention_purge',true)='on'or pg_trigger_depth()>1)then return old;end if;raise exception using errcode='55000',message='query_context_command_immutable';end $$;
 create trigger e10_query_context_commands_immutable before update or delete on public.e10_query_context_commands for each row execute function e10.reject_query_context_command_change();
 
 create function e10.x8_query_context_actor(p_org uuid,p_context uuid,p_lock boolean default false)

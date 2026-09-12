@@ -181,6 +181,13 @@ jobs:
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x7e2_inventory_valuation_test.sql
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x7e_temporal_regression_test.sql
           node tests/ta_x7e_concurrent_test.js
+      - name: TA-X8a scoped query context and typed dispatcher gate
+        # Closed operation and argument allowlists, bounded context lifetime/capacity, strict JSON types,
+        # immutable command replay, redaction, final post-wait authorization, and zero denied-call residue.
+        run: |
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x8a_query_context_test.sql
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x8a_typed_dispatcher_test.sql
+          node tests/ta_x8a_context_concurrent_test.js
       - name: A7 hostile two-org matrix (every identity class x both orgs x every census family, real JWTs, specific refusals)
         # docs/A7_HOSTILE_MATRIX.md proven: F1-F8 cross-org denials + legitimate positives under real authenticated JWTs;
         # ledger outlives items under a hostile identity; receipts server-only (no authenticated grant); anon zero access;
