@@ -248,6 +248,11 @@ jobs:
         run: |
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x4d_receipt_posting_test.sql
           node tests/ta_x4d_receipt_reverse_concurrent_test.js
+      - name: TA-X4e source-neutral receipt batches
+        run: |
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x4e_receipt_batch_test.sql
+          node tests/ta_x4e_invoice_void_receipt_concurrent_test.js
+          node tests/ta_x4e_receipt_locking_concurrent_test.js
       - name: TA-X5a typed intake and lifecycle foundation
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x5a_typed_intake_lifecycle_test.sql
       - name: TA-X5b bounded intake and lifecycle writers

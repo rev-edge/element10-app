@@ -4,26 +4,30 @@ const { randomUUID } = require('crypto');
 const CONN = process.env.E10_DB_URL || 'postgresql://postgres:postgres@127.0.0.1:54322/postgres';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const org = 'e1000000-0000-4000-8000-0000000000a6';
-const x = Object.fromEntries(['user','role','supplier','location','product','config','invoice','invoiceLine'].map((k) => [k, randomUUID()]));
-x.item = `x4e-race-${randomUUID()}`; x.run = randomUUID();
+const x = Object.fromEntries(['user','role','supplier','location','product','config','po','poLine','invoice','invoiceLine'].map((k) => [k, randomUUID()]));
+x.item = `x4e-race-${randomUUID()}`; x.item2=`x4e-race-${randomUUID()}`; x.run = randomUUID();
 const jwt = JSON.stringify({ sub: x.user, role: 'authenticated' });
+async function waitForLock(observer,pid,label){for(let i=0;i<400;i++){const q=await observer.query("select wait_event_type='Lock' waiting from pg_stat_activity where pid=$1",[pid]);if(q.rows[0]?.waiting)return;await sleep(10);}throw new Error(`${label} never established a real lock wait`);}
 
 async function cleanup(c) {
   await c.query('set session_replication_role=replica');
-  await c.query("delete from public.e10_integration_outbox where commercial_event_id in (select id from public.e10_commercial_events where subject_id=$1 or payload->>'command'=$2)",[x.item,`x4e-receipt-${x.run}`]);
-  await c.query("delete from public.e10_commercial_events where subject_id=$1 or payload->>'command'=$2",[x.item,`x4e-receipt-${x.run}`]);
-  await c.query('delete from public.e10_receipt_commands where organization_id=$1 and idempotency_key=$2',[org,`x4e-receipt-${x.run}`]);
-  await c.query('delete from public.e10_inventory_lots where organization_id=$1 and inventory_item_id=$2',[org,x.item]);
+  await c.query("delete from public.e10_integration_outbox where commercial_event_id in (select id from public.e10_commercial_events where subject_id=any($1::text[]) or payload->>'command' like $2)",[[x.item,x.item2],`x4e-receipt-${x.run}%`]);
+  await c.query("delete from public.e10_commercial_events where subject_id=any($1::text[]) or payload->>'command' like $2",[[x.item,x.item2],`x4e-receipt-${x.run}%`]);
+  await c.query("delete from public.e10_receipt_commands where organization_id=$1 and idempotency_key like $2",[org,`x4e-receipt-${x.run}%`]);
+  await c.query('delete from public.e10_inventory_lots where organization_id=$1 and inventory_item_id=any($2::text[])',[org,[x.item,x.item2]]);
+  await c.query('delete from public.e10_receipt_po_allocations where organization_id=$1 and purchase_order_line_id=$2',[org,x.poLine]);
   await c.query('delete from public.e10_receipt_invoice_allocations where organization_id=$1 and invoice_line_id=$2',[org,x.invoiceLine]);
-  await c.query("delete from public.e10_stock_receipt_lines where organization_id=$1 and stock_receipt_id in(select id from public.e10_stock_receipts where organization_id=$1 and idempotency_key=$2)",[org,`x4e-receipt-${x.run}`]);
-  await c.query('delete from public.e10_stock_receipts where organization_id=$1 and idempotency_key=$2',[org,`x4e-receipt-${x.run}`]);
-  await c.query('delete from public.e10_inventory_movements where organization_id=$1 and item_id=$2',[org,x.item]);
+  await c.query("delete from public.e10_stock_receipt_lines where organization_id=$1 and stock_receipt_id in(select id from public.e10_stock_receipts where organization_id=$1 and idempotency_key like $2)",[org,`x4e-receipt-${x.run}%`]);
+  await c.query("delete from public.e10_stock_receipts where organization_id=$1 and idempotency_key like $2",[org,`x4e-receipt-${x.run}%`]);
+  await c.query('delete from public.e10_inventory_movements where organization_id=$1 and item_id=any($2::text[])',[org,[x.item,x.item2]]);
   await c.query('delete from public.e10_financial_document_events where organization_id=$1 and document_id=$2',[org,x.invoice]);
-  await c.query("delete from public.e10_financial_document_commands where organization_id=$1 and idempotency_key=$2",[org,`x4e-void-${x.run}`]);
+  await c.query("delete from public.e10_financial_document_commands where organization_id=$1 and idempotency_key like $2",[org,`x4e-void%${x.run}`]);
   await c.query('delete from public.e10_supplier_invoice_revisions where organization_id=$1 and supplier_invoice_id=$2',[org,x.invoice]);
   await c.query('delete from public.e10_supplier_invoice_lines where organization_id=$1 and supplier_invoice_id=$2',[org,x.invoice]);
   await c.query('delete from public.e10_supplier_invoices where organization_id=$1 and id=$2',[org,x.invoice]);
-  await c.query('delete from public.e10_inventory_items where organization_id=$1 and id=$2',[org,x.item]);
+  await c.query('delete from public.e10_purchase_order_lines where organization_id=$1 and id=$2',[org,x.poLine]);
+  await c.query('delete from public.e10_purchase_orders where organization_id=$1 and id=$2',[org,x.po]);
+  await c.query('delete from public.e10_inventory_items where organization_id=$1 and id=any($2::text[])',[org,[x.item,x.item2]]);
   await c.query('delete from public.e10_product_configuration_versions where organization_id=$1 and id=$2',[org,x.config]);
   await c.query('delete from public.e10_product_configurations where organization_id=$1 and id=$2',[org,x.config]);
   await c.query('delete from public.e10_product_masters where organization_id=$1 and id=$2',[org,x.product]);
@@ -54,13 +58,16 @@ async function main() {
     await setup.query("insert into public.e10_product_masters(id,organization_id,name,status) values($1,$2,'X4e product','active')",[x.product,org]);
     await setup.query("insert into public.e10_product_configurations(id,organization_id,product_master_id,name,status) values($1,$2,$3,'Each','active')",[x.config,org,x.product]);
     await setup.query("insert into public.e10_product_configuration_versions(id,organization_id,configuration_id,version_no,state,packaging_kind,base_unit,base_units_per_package) values($1,$2,$1,1,'active','each','each',1)",[x.config,org]);
-    await setup.query("insert into public.e10_inventory_items(id,name,qty,organization_id) values($1,'X4e item',0,$2)",[x.item,org]);
+    await setup.query("insert into public.e10_inventory_items(id,name,qty,organization_id) values($1,'X4e item',0,$3),($2,'X4e item 2',0,$3)",[x.item,x.item2,org]);
+    await setup.query("insert into public.e10_purchase_orders(id,organization_id,supplier_id,destination_location_id,status,currency,created_by)values($1,$2,$3,$4,'approved','CAD',$5)",[x.po,org,x.supplier,x.location,x.user]);
+    await setup.query("insert into public.e10_purchase_order_lines(id,organization_id,purchase_order_id,configuration_version_id,line_no,ordered_quantity,state)values($1,$2,$3,$4,1,5,'active')",[x.poLine,org,x.po,x.config]);
     await setup.query("insert into public.e10_supplier_invoices(id,organization_id,supplier_id,supplier_document_number,status,currency,created_by) values($1,$2,$3,$4,'draft','CAD',$5)",[x.invoice,org,x.supplier,`X4E-${x.run}`,x.user]);
     await setup.query("insert into public.e10_supplier_invoice_lines(id,organization_id,supplier_invoice_id,configuration_version_id,line_no,invoiced_quantity,line_amount,state) values($1,$2,$3,$4,1,5,50,'active')",[x.invoiceLine,org,x.invoice,x.config]);
 
-    await A.query('begin'); await A.query('select set_config($1,$2,true)',['request.jwt.claims',jwt]);
+    await A.query('begin');
     await A.query("select e10.lock_financial_document($1,'supplier_invoice',$2)",[org,x.invoice]);
-    await B.query('begin'); await B.query('select set_config($1,$2,true)',['request.jwt.claims',jwt]);
+    await A.query('select set_config($1,$2,true)',['request.jwt.claims',jwt]); await A.query('set local role authenticated');
+    await B.query('begin'); await B.query('select set_config($1,$2,true)',['request.jwt.claims',jwt]); await B.query('set local role authenticated');
     const bpid=(await B.query('select pg_backend_pid() pid')).rows[0].pid;
     let receiptError;
     const lines=JSON.stringify([{line_no:1,configuration_version_id:x.config,inventory_item_id:x.item,accepted_quantity:1,damaged_quantity:0,quarantined_quantity:0,actual_unit_cost:10,currency:'CAD',invoice_line_id:x.invoiceLine,expected_allocations:[]}]);
@@ -76,10 +83,39 @@ async function main() {
     await receiptCall; await B.query('rollback').catch(()=>{});
     if(voided.status!=='void' || !receiptError || receiptError.code!=='42501' || receiptError.message!=='invoice_line_access_denied')
       throw new Error(`unexpected outcomes void=${JSON.stringify(voided)} receipt=${receiptError&&receiptError.code}:${receiptError&&receiptError.message}`);
-    const proof=(await setup.query("select i.status,(select count(*) from public.e10_stock_receipts where organization_id=$1 and idempotency_key=$3) receipts,(select count(*) from public.e10_receipt_invoice_allocations where organization_id=$1 and invoice_line_id=$2) allocations,(select qty from public.e10_inventory_items where organization_id=$1 and id=$4) qty from public.e10_supplier_invoices i where i.organization_id=$1 and i.id=$2",[org,x.invoice,`x4e-receipt-${x.run}`,x.item])).rows[0];
+    const proof=(await setup.query("select i.status,(select count(*) from public.e10_stock_receipts where organization_id=$1 and idempotency_key=$3) receipts,(select count(*) from public.e10_receipt_invoice_allocations where organization_id=$1 and invoice_line_id=$5) allocations,(select qty from public.e10_inventory_items where organization_id=$1 and id=$4) qty from public.e10_supplier_invoices i where i.organization_id=$1 and i.id=$2",[org,x.invoice,`x4e-receipt-${x.run}`,x.item,x.invoiceLine])).rows[0];
     if(proof.status!=='void'||Number(proof.receipts)!==0||Number(proof.allocations)!==0||Number(proof.qty)!==0)
       throw new Error('losing receipt left residue: '+JSON.stringify(proof));
-    console.log(`TA-X4e invoice-void race: PASS (B pid=${bpid} waited; void won; receipt reread denied; zero residue)`);
+
+    // Reverse direction: receipt commits while void waits, then void must see the
+    // physical allocation and fail rather than orphaning it.
+    await setup.query("update public.e10_supplier_invoices set status='draft' where organization_id=$1 and id=$2",[org,x.invoice]);
+    const receiptLines=JSON.stringify([{line_no:1,configuration_version_id:x.config,inventory_item_id:x.item2,accepted_quantity:3,damaged_quantity:0,quarantined_quantity:0,actual_unit_cost:10,currency:'CAD',purchase_order_line_id:x.poLine,invoice_line_id:x.invoiceLine,expected_allocations:[]}]);
+    await A.query('begin');await A.query('select set_config($1,$2,true)',['request.jwt.claims',jwt]);await A.query('set local role authenticated');
+    const receiptWon=(await A.query('select public.e10_org_receive_batch($1,$2,$3,now(),$4::jsonb,$5) r',[org,x.supplier,x.location,receiptLines,`x4e-receipt-${x.run}-wins`])).rows[0].r;
+    await B.query('begin');await B.query('select set_config($1,$2,true)',['request.jwt.claims',jwt]);await B.query('set local role authenticated');
+    const voidPid=(await B.query('select pg_backend_pid() pid')).rows[0].pid;let voidError;
+    const voidCall=B.query("select public.e10_org_void_supplier_invoice($1,$2,2,'receipt wins race',$3)",[org,x.invoice,`x4e-void-after-${x.run}`]).catch(e=>{voidError=e;});
+    await waitForLock(setup,voidPid,'void backend');
+    await A.query('commit');await voidCall;await B.query('rollback').catch(()=>{});
+    if(!receiptWon.ok||!voidError||voidError.code!=='55000'||voidError.message!=='financial_document_has_active_allocations')throw new Error(`receipt-wins outcome invalid receipt=${JSON.stringify(receiptWon)} void=${voidError&&voidError.code}:${voidError&&voidError.message}`);
+    const protectedProof=(await setup.query("select i.status,(select sum(a.allocated_quantity) from public.e10_receipt_invoice_allocations a where a.organization_id=$1 and a.invoice_line_id=$3) allocated,(select qty from public.e10_inventory_items where organization_id=$1 and id=$4) qty from public.e10_supplier_invoices i where i.organization_id=$1 and i.id=$2",[org,x.invoice,x.invoiceLine,x.item2])).rows[0];
+    if(protectedProof.status!=='draft'||Number(protectedProof.allocated)!==3||Number(protectedProof.qty)!==3)throw new Error('receipt-wins protection residue invalid: '+JSON.stringify(protectedProof));
+
+    // Competing PO and invoice capacity: A consumes the exact remainder while B
+    // waits on the shared document hierarchy, then B must fail atomically.
+    const capacityLines=JSON.stringify([{line_no:1,configuration_version_id:x.config,inventory_item_id:x.item2,accepted_quantity:2,damaged_quantity:0,quarantined_quantity:0,actual_unit_cost:10,currency:'CAD',purchase_order_line_id:x.poLine,invoice_line_id:x.invoiceLine,expected_allocations:[]}]);
+    await A.query('begin');await A.query('select set_config($1,$2,true)',['request.jwt.claims',jwt]);await A.query('set local role authenticated');
+    const capacityWinner=(await A.query('select public.e10_org_receive_batch($1,$2,$3,now(),$4::jsonb,$5) r',[org,x.supplier,x.location,capacityLines,`x4e-receipt-${x.run}-capacity-winner`])).rows[0].r;
+    await B.query('begin');await B.query('select set_config($1,$2,true)',['request.jwt.claims',jwt]);await B.query('set local role authenticated');
+    const capacityPid=(await B.query('select pg_backend_pid() pid')).rows[0].pid;let capacityError;
+    const losingCall=B.query('select public.e10_org_receive_batch($1,$2,$3,now(),$4::jsonb,$5)',[org,x.supplier,x.location,capacityLines,`x4e-receipt-${x.run}-capacity-loser`]).catch(e=>{capacityError=e;});
+    await waitForLock(setup,capacityPid,'capacity backend');
+    await A.query('commit');await losingCall;await B.query('rollback').catch(()=>{});
+    if(!capacityWinner.ok||!capacityError||capacityError.code!=='23514')throw new Error(`capacity race invalid winner=${JSON.stringify(capacityWinner)} loser=${capacityError&&capacityError.code}:${capacityError&&capacityError.message}`);
+    const capacityProof=(await setup.query("select (select sum(a.allocated_quantity) from public.e10_receipt_invoice_allocations a where a.organization_id=$1 and a.invoice_line_id=$2) invoice_qty,(select sum(a.allocated_quantity) from public.e10_receipt_po_allocations a where a.organization_id=$1 and a.purchase_order_line_id=$3) po_qty,(select count(*) from public.e10_stock_receipts where organization_id=$1 and idempotency_key=$4) loser_receipts",[org,x.invoiceLine,x.poLine,`x4e-receipt-${x.run}-capacity-loser`])).rows[0];
+    if(Number(capacityProof.invoice_qty)!==5||Number(capacityProof.po_qty)!==5||Number(capacityProof.loser_receipts)!==0)throw new Error('capacity loser residue: '+JSON.stringify(capacityProof));
+    console.log(`TA-X4e source races: PASS (void-wins pid=${bpid}; receipt-wins pid=${voidPid}; PO+invoice capacity pid=${capacityPid}; zero orphan residue)`);
   } finally {
     await A.query('rollback').catch(()=>{}); await B.query('rollback').catch(()=>{}); await setup.query('rollback').catch(()=>{});
     await cleanup(setup); await Promise.all([A.end(),B.end(),setup.end()]);

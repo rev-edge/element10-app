@@ -30,11 +30,16 @@ returns table(
   unresolved_quarantined numeric,reversed_quantity numeric,remaining_quantity numeric
 ) language sql stable security definer set search_path=public as $$
  select l.received_quantity,
-   case when r.status='reversed' then 0 else l.accepted_quantity end,
-   case when r.status='reversed' then 0 else l.damaged_quantity end,
-   case when r.status='reversed' then 0 else l.quarantined_quantity end,
-   case when r.status='reversed' then l.received_quantity else 0 end,
-   case when r.status='reversed' then 0
+   case when r.status not in('posted','corrected') or exists(select 1 from public.e10_stock_receipt_reversals rv
+     where rv.organization_id=l.organization_id and rv.stock_receipt_line_id=l.id) then 0 else l.accepted_quantity end,
+   case when r.status not in('posted','corrected') or exists(select 1 from public.e10_stock_receipt_reversals rv
+     where rv.organization_id=l.organization_id and rv.stock_receipt_line_id=l.id) then 0 else l.damaged_quantity end,
+   case when r.status not in('posted','corrected') or exists(select 1 from public.e10_stock_receipt_reversals rv
+     where rv.organization_id=l.organization_id and rv.stock_receipt_line_id=l.id) then 0 else l.quarantined_quantity end,
+   case when r.status='reversed' or exists(select 1 from public.e10_stock_receipt_reversals rv
+     where rv.organization_id=l.organization_id and rv.stock_receipt_line_id=l.id) then l.received_quantity else 0 end,
+   case when r.status not in('posted','corrected') or exists(select 1 from public.e10_stock_receipt_reversals rv
+     where rv.organization_id=l.organization_id and rv.stock_receipt_line_id=l.id) then 0
         else l.received_quantity-l.accepted_quantity-l.damaged_quantity-l.quarantined_quantity end
  from public.e10_stock_receipt_lines l
  join public.e10_stock_receipts r
@@ -57,7 +62,7 @@ declare
   line_no integer; config_id uuid; item_id text; po_line_id uuid; invoice_line_id uuid;
   accepted numeric; damaged numeric; quarantined numeric; physical numeric; prior numeric;
   lot_code text; unit_cost numeric; currency text; source_supplier uuid; source_destination uuid;
-  source_config uuid; source_status text; source_currency text; po_currency text; source_quantity numeric;
+  source_config uuid; source_status text; source_line_state text; source_currency text; po_currency text; source_quantity numeric;
   expected jsonb; expected_total numeric; allocation record; lot_status text; event_id uuid;
   result jsonb;
 begin
@@ -119,6 +124,15 @@ begin
       where nullif(x->>'purchase_order_line_id','') is not null) order by id
   loop perform e10.lock_purchase_order(p_org,allocation.id); end loop;
 
+  -- Lock every mutable physical dependency globally by class and ID before the
+  -- final authority reread. Later per-line locks are therefore reentrant only.
+  perform 1 from public.e10_inventory_items i where i.organization_id=p_org and i.id in(
+    select x->>'inventory_item_id' from jsonb_array_elements(p_lines) x) order by i.id for update;
+  perform 1 from public.e10_expected_inventory_allocations ea where ea.organization_id=p_org and ea.id in(
+    select (a->>'id')::uuid from jsonb_array_elements(p_lines) x
+    cross join lateral jsonb_array_elements(case when jsonb_typeof(x->'expected_allocations')='array'
+      then x->'expected_allocations' else '[]'::jsonb end) a) order by ea.id for update;
+
   if auth.uid() is distinct from actor
     or not exists(select 1 from public.e10_organizations where id=p_org and status='active')
     or not e10.is_org_member(p_org) or not e10.has_org_cap(p_org,'act.create_receiving')
@@ -133,6 +147,18 @@ begin
 
   for line_json in select x from jsonb_array_elements(p_lines) x order by (x->>'line_no')::integer loop
     begin
+      if jsonb_typeof(line_json) is distinct from 'object'
+        or jsonb_typeof(line_json->'line_no') is distinct from 'number'
+        or jsonb_typeof(line_json->'configuration_version_id') is distinct from 'string'
+        or jsonb_typeof(line_json->'inventory_item_id') is distinct from 'string'
+        or jsonb_typeof(line_json->'accepted_quantity') is distinct from 'number'
+        or jsonb_typeof(line_json->'damaged_quantity') is distinct from 'number'
+        or jsonb_typeof(line_json->'quarantined_quantity') is distinct from 'number'
+        or (line_json ? 'actual_unit_cost' and jsonb_typeof(line_json->'actual_unit_cost') not in('number','null'))
+        or (line_json ? 'currency' and jsonb_typeof(line_json->'currency') not in('string','null'))
+        or (line_json ? 'expected_allocations' and jsonb_typeof(line_json->'expected_allocations')<>'array') then
+        raise exception using errcode='22023',message='receipt_line_payload_invalid';
+      end if;
       line_no:=(line_json->>'line_no')::integer;
       config_id:=(line_json->>'configuration_version_id')::uuid;
       item_id:=line_json->>'inventory_item_id';
@@ -162,15 +188,24 @@ begin
     if exists(select 1 from jsonb_array_elements(expected) x group by (x->>'id')::uuid having count(*)>1) then
       raise exception using errcode='22023',message='duplicate_expected_allocation';
     end if;
+    if exists(select 1 from jsonb_array_elements(expected) x
+      where jsonb_typeof(x) is distinct from 'object'
+        or jsonb_typeof(x->'id') is distinct from 'string'
+        or jsonb_typeof(x->'quantity') is distinct from 'number'
+        or (x->>'quantity')::numeric<=0
+        or (x->>'quantity') in('NaN','Infinity','-Infinity')) then
+      raise exception using errcode='22023',message='expected_allocation_payload_invalid';
+    end if;
 
     if po_line_id is not null then
-      select po.supplier_id,po.destination_location_id,pol.configuration_version_id,po.status,po.currency,pol.ordered_quantity
-        into source_supplier,source_destination,source_config,source_status,po_currency,source_quantity
+      select po.supplier_id,po.destination_location_id,pol.configuration_version_id,po.status,po.currency,pol.ordered_quantity,pol.state
+        into source_supplier,source_destination,source_config,source_status,po_currency,source_quantity,source_line_state
       from public.e10_purchase_order_lines pol join public.e10_purchase_orders po
         on po.organization_id=pol.organization_id and po.id=pol.purchase_order_id
       where pol.organization_id=p_org and pol.id=po_line_id;
-      if not found or source_supplier<>p_supplier_id or source_destination<>p_destination_location_id
-        or source_config<>config_id or source_status not in('submitted','approved') then
+      if not found or source_supplier is distinct from p_supplier_id or source_destination is distinct from p_destination_location_id
+        or source_config is distinct from config_id or source_status not in('submitted','approved')
+        or source_line_state is distinct from 'active' then
         raise exception using errcode='42501',message='purchase_order_line_access_denied';
       end if;
       select coalesce(sum(a.allocated_quantity),0) into prior
@@ -187,7 +222,7 @@ begin
       from public.e10_supplier_invoice_lines il join public.e10_supplier_invoices si
         on si.organization_id=il.organization_id and si.id=il.supplier_invoice_id
       where il.organization_id=p_org and il.id=invoice_line_id and il.state='active';
-      if not found or source_supplier<>p_supplier_id or source_config<>config_id
+      if not found or source_supplier is distinct from p_supplier_id or source_config is distinct from config_id
         or source_status not in('draft','reviewed','approved') or source_quantity is null
         or currency is not null and source_currency<>currency
         or po_line_id is not null and source_currency<>po_currency then
@@ -235,7 +270,6 @@ begin
     end if;
     for allocation in select (x->>'id')::uuid id,(x->>'quantity')::numeric quantity
       from jsonb_array_elements(expected) x order by (x->>'id')::uuid loop
-      if allocation.quantity<=0 then raise exception using errcode='22023',message='expected_allocation_quantity_must_be_positive'; end if;
       perform 1 from public.e10_expected_inventory_allocations ea where ea.organization_id=p_org and ea.id=allocation.id
         and ea.purchase_order_line_id=po_line_id and ea.destination_location_id=p_destination_location_id
         and ea.status='open' and ea.fulfilled_quantity+allocation.quantity<=ea.expected_quantity for update;
@@ -253,22 +287,24 @@ begin
         where organization_id=p_org and id=item_id;
       perform set_config('e10.emit','on',true);
       insert into public.e10_inventory_movements(workspace_id,item_id,movement_type,on_hand_delta,reserved_delta,
-        source_entity_type,source_entity_id,source_action,actor_uid,reason_code,note,idempotency_key,meta,organization_id)
+        source_entity_type,source_entity_id,source_action,actor_uid,reason_code,note,idempotency_key,meta,organization_id,created_at)
       values('shared',item_id,'intake',accepted,0,'stock_receipt_line',line_id::text,'receive',actor,'intake',
         'accepted receipt quantity',p_org::text||':receive-batch:'||p_idempotency_key||':'||line_no,
         jsonb_build_object('receipt_id',receipt_id,'receipt_line_id',line_id,'lot_id',lot_id,
-          'purchase_order_line_id',po_line_id,'invoice_line_id',invoice_line_id,'command',p_idempotency_key),p_org)
+          'purchase_order_line_id',po_line_id,'invoice_line_id',invoice_line_id,'command',p_idempotency_key),p_org,
+        coalesce(p_received_at,now()))
       returning id into movement_id;
       update public.e10_stock_receipt_lines set inventory_movement_id=movement_id
         where organization_id=p_org and id=line_id;
     else
       event_id:=gen_random_uuid();
+      perform set_config('e10.receipt_evidence','on',true);
       insert into public.e10_commercial_events(id,organization_id,event_type,event_schema_version,subject_type,subject_id,
-        occurred_at,occurred_at_precision,idempotency_key,source_kind,source_reference,source_event_id,correlation_id,
+        occurred_at,occurred_at_precision,idempotency_key,source_kind,source_connection_id,source_reference,source_event_id,correlation_id,
         evidence_quality,payload,created_by,request_fingerprint)
-      values(event_id,p_org,'receipt',1,'receipt',receipt_id::text,coalesce(p_received_at,now()),'exact',
-        p_org::text||':receipt-batch-event:'||p_idempotency_key||':'||line_no,'manual',
-        'stock_receipt_line:'||line_id::text,line_id::text,receipt_id::text,'operator_asserted',
+      values(event_id,p_org,'receipt',1,'inventory_item',item_id,coalesce(p_received_at,now()),'exact',
+        p_org::text||':receipt-batch-event:'||p_idempotency_key||':'||line_no,'native','receipt-ledger',
+        'stock_receipt_line:'||line_id::text,line_id::text,receipt_id::text,'native_system',
         jsonb_build_object('receipt_id',receipt_id::text,'receipt_line_id',line_id,'lot_id',lot_id,
           'movement_id',null,'purchase_order_line_id',po_line_id,'invoice_line_id',invoice_line_id,
           'command',p_idempotency_key,'physical_received',physical,'accepted_quantity',accepted),actor,
@@ -293,6 +329,35 @@ grant execute on function public.e10_org_receive_batch(uuid,uuid,uuid,timestampt
 
 comment on function public.e10_org_receive_batch(uuid,uuid,uuid,timestamptz,jsonb,text) is
   'Bounded source-neutral physical receipt writer. Does not approve invoices, recognize charges, allocate landed cost, pay, settle, or create credits.';
+
+create or replace function e10.normalize_commercial_event_envelope() returns trigger
+language plpgsql security definer set search_path=public as $$
+begin
+  if new.source_kind='native' then
+    if new.inventory_movement_id is null and not(
+      current_setting('e10.receipt_evidence',true)='on' and new.event_type='receipt'
+      and new.source_connection_id='receipt-ledger' and nullif(btrim(new.source_event_id),'') is not null
+      and new.subject_type='inventory_item') then
+      raise exception using errcode='42501',message='native_evidence_requires_inventory_movement';
+    end if;
+    new.evidence_quality:='native_system';
+    new.source_connection_id:=coalesce(nullif(btrim(new.source_connection_id),''),
+      case when new.inventory_movement_id is not null then 'inventory-ledger' else 'receipt-ledger' end);
+    new.source_event_id:=coalesce(nullif(btrim(new.source_event_id),''),new.inventory_movement_id::text);
+    new.correlation_id:=coalesce(nullif(btrim(new.correlation_id),''),nullif(btrim(new.source_reference),''),
+      new.inventory_movement_id::text);
+  elsif new.source_kind='system' then
+    raise exception using errcode='42501',message='system_evidence_requires_trusted_writer';
+  elsif new.source_kind='import' and new.evidence_quality='operator_asserted' then
+    new.evidence_quality:='imported_unreviewed';
+  end if;
+  if new.source_kind<>'native' and not e10.valid_commercial_event_payload(new.event_type,new.payload) then
+    raise exception using errcode='22023',message='event_payload_invalid_for_schema';
+  end if;
+  return new;
+end $$;
+revoke all on function e10.normalize_commercial_event_envelope() from public,anon,authenticated;
+grant execute on function e10.normalize_commercial_event_envelope() to service_role;
 
 -- Enrich native receipt evidence with the exact physical source correlations.
 -- The unique movement index keeps this at one event for each accepted line.
@@ -364,7 +429,7 @@ returns jsonb language sql stable security definer set search_path=public as $$
   from public.e10_receipt_po_allocations a
   join public.e10_stock_receipt_lines rl on(rl.organization_id,rl.id)=(a.organization_id,a.receipt_line_id)
   cross join lateral e10.receipt_line_effective_quantities(rl.organization_id,rl.id) q
-  where a.organization_id=p_org
+  where a.organization_id=p_org and q.effective_accepted>0
  ),received as(
   select purchase_order_line_id,
    sum(case when allocated_total<=accepted_quantity then allocated_quantity when n=1 then accepted_quantity end)accepted_quantity,
@@ -399,7 +464,7 @@ returns jsonb language sql stable security definer set search_path=public as $$
   from public.e10_receipt_po_allocations a
   join public.e10_stock_receipt_lines rl on(rl.organization_id,rl.id)=(a.organization_id,a.receipt_line_id)
   cross join lateral e10.receipt_line_effective_quantities(rl.organization_id,rl.id) q
-  where a.organization_id=p_org
+  where a.organization_id=p_org and q.effective_accepted>0
  ),received as(
   select purchase_order_line_id,
    sum(case when allocated_total<=accepted_quantity then allocated_quantity when n=1 then accepted_quantity end)accepted_quantity,
