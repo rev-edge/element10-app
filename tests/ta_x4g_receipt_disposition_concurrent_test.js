@@ -5,7 +5,7 @@ const CONN=process.env.E10_DB_URL||'postgresql://postgres:postgres@127.0.0.1:543
 const org='e1000000-0000-4000-8000-0000000000a6';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const x=Object.fromEntries(['user','role','supplier','location','product','config'].map(k=>[k,randomUUID()]));
-x.run=randomUUID();x.items=['compete','cas','dispwin','revwin','auth','replay','corrdisp','corrrev','location','org'].map(k=>`x4g-${k}-${x.run}`);
+x.run=randomUUID();x.session=randomUUID();x.items=['compete','cas','dispwin','revwin','auth','replay','corrdisp','corrrev','location','org','reserveauth'].map(k=>`x4g-${k}-${x.run}`);
 const jwt=JSON.stringify({sub:x.user,role:'authenticated'});
 const line=item=>[{line_no:1,configuration_version_id:x.config,inventory_item_id:item,accepted_quantity:0,damaged_quantity:0,quarantined_quantity:3,expected_allocations:[]}];
 async function auth(c){await c.query('select set_config($1,$2,true)',['request.jwt.claims',jwt]);await c.query('set local role authenticated');}
@@ -33,6 +33,7 @@ async function cleanup(c){
  await c.query('delete from public.e10_locations where organization_id=$1 and id=$2',[org,x.location]);
  await c.query('delete from public.e10_suppliers where organization_id=$1 and id=$2',[org,x.supplier]);
  await c.query('delete from public.e10_organization_memberships where organization_id=$1 and user_id=$2',[org,x.user]);
+ await c.query('delete from public.e10_break_sessions where organization_id=$1 and id=$2',[org,x.session]);
  await c.query('delete from public.e10_organization_role_permissions where organization_id=$1 and role_id=$2',[org,x.role]);
  await c.query('delete from public.e10_organization_roles where organization_id=$1 and id=$2',[org,x.role]);
  await c.query('delete from auth.users where id=$1',[x.user]);
@@ -45,7 +46,7 @@ async function main(){
   await cleanup(setup);
   await setup.query("insert into auth.users(id,instance_id,aud,role,email,created_at,updated_at)values($1,'00000000-0000-0000-0000-000000000000','authenticated','authenticated',$2,now(),now())",[x.user,`x4g-${x.run}@example.invalid`]);
   await setup.query("insert into public.e10_organization_roles(id,organization_id,key,name,is_system)values($1,$2,$3,'X4g race',false)",[x.role,org,`x4g-${x.run}`]);
-  await setup.query("insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed)values($1,$2,'act.create_receiving',true),($1,$2,'act.resolve_recovery',true)",[org,x.role]);
+  await setup.query("insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed)values($1,$2,'act.create_receiving',true),($1,$2,'act.resolve_recovery',true),($1,$2,'act.reserve_inventory',true)",[org,x.role]);
   await setup.query("insert into public.e10_organization_memberships(organization_id,user_id,role_id,status)values($1,$2,$3,'active')",[org,x.user,x.role]);
   await setup.query("insert into public.e10_suppliers(id,organization_id,code,name,status)values($1,$2,$3,'X4g supplier','active')",[x.supplier,org,`X4G-${x.run}`]);
   await setup.query("insert into public.e10_locations(id,organization_id,code,name,status)values($1,$2,$3,'X4g location','active')",[x.location,org,`X4G-${x.run}`]);
@@ -53,6 +54,7 @@ async function main(){
   await setup.query("insert into public.e10_product_masters(id,organization_id,name,status)values($1,$2,'X4g product','active')",[x.product,org]);
   await setup.query("insert into public.e10_product_configurations(id,organization_id,product_master_id,name,status)values($1,$2,$3,'Each','active')",[x.config,org,x.product]);
   await setup.query("insert into public.e10_product_configuration_versions(id,organization_id,configuration_id,version_no,state,packaging_kind,base_unit,base_units_per_package)values($1,$2,$1,1,'active','each','each',1)",[x.config,org]);
+  await setup.query("insert into public.e10_break_sessions(id,name,streamer_uid,organization_id,source_show_ref)values($1,'X4g reserve auth',$2,$3,$4)",[x.session,x.user,org,`x4g-${x.run}`]);
   for(const item of x.items)await setup.query('insert into public.e10_inventory_items(id,name,qty,organization_id)values($1,$2,0,$3)',[item,item,org]);
 
   // Competing dispositions serialize on the receipt. The first consumes two of
@@ -143,6 +145,17 @@ async function main(){
   await A.query('begin');await A.query('select id from public.e10_stock_receipts where organization_id=$1 and id=$2 for update',[org,orgReceipt.receipt_id]);await B.query('begin');await auth(B);const orgPid=(await B.query('select pg_backend_pid() pid')).rows[0].pid;let orgError;
   const orgCall=dispose(B,orgReceipt,'accept',1,null,0,'organization suspended',`x4g-${x.run}-org-disposition`).catch(e=>{orgError=e;});await waitForLock(setup,orgPid,'organization suspension');await setup.query("update public.e10_organizations set status='suspended' where id=$1",[org]);await A.query('commit');await orgCall;await B.query('rollback').catch(()=>{});
   if(!orgError||orgError.code!=='42501'||orgError.message!=='receipt_disposition_denied')throw new Error(`organization suspension escaped ${orgError&&orgError.code}:${orgError&&orgError.message}`);await setup.query("update public.e10_organizations set status='active' where id=$1",[org]);
+
+  // Reserve authority is reread after the canonical lot advisory wait and
+  // before inspecting a deliberately divergent receipt-backed projection.
+  const reserveAuth=await receive(setup,x.items[10],`x4g-${x.run}-reserveauth-receive`);await setup.query('begin');await auth(setup);await dispose(setup,reserveAuth,'accept',2,null,0,'reserve auth stock',`x4g-${x.run}-reserveauth-disposition`);await setup.query('commit');
+  const reserveLot=reserveAuth.lines[0].lot_id;await setup.query('update public.e10_inventory_lots set accepted_quantity=accepted_quantity+1 where organization_id=$1 and id=$2',[org,reserveLot]);
+  await A.query('begin');await A.query("select pg_advisory_xact_lock(hashtextextended($1::text||'|lot|'||$2::text,0))",[org,reserveLot]);
+  await B.query('begin');await auth(B);const reserveAuthPid=(await B.query('select pg_backend_pid() pid')).rows[0].pid;let reserveAuthError;
+  const reserveAuthCall=B.query('select public.e10_org_lot_reserve($1,$2,1,$3,$4)',[org,reserveLot,x.session,`x4g-${x.run}-reserveauth-reserve`]).catch(e=>{reserveAuthError=e;});
+  await waitForLock(setup,reserveAuthPid,'reserve post-lock authority');await setup.query("delete from public.e10_organization_role_permissions where organization_id=$1 and role_id=$2 and capability='act.reserve_inventory'",[org,x.role]);await A.query('commit');await reserveAuthCall;await B.query('rollback').catch(()=>{});
+  if(!reserveAuthError||reserveAuthError.code!=='42501'||reserveAuthError.message!=='reserve_inventory_denied')throw new Error(`reserve post-lock authority leaked projection ${reserveAuthError&&reserveAuthError.code}:${reserveAuthError&&reserveAuthError.message}`);
+  const reserveResidue=(await setup.query("select (select count(*) from public.e10_lot_reservations where organization_id=$1 and lot_id=$2) reservations,(select count(*) from public.e10_inventory_movements where organization_id=$1 and idempotency_key=$3) movements",[org,reserveLot,`${org}:lot-reserve:x4g-${x.run}-reserveauth-reserve`])).rows[0];if(Number(reserveResidue.reservations)!==0||Number(reserveResidue.movements)!==0)throw new Error(`reserve revocation residue ${JSON.stringify(reserveResidue)}`);
   console.log(`TA-X4g disposition races: PASS (initial/CAS/reversal, correction both directions, authority/location/org rereads, replay; waiter pid=${orgPid})`);
  }finally{
   await A.query('rollback').catch(()=>{});await B.query('rollback').catch(()=>{});await setup.query('rollback').catch(()=>{});

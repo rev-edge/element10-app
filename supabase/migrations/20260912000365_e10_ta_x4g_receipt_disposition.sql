@@ -144,6 +144,10 @@ begin
     raise exception using errcode='42501',message='reserve_inventory_denied';
   end if;
   perform pg_advisory_xact_lock(hashtextextended(p_org::text||'|lot|'||p_lot_id::text,0));
+  if auth.uid() is null or not exists(select 1 from public.e10_organizations where id=p_org and status='active')
+    or not e10.is_org_member(p_org) or not e10.has_org_cap(p_org,'act.reserve_inventory') then
+    raise exception using errcode='42501',message='reserve_inventory_denied';
+  end if;
   perform e10.assert_receipt_lot_projection(p_org,p_lot_id);
   return public._e10_org_lot_reserve_x4b(p_org,p_lot_id,p_quantity,p_break_session_id,p_idempotency_key);
 end $$;
