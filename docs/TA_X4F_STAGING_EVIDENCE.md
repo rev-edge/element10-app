@@ -146,9 +146,10 @@ auth_leaked_password_protection WARN=1
 ```
 
 The new command table adds one expected deny-by-default RLS/no-policy INFO.
-The authenticated security-definer count remains 144. The new public RPC is
-intentionally authenticated-executable and self-authorizing. No unexpected
-client table or helper-function exposure exists.
+The authenticated security-definer count increased from 143 to 144 for the new
+reviewed public RPC. It is intentionally authenticated-executable and
+self-authorizing. No unexpected client table or helper-function exposure
+exists.
 
 Performance advisors:
 
@@ -185,5 +186,7 @@ The transaction was rolled back. No production write occurred.
 - X4g remains separate and must prove disposition-accepted reversal quantities,
   terminal post-reversal disposition denial, and reversal/disposition atomicity.
 
-X4f is complete through staging and frozen pending independent staging
-acceptance. X4g must not begin before that acceptance.
+The independent reviewer accepted the X4f staging gate against evidence commit
+`f911b2bb45ed67fc215beb0205ebe2185263b9b8` and implementation commit
+`239a47e20ee9506af193a11d6175602f34fc00a1`. X4f is complete through staging
+and frozen. X4g may proceed under the approved remainder contract.
