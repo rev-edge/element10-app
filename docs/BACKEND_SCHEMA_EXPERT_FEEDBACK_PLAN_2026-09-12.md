@@ -771,6 +771,29 @@ passed; the default-privilege probe passed with zero anonymous or PUBLIC
 executable functions. Database lint reported only pre-existing findings in
 older functions and no finding in this checkpoint's objects.
 
+### C2: governed typed custom fields
+
+Status: implemented and locally verified 2026-09-12. Awaiting review before C3.
+
+Migration `20260912171646_e10_schema_review_c2_governed_custom_fields.sql`
+adds organization-owned definitions, controlled terms and exactly-one-type
+values. Supported object families are catalog variants, checklists, inventory
+items, unique items, product masters, product configurations and versions,
+customers, suppliers and locations. Platform references may receive an
+organization overlay, while organization-owned targets are verified against
+the same organization before a value can be written.
+
+Definitions govern data type, unit, cardinality, indexing mode and optional
+field-level read/write capabilities. A missing write capability is fail-closed
+to organization admins; a declared capability must be held. Direct client
+writes remain closed and the authenticated RPC validates each typed value.
+Raw JSON is not rewritten.
+
+The clean local census found no populated keys in card, player or inventory
+extension bags, so this checkpoint performs no speculative backfill. A future
+environment-authorized census may nominate keys, but promotion still requires
+an explicit definition, type and reconciliation proof.
+
 ## Appendix: exact base-table JSON inventory
 
 ```text
