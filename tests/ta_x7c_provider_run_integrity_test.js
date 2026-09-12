@@ -46,15 +46,15 @@ async function main() {
       [x.session, x.org, x.user],
     );
     await c.query(
-      "insert into public.e10_presence_collection_policies(organization_id,policy_version,source_class,provider_key,enabled,notice_version,heartbeat_expiry_seconds,min_event_interval_ms,max_events_per_minute,retention_interval,coverage_label,effective_from)values($1,1,'authorized_platform','provider-a',true,'n1',300,0,60,interval '30 days','fixture','2026-01-01')",
+      "insert into public.e10_presence_collection_policies(organization_id,policy_version,source_class,provider_key,enabled,notice_version,heartbeat_expiry_seconds,min_event_interval_ms,max_events_per_minute,retention_interval,coverage_label,effective_from)values($1,1,'authorized_platform','whatnot',true,'n1',300,0,60,interval '30 days','fixture','2026-01-01')",
       [x.org],
     );
     await c.query(
-      "insert into public.e10_provider_presence_normalization_policy_decisions(id,organization_id,provider_key,revision,action,effective_from,effective_through,heartbeat_expiry,maximum_late_arrival,collection_policy_version,reason,evidence,idempotency_key,request_fingerprint)values($1,$2,'provider-a',1,'enable','2026-01-01','2027-01-01',interval '5 minutes',interval '1 day',1,'fixture','{}','policy','fp')",
+      "insert into public.e10_provider_presence_normalization_policy_decisions(id,organization_id,provider_key,revision,action,effective_from,effective_through,heartbeat_expiry,maximum_late_arrival,collection_policy_version,reason,evidence,idempotency_key,request_fingerprint)values($1,$2,'whatnot',1,'enable','2026-01-01','2027-01-01',interval '5 minutes',interval '1 day',1,'fixture','{}','policy','fp')",
       [x.policy, x.org],
     );
     await c.query(
-      "insert into public.e10_session_presence_streams(id,organization_id,session_id,source_class,provider_key,subject_key,connection_id,platform_attendee_key,identity_status,collection_policy_version,notice_version,coverage_label,retention_expires_at)values($1,$2,$3,'authorized_platform','provider-a','attendee','connection','attendee','unresolved',1,'n1','fixture','2027-01-01')",
+      "insert into public.e10_session_presence_streams(id,organization_id,session_id,source_class,provider_key,subject_key,connection_id,platform_attendee_key,identity_status,collection_policy_version,notice_version,coverage_label,retention_expires_at)values($1,$2,$3,'authorized_platform','whatnot','attendee','connection','attendee','unresolved',1,'n1','fixture','2027-01-01')",
       [x.stream, x.org, x.session],
     );
     await c.query(
@@ -62,12 +62,12 @@ async function main() {
       [x.segment, x.org, x.stream],
     );
     await c.query(
-      "insert into public.e10_session_presence_events(id,organization_id,stream_id,segment_id,event_sequence,event_kind,server_received_at,provider_occurred_at,provider_event_id,provider_key,evidence,request_fingerprint)values($1,$2,$3,$4,1,'join','2026-01-02 10:00Z','2026-01-02 10:00Z','event-a','provider-a','{}','event-fp')",
+      "insert into public.e10_session_presence_events(id,organization_id,stream_id,segment_id,event_sequence,event_kind,server_received_at,provider_occurred_at,provider_event_id,provider_key,evidence,request_fingerprint)values($1,$2,$3,$4,1,'join','2026-01-02 10:00Z','2026-01-02 10:00Z','event-a','whatnot','{}','event-fp')",
       [x.event, x.org, x.stream, x.segment],
     );
     const run =
-      "insert into public.e10_provider_presence_normalization_runs(id,organization_id,provider_key,policy_decision_id,window_from,window_to,observation_cutoff,input_reporting_revision,dependency_fingerprint,algorithm_version,status,input_event_count,interval_count,quarantine_count,idempotency_key,request_fingerprint)values($1,$2,'provider-a',$3,'2026-01-01','2026-02-01','2026-02-01',1,$4,'provider-presence-v1','building',1,1,0,$5,'run-fp')";
-    if(!await denied(c.query(run.replace("'provider-a'","'provider-b'"),[randomUUID(),x.org,x.policy,"c".repeat(64),"wrong-provider"]),"23503","provider_normalization_run_identity_invalid"))throw Error("policy/provider mismatch accepted");
+      "insert into public.e10_provider_presence_normalization_runs(id,organization_id,provider_key,policy_decision_id,window_from,window_to,observation_cutoff,input_reporting_revision,dependency_fingerprint,algorithm_version,status,input_event_count,interval_count,quarantine_count,idempotency_key,request_fingerprint)values($1,$2,'whatnot',$3,'2026-01-01','2026-02-01','2026-02-01',1,$4,'provider-presence-v1','building',1,1,0,$5,'run-fp')";
+    if(!await denied(c.query(run.replace("'whatnot'","'provider-b'"),[randomUUID(),x.org,x.policy,"c".repeat(64),"wrong-provider"]),"23503","provider_normalization_run_identity_invalid"))throw Error("policy/provider mismatch accepted");
     if(!await denied(c.query(run.replace("'building'","'complete'"),[randomUUID(),x.org,x.policy,"d".repeat(64),"complete-insert"]),"23503","provider_normalization_run_identity_invalid"))throw Error("completed insert bypassed seal");
     await c.query(run, [x.run, x.org, x.policy, "a".repeat(64), "run-a"]);
     await c.query(
