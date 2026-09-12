@@ -4,7 +4,7 @@ do $$
 declare
   o uuid:='e1000000-0000-4000-8000-0000000000a6'; u uuid:=gen_random_uuid(); v_role uuid:=gen_random_uuid();
   supplier uuid:=gen_random_uuid(); location uuid:=gen_random_uuid(); product uuid:=gen_random_uuid(); config uuid:=gen_random_uuid(); config2 uuid:=gen_random_uuid();
-  po uuid:=gen_random_uuid(); pol uuid:=gen_random_uuid(); pol2 uuid:=gen_random_uuid(); pol3 uuid:=gen_random_uuid(); pol4 uuid:=gen_random_uuid(); expected uuid:=gen_random_uuid(); expected2 uuid:=gen_random_uuid(); r1 jsonb; r2 jsonb; rr jsonb; zero_r jsonb; zero_line uuid;
+  po uuid:=gen_random_uuid(); pol uuid:=gen_random_uuid(); pol2 uuid:=gen_random_uuid(); pol3 uuid:=gen_random_uuid(); pol4 uuid:=gen_random_uuid(); pol5 uuid:=gen_random_uuid(); expected uuid:=gen_random_uuid(); expected2 uuid:=gen_random_uuid(); r1 jsonb; r2 jsonb; rr jsonb; zero_r jsonb; zero_line uuid;
   receipt2 uuid; lot2 uuid; session uuid:=gen_random_uuid(); lr uuid; c bigint; q numeric; st text;
 begin
   insert into auth.users(id,instance_id,aud,role,email,created_at,updated_at)
@@ -26,7 +26,7 @@ begin
   insert into public.e10_product_configuration_versions(id,organization_id,configuration_id,version_no,state,packaging_kind,base_unit,base_units_per_package)
     values(config2,o,config2,1,'active','case','each',10);
   insert into public.e10_inventory_items(id,name,qty,organization_id) values
-    ('x4d-item','X4d Item',0,o),('x4d-zero-damage','X4d Zero Damage',0,o),('x4d-zero-accept','X4d Zero Accept',0,o);
+    ('x4d-item','X4d Item',0,o),('x4d-null-alloc','X4d Null Allocation',0,o),('x4d-zero-damage','X4d Zero Damage',0,o),('x4d-zero-accept','X4d Zero Accept',0,o);
   insert into public.e10_purchase_orders(id,organization_id,supplier_id,destination_location_id,status,currency,created_by)
     values(po,o,supplier,location,'approved','CAD',u);
   insert into public.e10_purchase_order_lines(id,organization_id,purchase_order_id,configuration_version_id,line_no,ordered_quantity)
@@ -34,7 +34,7 @@ begin
   insert into public.e10_purchase_order_lines(id,organization_id,purchase_order_id,configuration_version_id,line_no,ordered_quantity)
     values(pol2,o,po,config2,2,10);
   insert into public.e10_purchase_order_lines(id,organization_id,purchase_order_id,configuration_version_id,line_no,ordered_quantity)
-    values(pol3,o,po,config,3,2),(pol4,o,po,config,4,2);
+    values(pol3,o,po,config,3,2),(pol4,o,po,config,4,2),(pol5,o,po,config,5,1);
   insert into public.e10_expected_inventory_allocations(id,organization_id,purchase_order_line_id,destination_location_id,expected_quantity,planning_reference)
     values(expected,o,pol,location,5,'x4d-demand-1'),(expected2,o,pol,location,5,'x4d-demand-2');
   insert into public.e10_break_sessions(id,name,streamer_uid,organization_id,source_show_ref)
@@ -54,6 +54,9 @@ begin
   if not (r1->>'replay')::boolean then raise exception 'receipt replay missing'; end if;
   begin perform public.e10_org_receive_po_line(o,pol,'x4d-item',5,0,1,'x4d-lot-1','2026-09-10T20:00:00Z','[]','x4d-receive-1'); raise exception 'receipt mismatch accepted';
   exception when sqlstate '22023' then null; end;
+  r2:=public.e10_org_receive_po_line(o,pol5,'x4d-null-alloc',1,0,0,'x4d-null-alloc','2026-09-10T20:30:00Z',null,'x4d-null-alloc');
+  r2:=public.e10_org_receive_po_line(o,pol5,'x4d-null-alloc',1,0,0,'x4d-null-alloc','2026-09-10T20:30:00Z','[]','x4d-null-alloc');
+  if not(r2->>'replay')::boolean then raise exception 'legacy NULL allocation did not replay as empty array';end if;
   r2:=public.e10_org_receive_po_line(o,pol,'x4d-item',4,0,0,'x4d-lot-2','2026-09-10T21:00:00Z',
     jsonb_build_array(jsonb_build_object('id',expected,'quantity',1),jsonb_build_object('id',expected2,'quantity',3)),'x4d-receive-2');
   receipt2:=(r2->>'receipt_id')::uuid;
