@@ -1,8 +1,8 @@
 # Current project status
 
 Reconciled September 12, 2026 against canonical `foundation-a6` at
-`ce463d6dbf51e4174c1224b9122d835691ce0766`, Track A's chat through
-17:42:12 UTC, committed migrations/tests and the evidence documents below.
+`481ea1ab452a1e196d59b19526ea4ecfdc19309f`, committed migrations/tests,
+explicit staging verification and the evidence documents below.
 
 This is the current progress index. BOARD.md remains acceptance authority.
 Older dated plans, gap descriptions and completion messages are historical
@@ -20,15 +20,15 @@ of the R-series or of the whole application.
 | Workstream | Evidence-backed status | Next action |
 | --- | --- | --- |
 | X1-X8 original foundation | Implemented; original unconditional acceptance superseded by external conditional acceptance | Close remaining external findings; do not rebuild the foundation |
-| R0 review preservation | Report and scope snapshots committed at `43e1bf5`; trace claims reopened | Complete final finding-to-evidence closure during R8 |
+| R0 review preservation | Report and scope snapshots preserved; authoritative trace reconciled to current executable evidence | Preserve the audit trail |
 | R1 inventory corrections | Independently accepted through staging at runtime `5641b18`, evidence `06d1cde` | Preserve accepted regression coverage |
-| R2 customer corrections | Final local correction and complete proof implemented after `436de45`; ready for renewed independent review | Run exact-head CI and explicit staging verification in R8; do not self-accept |
-| R3 intake provenance/deduplication | No closure evidence found in later commits or chat | Correct source claims, cross-batch identity and correction/reimport race |
-| R4 visibility/authority | No closure evidence found | Verify internal comments, multi-membership catalog reads and suspended-org reader/writer coverage |
-| R5 immutable history and identity writers | Partially overlapped by C1's checklist promotion; not closed | Map promotion against each missing X1 creation path; verify configuration/provider history immutability separately |
-| R6 validation/error/replay contracts | No complete closure evidence found | Close remaining IMPL-14 subitems individually |
-| R7 scope dispositions | Later schema work addresses selected architecture concerns, not every SCOPE item | Record each remaining policy/compatibility disposition without reopening already decided technical choices |
-| R8 final verification | Not complete | Combined regression, exact-head CI, staging evidence and renewed independent review |
+| R2 customer corrections | Implemented with all final-lock authority, native/import reconciliation and no-write loser proofs | Await exact-head CI and final independent verdict |
+| R3 intake provenance/deduplication | Implemented with source claims, cross-batch identity and correction/reimport race evidence | Await final independent verdict |
+| R4 visibility/authority | Implemented with audience, multi-membership and suspended-organization reader/writer proofs | Await final independent verdict |
+| R5 immutable history and identity writers | Implemented with immutable configuration/provider mapping history and forced CAS races | Await final independent verdict |
+| R6 validation/error/replay contracts | Implemented, including explicit pre-R6 stored-fingerprint receipt/reservation/event replay | Await final independent verdict |
+| R7 scope dispositions | Implemented with legacy-truncate closure and retained compatibility boundaries | Await final independent verdict |
+| R8 final verification | Runtime and staging evidence complete; exact-head CI and renewed independent review in progress | Do not self-accept |
 | C1-C9 schema expert corrections | All nine completed and locally verified by builder; final record `ce463d6` | Independent review and environment verification of this newer delta; no staging rollout is claimed |
 | Multilingual backend | Requirements queued; no implementation evidence found | Preferences, translated labels/aliases, locale/fallback and stable message contracts after external corrections |
 | Track B | Existing prototype work plus receiving preflight; latest accessible review still requires contract reconciliation | Refresh receiving design against current engine before implementation; owner retains UI acceptance |
@@ -38,8 +38,8 @@ R2 now has executable proof for all twelve final-lock authority races, reviewed
 same-slot `new_transaction` resale, symmetric native/import duplicate
 prevention, official totals, altered and omitted scope, managed versus trusted
 non-managed native evidence, released-after-approval denial and exact replay.
-It remains unaccepted until independent review and the R8 exact-head CI/staging
-gate complete.
+The combined R2-R8 result remains unaccepted until exact-head CI and renewed
+independent review complete.
 
 ## Newer work that closes or narrows old gaps
 

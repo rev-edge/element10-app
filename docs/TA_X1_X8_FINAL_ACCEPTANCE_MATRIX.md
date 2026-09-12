@@ -2,8 +2,9 @@
 
 Date: 2026-09-12
 
-Status: ACCEPTED through staging. F1 through F5 are closed by independent
-review at `4fd7a88c21861921774647cdc4812ec18d9a2c9f`.
+Status: R2-R8 corrective runtime and staging evidence complete at
+`481ea1ab452a1e196d59b19526ea4ecfdc19309f`; exact-head CI and renewed
+independent acceptance are pending. This document does not self-accept.
 
 This is the authoritative completion audit for the owner-approved Track A
 backend expansion. It supersedes only stale progress labels in planning and
@@ -29,12 +30,12 @@ Audited against:
 - `docs/TA_X8_REVIEW_CHECKLIST.md`
 - `docs/TA_X8_IMPLEMENTATION_CONTRACT.md`
 
-The implementation consists of 108 additive `202609*` migrations and 118
-`tests/ta_x*` files, including F3, plus the final F4 focused tests. Current
-implementation/test head `bf99230063bd81c14b215254b7fd257fda14f399`
-passed the entire registered CI suite in run `34684368998`. F4 staging evidence
-head `f359fb0da66c206b79647977ba63bd5b698a939f` records the final applied
-runtime checkpoint.
+The implementation consists of 145 additive `202609*` migrations and 137
+top-level `tests/ta_*` files. Current implementation/test head is
+`481ea1ab452a1e196d59b19526ea4ecfdc19309f`; exact-head CI run `34717509375`
+is in progress. Staging project `csmbjfmoxkexcyssntbg` contains all 145 local
+migration names and matches the local schema manifest except two historical
+comment-only definitions.
 
 ## Batch reconciliation
 
@@ -83,7 +84,7 @@ as implemented functionality.
 | Bounded reads | PASS through explicit limits, stable scope-bound cursors, full-dataset filtering before pagination/aggregation, source/grain/unit/coverage metadata, and unavailable rather than fabricated values. |
 | Explicit staging target | PASS. Remote writes used the staging session pooler for project `csmbjfmoxkexcyssntbg`; no bare production-linked push was used. |
 | Staging cleanup | PASS. Batch evidence records rollback or cleanup, foreign-key/object census, and zero batch fixture residue. X8c ends with zero consumers, commands, acknowledgements and active claims. |
-| Current CI | PASS. Run `34685754343` completed successfully at final reviewed head `4fd7a88c21861921774647cdc4812ec18d9a2c9f`; schema-gate and deploy were correctly skipped. |
+| Current CI | PENDING. Exact-head run `34717509375` targets `481ea1ab452a1e196d59b19526ea4ecfdc19309f`; this row must be updated only after completion. |
 | Production untouched | PASS. Latest read-only proof reports no `e10` schema, 12 migrations through `20260716110000`, inventory `35/41/9`, and no X8c objects. |
 
 ## Explicit non-claims and retained decision boundaries
@@ -129,9 +130,7 @@ their framework constraints when a later slice is designed.
 
 ## Audit conclusion
 
-The repository, CI, staging ledger, executable tests, evidence packets and
-read-only production sentinels prove completion of the approved TA-X1 through
-TA-X8 backend foundation through staging. Independent final review accepted the
-complete scope at `4fd7a88c21861921774647cdc4812ec18d9a2c9f` after closing F5's
-schema-manifest and exact integration-handoff requirements. The exclusions and
-future compatibility seams above remain explicit non-claims.
+The repository, staging ledger, executable tests and evidence packets establish
+the implemented TA-X1 through TA-X8 backend foundation through staging. Final
+R2-R8 acceptance remains pending exact-head CI and renewed independent review.
+The exclusions and future compatibility seams above remain explicit non-claims.
