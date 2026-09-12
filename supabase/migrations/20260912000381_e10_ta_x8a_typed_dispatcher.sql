@@ -28,7 +28,7 @@ begin
   if arg_key=any(array['after_created','from','to','observation_cutoff','as_of','closing_cutoff','opening_cutoff','observed_from','observed_to','after_occurred_at'])then begin if arg_type<>'string'or not isfinite((arg_value#>>'{}')::timestamptz)then raise exception using errcode='22023',message='x8_query_args_invalid';end if;exception when others then raise exception using errcode='22023',message='x8_query_args_invalid';end;end if;
   if arg_key='after_week_start'then begin if arg_type<>'string'or not isfinite((arg_value#>>'{}')::date)then raise exception using errcode='22023',message='x8_query_args_invalid';end if;exception when others then raise exception using errcode='22023',message='x8_query_args_invalid';end;end if;
   if arg_key='filters'and arg_type<>'object'then raise exception using errcode='22023',message='x8_query_args_invalid';end if;
-  if arg_key='source_connections'and(arg_type<>'array'or exists(select 1 from jsonb_array_elements(arg_value)e where jsonb_typeof(e)<>'string'))then raise exception using errcode='22023',message='x8_query_args_invalid';end if;
+  if arg_key='source_connections'and(arg_type<>'array'or exists(select 1 from jsonb_array_elements(arg_value)e where jsonb_typeof(e)not in('string','null')))then raise exception using errcode='22023',message='x8_query_args_invalid';end if;
   if arg_key<>all(array['limit','week_start','freshness_days','expected_dataset_revision','filters','source_connections'])and arg_type<>'string'then raise exception using errcode='22023',message='x8_query_args_invalid';end if;
  end loop;
 end $$;
@@ -67,7 +67,7 @@ returns jsonb language sql immutable security definer set search_path=public as 
   when'inventory.lifecycle'then(select jsonb_agg(jsonb_build_object('unique_item_id',v->'unique_item_id','episode_key',v->'episode_key','origin_event_id',v->'origin_event_id'))from jsonb_array_elements(coalesce(p_result->'items','[]'))v)
   when'inventory.unique_item_evidence'then(select jsonb_agg(jsonb_build_object('kind',v->'kind','evidence_id',v->'id'))from jsonb_array_elements(coalesce(p_result->'items','[]'))v)
   when'inventory.valuation_coverage'then(select jsonb_agg(jsonb_strip_nulls(jsonb_build_object('unique_item_id',v->'unique_item_id','origin_event_id',v->'origin_event_id','valuation_evidence_id',v->'valuation_evidence_id','actual_cost_evidence_id',v->'actual_cost_evidence_id')))from jsonb_array_elements(coalesce(p_result->'items','[]'))v)
-  when'market.screener'then(select jsonb_agg(jsonb_strip_nulls(jsonb_build_object('entity_id',v->'entity_id','catalog_variant_id',v->'catalog_variant_id','release_id',v->'release_id','subject_id',v->'subject_id')))from jsonb_array_elements(coalesce(p_result->'rows','[]'))v)
+  when'market.screener'then(select jsonb_agg(jsonb_strip_nulls(jsonb_build_object('cohort_key',v->'cohort_key','entity_id',v->'entity_id','catalog_variant_id',v->'catalog_variant_id','release_id',v->'release_id','subject_id',v->'subject_id','color_family_term_id',v->'color_family_term_id','finish_family_term_id',v->'finish_family_term_id')))from jsonb_array_elements(coalesce(p_result->'rows','[]'))v)
   when'market.observation_drilldown'then(select jsonb_agg(jsonb_build_object('observation_id',v->'observation_id'))from jsonb_array_elements(coalesce(p_result->'rows','[]'))v)
   else'[]'::jsonb end,'[]'::jsonb)
 $$;
