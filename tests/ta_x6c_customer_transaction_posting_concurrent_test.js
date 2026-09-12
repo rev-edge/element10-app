@@ -6,8 +6,8 @@ const x = { run: randomUUID(), user: randomUUID(), role: randomUUID(), customer:
 const timeout = (p, ms = 8000) => Promise.race([p, new Promise((_, reject) => setTimeout(() => reject(new Error(`posting race timeout ${ms}ms`)), ms))]);
 
 async function main() {
-  const s = new Client({ connectionString: db }), a = new Client({ connectionString: db }), b = new Client({ connectionString: db });
-  await Promise.all([s.connect(), a.connect(), b.connect()]);
+  const s = new Client({ connectionString: db }), a = new Client({ connectionString: db }), b = new Client({ connectionString: db }), c = new Client({ connectionString: db });
+  await Promise.all([s.connect(), a.connect(), b.connect(), c.connect()]);
   try {
     await s.query("insert into auth.users(id,instance_id,aud,role,email,created_at,updated_at) values($1,'00000000-0000-0000-0000-000000000000','authenticated','authenticated',$2,now(),now())", [x.user, `${x.run}@x.invalid`]);
     await s.query("insert into public.e10_organization_roles(id,organization_id,key,name,is_system) values($1,$2,$3,'X6c Race',false)", [x.role, org, x.run]);
@@ -52,7 +52,27 @@ async function main() {
     await a.query('commit');
     const postAfterCorrection = await timeout(Promise.allSettled([postPromise]));
     if (postAfterCorrection[0].status !== 'rejected' || postAfterCorrection[0].reason.code !== '40001') throw new Error(`reattribution race ${JSON.stringify(postAfterCorrection)}`);
-    console.log('TA-X6c concurrent posting: PASS (reverse-order locks, one winner, no deadlock, source/activity once)');
+
+    await a.query("select public.e10_org_attribute_customer_activity($1,$2,$3,'restore for authority race','{}',$4)", [org, activity2, x.customer, `${x.run}-attr-restore`]);
+    await b.query('select public.e10_org_reopen_customer_transaction_draft($1,$2,1,$3,$4)', [org, d3, 'authority re-review', `${x.run}-reopen-three`]);
+    await b.query('select public.e10_org_approve_customer_transaction_draft($1,$2,1,$3)', [org, d3, `${x.run}-reapprove-three`]);
+    await s.query('begin');
+    await s.query('select 1 from public.e10_customer_transaction_drafts where id=$1 for update', [d3]);
+    const authorityPost = b.query('select public.e10_org_post_customer_transaction_draft($1,$2,1,$3)', [org, d3, `${x.run}-post-authority`]);
+    waiting = false;
+    for (let i = 0; i < 40; i++) {
+      const q = await c.query("select exists(select 1 from pg_locks where pid=$1 and locktype='tuple' and not granted) or exists(select 1 from pg_stat_activity where pid=$1 and wait_event_type='Lock') waiting", [bPid]);
+      if (q.rows[0].waiting) { waiting = true; break; }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    if (!waiting) throw new Error('post did not wait on its exact draft-row lock');
+    await c.query("delete from public.e10_organization_role_permissions where organization_id=$1 and role_id=$2 and capability='act.post_customer_transactions'", [org, x.role]);
+    await s.query('commit');
+    const deniedPost = await timeout(Promise.allSettled([authorityPost]));
+    if (deniedPost[0].status !== 'rejected' || deniedPost[0].reason.code !== '42501') throw new Error(`post-lock authority race ${JSON.stringify(deniedPost)}`);
+    const deniedResidue = (await c.query('select count(*)::int n from public.e10_customer_transactions where source_draft_id=$1', [d3])).rows[0].n;
+    if (deniedResidue !== 0) throw new Error(`post-lock authority residue ${deniedResidue}`);
+    console.log(`TA-X6c concurrent posting: PASS (reverse-order locks, one winner, source/activity once; post-lock revoke pid=${bPid}, zero effect)`);
   } finally {
     await a.query('rollback').catch(() => {}); await b.query('rollback').catch(() => {});
     await s.query('set session_replication_role=replica').catch(() => {});
@@ -72,7 +92,7 @@ async function main() {
     await s.query('delete from public.e10_organization_memberships where user_id=$1', [x.user]).catch(() => {});
     await s.query('delete from public.e10_organization_roles where id=$1', [x.role]).catch(() => {});
     await s.query('delete from auth.users where id=$1', [x.user]).catch(() => {});
-    await Promise.all([s.end(), a.end(), b.end()]);
+    await Promise.all([s.end(), a.end(), b.end(), c.end()]);
   }
 }
 main().catch(e => { console.error(e.stack); process.exit(1); });
