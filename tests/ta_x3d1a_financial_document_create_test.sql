@@ -183,10 +183,15 @@ declare
   invoice_id uuid:=((select value from x3d1a_results where key='invoice')->>'supplier_invoice_id')::uuid;
   credit_id uuid:=((select value from x3d1a_results where key='credit')->>'supplier_credit_id')::uuid;
   connected_id uuid:=((select value from x3d1a_results where key='connected')->>'supplier_invoice_id')::uuid;
+  invoice_line_id uuid:=((select value from x3d1a_results where key='invoice')#>>'{line_id_map,0,stored_id}')::uuid;
+  credit_line_id uuid:=((select value from x3d1a_results where key='credit')#>>'{line_id_map,0,stored_id}')::uuid;
   baseline jsonb:=(select value from x3d1a_results where key='baseline');
 begin
   if (select id from public.e10_supplier_invoice_lines where supplier_invoice_id=invoice_id)
+      <>invoice_line_id
+    or (select value from x3d1a_results where key='invoice')#>>'{line_id_map,0,client_id}'
       <>'d3100000-0000-4000-8000-000000000031'
+    or invoice_line_id='d3100000-0000-4000-8000-000000000031'
     or (select line_amount from public.e10_supplier_invoice_lines where supplier_invoice_id=invoice_id)
       <>123.45678901234567890123456789 then
     raise exception 'invoice stable line identity or numeric precision lost';
@@ -206,13 +211,16 @@ begin
     or (select received_snapshot->'lines'->0->>'id'
       from public.e10_financial_document_reconciliation_cases
       where existing_document_id=invoice_id and identity_kind='manual')
-      is distinct from 'd3100000-0000-4000-8000-000000000031'
+      is distinct from invoice_line_id::text
     or exists(select 1 from public.e10_financial_document_commands
       where idempotency_key in ('x3d1a-invalid-existing-quantity','x3d1a-invalid-existing-unit-cost')) then
     raise exception 'bounded incoming snapshot missing or invalid-line request wrote evidence';
   end if;
   if (select count(*) from public.e10_supplier_credit_lines
-      where supplier_credit_id=credit_id and id='d3100000-0000-4000-8000-000000000032')<>1 then
+      where supplier_credit_id=credit_id and id=credit_line_id)<>1
+    or (select value from x3d1a_results where key='credit')#>>'{line_id_map,0,client_id}'
+      <>'d3100000-0000-4000-8000-000000000032'
+    or credit_line_id='d3100000-0000-4000-8000-000000000032' then
     raise exception 'credit stable line identity lost';
   end if;
   if (select count(*) from public.e10_purchase_orders)<>(baseline->>'purchase_orders')::bigint
