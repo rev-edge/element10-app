@@ -1,0 +1,134 @@
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6a1_verify_bundle_test.sql
+FAIL 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6a2_module_access_test.sql
+FAIL 0s node tests/a6a3_verify_concurrent_test.js
+PASS 1s bash tests/a6b_reindex_recovery_test.sh
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6b_fk_corrective_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6c0_gate_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6c2_cutover_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6c2_1_authority_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6c3_workspace_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6c4_platform_identity_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6c4_disclosures_test.sql
+PASS 2s bash tests/a6c4_cas_race.sh
+PASS 9s node tests/ta_x6d_customer_transaction_adjustments_test.js
+PASS 8s node tests/ta_x6e_customer_resolution_test.js
+PASS 8s node tests/ta_x6f_posted_customer_attribution_test.js
+PASS 8s node tests/ta_x6g_native_break_sale_test.js
+PASS 1s node tests/ta_x6g_native_break_sale_adversarial_test.js
+PASS 2s node tests/ta_x6h_attendance_foundation_test.js
+PASS 9s node tests/ta_x6h_attendance_concurrent_test.js
+PASS 3s node tests/ta_x7a_attendance_reporting_test.js
+PASS 0s node tests/ta_x7b_spend_control_test.js
+PASS 0s node tests/ta_x7b_financial_permission_concurrent_test.js
+PASS 12s node tests/ta_x7b_spend_reporting_test.js
+PASS 0s node tests/ta_x7b_spend_reporting_concurrent_test.js
+PASS 1s node tests/ta_x7b_spend_lifecycle_test.js
+PASS 53s node tests/ta_x7f_customer_spend_grid_test.js
+PASS 1s node tests/ta_x7f_concurrent_auth_test.js
+PASS 0s node tests/ta_x7c_provider_policy_test.js
+PASS 0s node tests/ta_x7c_provider_policy_concurrent_test.js
+PASS 0s node tests/ta_x7c_provider_run_integrity_test.js
+PASS 0s node tests/ta_x7c_provider_dependency_fingerprint_test.js
+PASS 1s node tests/ta_x7c_provider_normalization_runner_test.js
+PASS 0s node tests/ta_x7c_provider_normalization_edges_test.js
+PASS 8s node tests/ta_x7c_provider_normalization_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x7d0_facet_governance_test.sql
+PASS 1s node tests/ta_x7d0_facet_writers_test.js
+PASS 0s node tests/ta_x7d0_facet_writer_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x7d0_market_evidence_test.sql
+PASS 0s node tests/ta_x7d0_market_evidence_writers_test.js
+PASS 1s node tests/ta_x7d0_market_evidence_writer_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x7d1_canonical_projection_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x7d2_market_query_helpers_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x7d2_query_context_test.sql
+PASS 2s node tests/ta_x7d2_query_context_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x7d2_read_snapshot_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x7d2_catalog_entity_projection_test.sql
+PASS 1s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x7d2_request_validation_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x7d2_screener_cohorts_test.sql
+PASS 2s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x7d2_public_screener_test.sql
+PASS 1s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x7d2_cross_product_rookie_psa9_test.sql
+PASS 1s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x7d2_public_drilldown_test.sql
+PASS 8s node tests/ta_x7d3_market_read_concurrent_test.js
+PASS 1s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x7e0_inventory_evidence_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x7e1_inventory_lifecycle_test.sql
+PASS 6s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x7e2_inventory_valuation_test.sql
+PASS 2s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x7e_temporal_regression_test.sql
+PASS 2s node tests/ta_x7e_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x8a_query_context_test.sql
+PASS 1s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x8a_typed_dispatcher_test.sql
+PASS 1s node tests/ta_x8a_context_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x8b_action_draft_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x8b_commit_delegation_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x8b_permission_matrix_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x8b_customer_preview_permissions_test.sql
+PASS 1s node tests/ta_x8b_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x8c_outbox_claim_ack_test.sql
+PASS 5s node tests/ta_x8c_outbox_concurrent_test.js
+PASS 1s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a7_hostile_matrix_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/step8_bounded_reads_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x1_identity_foundation_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_f4_identity_ambiguity_review_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_f4_identity_ambiguity_review_guards_test.sql
+PASS 0s node tests/ta_f4_identity_ambiguity_review_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x1b_player_affiliations_test.sql
+PASS 0s node tests/ta_x1b_player_affiliation_concurrent_test.js
+PASS 1s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x2_location_supplier_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3a_purchasing_documents_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3b_document_revisions_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3c_purchase_order_lifecycle_test.sql
+PASS 0s node tests/ta_x3c_purchase_order_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3d0_financial_workflow_foundation_test.sql
+PASS 8s node tests/ta_x3d0_manual_identity_concurrent_test.js
+PASS 1s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3d1a_financial_document_create_test.sql
+PASS 0s node tests/ta_x3d1a_financial_document_create_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3d1b_financial_document_amend_test.sql
+PASS 0s node tests/ta_x3d1b_financial_document_amend_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3d1c_financial_document_transitions_test.sql
+PASS 1s node tests/ta_x3d1c_financial_document_transitions_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3d1d_financial_allocations_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3d1d_allocation_lifecycle_test.sql
+PASS 0s node tests/ta_x3d1d_financial_allocations_concurrent_test.js
+PASS 0s node tests/ta_x3d1d_allocation_workflow_races_test.js
+PASS 1s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3e_commercial_comments_test.sql
+PASS 0s node tests/ta_x3e_commercial_comments_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3f_supplier_workspace_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x4a_lot_reservation_foundation_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x4b_lot_reserve_test.sql
+PASS 1s node tests/ta_x4b_lot_reserve_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x4c_lot_transition_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x4d_receipt_posting_test.sql
+PASS 0s node tests/ta_x4d_receipt_reverse_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x4e_receipt_batch_test.sql
+PASS 1s node tests/ta_x4e_invoice_void_receipt_concurrent_test.js
+PASS 0s node tests/ta_x4e_receipt_locking_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x4f_receipt_reversal_batch_test.sql
+PASS 1s node tests/ta_x4f_receipt_reversal_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x4g_receipt_disposition_test.sql
+PASS 0s node tests/ta_x4g_receipt_disposition_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x4h_noncard_core_test.sql
+PASS 1s node tests/ta_x4h_noncard_reservation_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x5a_typed_intake_lifecycle_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x5b_intake_lifecycle_writers_test.sql
+PASS 0s node tests/ta_x5b_writers_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x5c_native_movement_events_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x5d_intake_commit_test.sql
+PASS 0s node tests/ta_x5d_intake_commit_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x5e_observation_corrections_test.sql
+PASS 1s node tests/ta_x5e_observation_corrections_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x5f_atomic_correction_import_test.sql
+PASS 0s node tests/ta_x5f_atomic_correction_import_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x5g_explicit_correction_source_test.sql
+PASS 0s node tests/ta_x5g_explicit_correction_source_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x5h_catalog_variant_observations_test.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x5i_versioned_event_envelope_test.sql
+PASS 0s node tests/ta_x5i_event_concurrent_test.js
+PASS 1s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x6a_customer_activity_foundation_test.sql
+PASS 0s node tests/ta_x6a_customer_activity_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x6b_customer_identity_attribution_test.sql
+PASS 0s node tests/ta_x6b_customer_identity_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x6c_customer_transaction_posting_test.sql
+PASS 8s node tests/ta_x6c_customer_transaction_posting_concurrent_test.js
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/probe_defpriv.sql
+PASS 0s psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/a6c1_rls_test.sql
+DONE
