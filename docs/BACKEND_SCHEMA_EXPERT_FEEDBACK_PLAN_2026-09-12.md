@@ -900,6 +900,26 @@ period is invented. Tests prove contextual batches, exact ordinary deltas,
 restricted redaction, absence of plaintext secrets, append-only protection,
 authorized/unauthorized reads and exclusion of authoritative domain histories.
 
+### C8: measured catalog term query index
+
+Status: implemented and locally verified 2026-09-12. Awaiting review before C9.
+
+Migration `20260912173830_e10_schema_review_c8_catalog_term_index.sql` adds one
+generic, term-led partial index over asserted catalog facet decisions. A
+rollback-only local measurement used 50,000 variants and 100,000 facet
+decisions. Before the index, the color-term report scanned all 100,000
+decisions, removed 75,000 rows, touched 3,125 buffers and completed in 8.715 ms.
+With the index, PostgreSQL selected `e10_variant_facet_term_assert_idx`, touched
+1,827 buffers and completed in 7.888 ms. Timing is supporting evidence; the
+stable acceptance signal is the index-backed predicate replacing a full scan.
+
+The index is namespace-generic `(facet_key, term_key, variant_id, id)` and
+limited to `action = 'assert'`. It supports color, finish and later governed
+facets without inventing one index per vocabulary. The existing successor index
+continues to serve the current-decision anti-join. No player-specific index was
+added because the subject relation already has `(player_id, variant_id)`. No
+JSON expression index was added.
+
 ## Appendix: exact base-table JSON inventory
 
 ```text
