@@ -19,7 +19,7 @@ begin
  then raise exception using errcode='22023',message='action_proposal_container_invalid';end if;
  perform e10.x8_validate_json(p_values,0);perform e10.x8_validate_json(p_field_provenance,0);perform e10.x8_validate_json(p_source_references,0);
  if p_operation='purchase_order.create'then
-  perform e10.x8_assert_args(p_values,array['supplier_id','destination_location_id','order_number','currency','expected_at','lines']);
+  if exists(select 1 from jsonb_object_keys(p_values)as supplied(key)where not(supplied.key=any(array['supplier_id','destination_location_id','order_number','currency','expected_at','lines'])))then raise exception using errcode='22023',message='action_proposal_unknown_key';end if;
   if p_values?'supplier_id'and jsonb_typeof(p_values->'supplier_id')not in('string','null')or p_values?'destination_location_id'and jsonb_typeof(p_values->'destination_location_id')not in('string','null')or p_values?'currency'and jsonb_typeof(p_values->'currency')not in('string','null')or p_values?'expected_at'and jsonb_typeof(p_values->'expected_at')not in('string','null')or p_values?'lines'and jsonb_typeof(p_values->'lines')not in('array','null')then raise exception using errcode='22023',message='action_proposal_type_invalid';end if;
   if coalesce(p_values->>'currency','')!~'^[A-Z]{3}$'then missing:=array_append(missing,'currency');end if;
   if p_values->>'expected_at'is not null and not isfinite((p_values->>'expected_at')::timestamptz)then raise exception using errcode='22023',message='action_proposal_time_invalid';end if;
@@ -31,7 +31,7 @@ begin
   if state is null or state->>'status'<>'active'or not coalesce((state->>'receivable')::boolean,false)then missing:=array_append(missing,'destination_location_id');else refs:=refs||jsonb_build_array(state);end if;
   if jsonb_typeof(p_values->'lines')is distinct from'array'or jsonb_array_length(p_values->'lines')not between 1 and 200 then missing:=array_append(missing,'lines');
   else for line in select value from jsonb_array_elements(p_values->'lines')loop n:=n+1;
-   perform e10.x8_assert_args(line,array['id','line_no','configuration_version_id','ordered_quantity','estimated_unit_cost']);
+   if jsonb_typeof(line)<>'object'or exists(select 1 from jsonb_object_keys(line)as supplied(key)where not(supplied.key=any(array['id','line_no','configuration_version_id','ordered_quantity','estimated_unit_cost'])))then raise exception using errcode='22023',message='action_proposal_line_unknown_key';end if;
    if jsonb_typeof(line->'line_no')is distinct from'number'or jsonb_typeof(line->'ordered_quantity')is distinct from'number'then raise exception using errcode='22023',message='action_proposal_line_type_invalid';end if;
    q:=(line->>'ordered_quantity')::numeric;if q<=0 or q::text in('NaN','Infinity','-Infinity')then missing:=array_append(missing,format('lines[%s].ordered_quantity',n));end if;
    begin u:=nullif(line->>'configuration_version_id','')::uuid;exception when invalid_text_representation then raise exception using errcode='22023',message='action_proposal_configuration_invalid';end;
@@ -39,7 +39,7 @@ begin
    if state is null or state->>'state'<>'active'then missing:=array_append(missing,format('lines[%s].configuration_version_id',n));else refs:=refs||jsonb_build_array(state);end if;
   end loop;end if;
  else
-  perform e10.x8_assert_args(p_values,array['customer_id','currency','occurred_at','precision','note','lines']);
+  if exists(select 1 from jsonb_object_keys(p_values)as supplied(key)where not(supplied.key=any(array['customer_id','currency','occurred_at','precision','note','lines'])))then raise exception using errcode='22023',message='action_proposal_unknown_key';end if;
   if coalesce(p_values->>'currency','')!~'^[A-Z]{3}$'then missing:=array_append(missing,'currency');end if;
   if coalesce(p_values->>'precision','')not in('exact','date','unknown')then missing:=array_append(missing,'precision');end if;
   if coalesce(p_values->>'note','')=''then missing:=array_append(missing,'note');end if;
@@ -48,6 +48,7 @@ begin
   if u is not null then select jsonb_build_object('relation','e10_customers','id',c.id,'status',c.status,'revision',c.revision)into state from public.e10_customers c where c.organization_id=p_org and c.id=u;if state is null or state->>'status'<>'active'then missing:=array_append(missing,'customer_id');else refs:=refs||jsonb_build_array(state);end if;else missing:=array_append(missing,'customer_id');end if;
   if jsonb_typeof(p_values->'lines')is distinct from'array'or jsonb_array_length(p_values->'lines')not between 1 and 100 then missing:=array_append(missing,'lines');
   else for line in select value from jsonb_array_elements(p_values->'lines')loop n:=n+1;
+   if jsonb_typeof(line)<>'object'or exists(select 1 from jsonb_object_keys(line)as supplied(key)where not(supplied.key=any(array['purchase_kind','sales_channel','location_id','source_session_reference','capture_source','source_connection_id','source_line_id','activity_observation_id','product_master_id','configuration_version_id','unique_item_id','break_session_id','break_slot_id','quantity','merchandise_gross','merchandise_discount','shipping_amount','tax_amount','raw_evidence'])))then raise exception using errcode='22023',message='action_proposal_line_unknown_key';end if;
    if coalesce(line->>'purchase_kind','')not in('retail','break','unclassified')then missing:=array_append(missing,format('lines[%s].purchase_kind',n));end if;
    if coalesce(line->>'capture_source','')not in('manual','import','native')then missing:=array_append(missing,format('lines[%s].capture_source',n));end if;
    if coalesce(btrim(line->>'source_line_id'),'')=''then missing:=array_append(missing,format('lines[%s].source_line_id',n));end if;
