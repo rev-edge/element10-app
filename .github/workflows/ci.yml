@@ -161,6 +161,10 @@ jobs:
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x7e2_inventory_valuation_test.sql
       - name: TA-R7 scope safety proof
         run: psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_r7_legacy_truncate_closure_test.sql
+      - name: TA-R8 focused evidence closure
+        run: |
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_r8_focused_evidence_test.sql
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x6c_customer_transaction_posting_test.sql
       - name: TA-X6h source-grained attendance evidence gate
         run: |
           node tests/ta_x6h_attendance_foundation_test.js

@@ -189,6 +189,13 @@ async function main() {
   const vdr=await bounded(variantDenied);pending=[];
   if(vdr.ok||vdr.error.code!=="42501")throw Error("variant subject-lock revocation escaped");
   await admin.query('insert into public.e10_platform_admins(user_id)values($1)',[x.user]);
+  const raceProvider="r5-race-"+run;
+  await locker.query("begin");await locker.query("select pg_advisory_xact_lock(hashtextextended($1,0))",["platform|x1-mapping|"+raceProvider+"|release|external"]);
+  const ma=settled(a.query("select e10_platform_review_catalog_identity_mapping($1,'release','external',null,$2,null,'candidate',null,'{}',$3)r",[raceProvider,x.release,"map-race-a-"+run]));
+  const mb=settled(b.query("select e10_platform_review_catalog_identity_mapping($1,'release','external',null,$2,null,'verified',1,'{}',$3)r",[raceProvider,x.release,"map-race-b-"+run]));
+  pending=[ma,mb];await blocked(ap,lp,"mapping revision A");await blocked(bp,lp,"mapping revision B");await locker.query("commit");
+  const maps=await bounded(Promise.all([ma,mb]));pending=[];
+  if(maps.some(z=>!z.ok)||maps.map(z=>Number(z.v.rows[0].r.mapping_revision)).sort().join(',')!=="1,2")throw Error("competing mapping revisions did not serialize");
   const mapKey = "map-" + run,
     provider = "r5-" + run;
   await locker.query("begin");
@@ -245,6 +252,7 @@ async function cleanup() {
     "delete from public.e10_catalog_identity_mappings where provider=$1",
     ["r5-" + run],
   );
+  await admin.query("delete from public.e10_catalog_identity_mappings where provider=$1",["r5-race-"+run]);
   await admin.query("delete from public.e10_catalog_variant_subjects where variant_id=$1",[x.variant]);
   await admin.query("delete from public.e10_catalog_variants where id=$1",[x.variant]);
   await admin.query("delete from public.e10_catalog_releases where id=$1", [
