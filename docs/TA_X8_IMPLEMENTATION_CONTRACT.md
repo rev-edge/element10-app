@@ -1,6 +1,6 @@
 # TA-X8 implementation contract
 
-Status: revision 2 proposed for independent review. No X8 migration is authorized by this
+Status: revision 3 proposed for independent review. No X8 migration is authorized by this
 document alone.
 
 Authorities:
@@ -500,8 +500,9 @@ Every mutation uses X8-command-lock then draft-lock ordering. Commit continues
 with the downstream advisory lock and canonical reference-row locks described
 above. Authorization is
 checked before target inspection and repeated after each blocking lock. Approval
-and commit require `current_revision=approved_revision=p_expected_revision` as
-appropriate. Commit derives an operation-namespaced ordinary idempotency key:
+requires the current draft revision; commit requires that same current revision
+to be the recorded approved revision, exactly as specified above. Commit derives
+an operation-namespaced ordinary idempotency key:
 `x8:<operation>:<draft UUID>:<revision>:<SHA-256 of X8 commit key>`. The caller
 cannot supply the downstream key. X8 stores that key and the exact ordinary
 result. Exact retry first rechecks current authority, then returns the stored
