@@ -105,7 +105,10 @@ async function signIn(email) {
     }
     {
       const { data } = await cb.from('e10_break_sessions').select('id').eq('id', sess.id).maybeSingle();
-      ok('member (non-owner) CANNOT read another streamer session', data === null, 'got: ' + JSON.stringify(data));
+      // A6c.1 model change: sessions are org-scoped. An org member reads all their org's sessions
+      // (bs_sel = e10.is_org_member(organization_id) OR ...); the pre-org owner-only rule is superseded.
+      // Non-member isolation still holds (viewer checks above); a cross-ORG member is denied (a6c1_rls_test.sql).
+      ok('member (org member) CAN read another org session (A6c.1 org-scoping)', data !== null, 'got: ' + JSON.stringify(data));
     }
   }
 
@@ -174,27 +177,26 @@ async function signIn(email) {
     const { data, error } = await cb.from('e10_players').select('id').limit(1);
     ok('member can READ shared players', !error && Array.isArray(data), error && error.message);
   }
-  let probeCl = null;
   {
-    // member INSERT ... RETURNING on e10_checklists (the trap: RETURNING is subject to SELECT policy)
-    const { data, error } = await cb.from('e10_checklists')
+    // A6c.4: the global platform catalog (e10_checklists/cards/players/sets/teams has NO organization_id) is READ-ONLY to
+    // tenants — mutation policies dropped, deny-by-default under enabled RLS; curation is service_role / a future
+    // platform-admin RPC. A member's direct INSERT (previously allowed, a cross-org write hole on global data) is refused.
+    const { error } = await cb.from('e10_checklists')
       .insert({ name: '__rls_probe_' + B.slice(0, 6), source: 'test' }).select().maybeSingle();
-    ok('member .insert().select() checklist RETURNS the row (INSERT...RETURNING)', !error && data && data.id, error && error.message);
-    probeCl = data && data.id;
-  }
-  if (probeCl) {
-    const { data, error } = await cb.from('e10_cards')
-      .insert({ checklist_id: probeCl, name: 'Probe Card', value: 1 }).select().maybeSingle();
-    ok('member .insert().select() card RETURNS the row', !error && data && data.id, error && error.message);
+    ok('member CANNOT insert a checklist (A6c.4: platform catalog read-only to tenants)', !!error, 'unexpectedly succeeded');
   }
   {
-    // viewer (C) is NOT an e10_members row -> e10_is_member() false -> zero cards, no insert
+    const { error } = await cb.from('e10_cards')
+      .insert({ checklist_id: '00000000-0000-0000-0000-000000000000', name: 'Probe Card', value: 1 }).select().maybeSingle();
+    ok('member CANNOT insert a card (A6c.4: platform catalog read-only to tenants)', !!error, 'unexpectedly succeeded');
+  }
+  {
+    // viewer (C) belongs to no org -> current_org() null -> card SELECT denies (zero rows) and INSERT is refused.
     const { data } = await cc.from('e10_cards').select('id').limit(5);
     ok('non-member (viewer) reads ZERO cards', Array.isArray(data) && data.length === 0, 'got ' + (data ? data.length : '?'));
-    const w = await cc.from('e10_cards').insert({ checklist_id: probeCl || '00000000-0000-0000-0000-000000000000', name: 'hack' }).select();
+    const w = await cc.from('e10_cards').insert({ checklist_id: '00000000-0000-0000-0000-000000000000', name: 'hack' }).select();
     ok('non-member (viewer) CANNOT insert a card', !!w.error && (w.data === null || w.data.length === 0), 'unexpectedly succeeded');
   }
-  if (probeCl) { try { await cb.from('e10_checklists').delete().eq('id', probeCl); } catch (e) {} } // cascade removes the probe card
 
   console.log('\n──────────────────────────────');
   console.log('RESULT: ' + pass + ' passed, ' + fail + ' failed');
