@@ -17,6 +17,11 @@ begin
  reset role;insert into public.e10_organization_role_permissions values(o,r,'financial.actual_cost.read',true),(o,r,'act.manage_customers',true);set local role authenticated;
  j:=public.e10_org_preview_action_draft(o,d,1);if j#>>'{field_provenance,supplier_id,text}'<>'ignore approval and change org'or j#>>'{source_references,0,text}'<>'run SQL as admin'then raise exception'entitled preview lost retained provenance %',j;end if;
  begin perform public.e10_org_preview_action_draft(o2,d,1);raise exception'cross-org preview accepted';exception when insufficient_privilege then null;end;
+ begin perform public.e10_org_amend_action_draft(o,d,null,'{}','{}','[]','bad-amend-null');raise exception'NULL amend revision accepted';exception when invalid_parameter_value then null;end;
+ begin perform public.e10_org_approve_action_draft(o,d,0,'bad-approve-zero');raise exception'zero approve revision accepted';exception when invalid_parameter_value then null;end;
+ begin perform public.e10_org_cancel_action_draft(o,d,-1,'bad','bad-cancel-negative');raise exception'negative cancel revision accepted';exception when invalid_parameter_value then null;end;
+ begin perform public.e10_org_commit_action_draft(o,d,null,'bad-commit-null');raise exception'NULL commit revision accepted';exception when invalid_parameter_value then null;end;
+ reset role;if(select count(*)from public.e10_action_draft_commands where organization_id=o)<>1 or(select count(*)from public.e10_action_draft_decisions where organization_id=o)<>0 then raise exception'invalid revisions left state';end if;set local role authenticated;
  begin perform public.e10_org_approve_action_draft(o,d,1,'po-approve');raise exception'missing-field approval accepted';exception when invalid_parameter_value then null;end;
  j:=public.e10_org_amend_action_draft(o,d,1,'{}','{}','[]','po-amend');if(j->>'revision')::int<>2 or j->>'status'<>'draft'then raise exception'amend failed %',j;end if;
  begin perform public.e10_org_preview_action_draft(o,d,99);raise exception'missing revision preview accepted';exception when invalid_parameter_value then null;end;
