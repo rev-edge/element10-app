@@ -16,8 +16,13 @@ begin
  insert into public.e10_players(id,name)values(player_id,'R6 player');
  perform set_config('request.jwt.claims',jsonb_build_object('sub',u,'role','authenticated')::text,true);set local role authenticated;
  set local timezone='America/Toronto';first_result:=public.e10_org_record_commercial_event(o,'listing_created','inventory_item',item,'2026-01-01T12:00:00Z','manual','r6','{"listing_id":"r6","channel":"test"}',null,'{}','r6-timezone');
+ set local role postgres;set local session_replication_role=replica;
+ update public.e10_commercial_events set request_fingerprint='pre-r6-event-fingerprint-v1'where organization_id=o and id=(first_result->>'event_id')::uuid;
+ set local session_replication_role=origin;
+ if not exists(select 1 from public.e10_commercial_events where organization_id=o and id=(first_result->>'event_id')::uuid and request_fingerprint='pre-r6-event-fingerprint-v1')then raise exception'pre-R6 event fixture not stored';end if;
+ set local role authenticated;
  set local timezone='Asia/Tokyo';second_result:=public.e10_org_record_commercial_event(o,'listing_created','inventory_item',item,'2026-01-01T12:00:00Z','manual','r6','{"listing_id":"r6","channel":"test"}',null,'{}','r6-timezone');
- if not(second_result->>'replay')::boolean or second_result->>'event_id'<>first_result->>'event_id'then raise exception'timezone-neutral event replay failed';end if;
+ if not(second_result->>'replay')::boolean or second_result->>'event_id'<>first_result->>'event_id'then raise exception'pre-R6 stored-fingerprint timezone-neutral event replay failed';end if;
  select count(*)into n from public.e10_org_find_customers(o,'%%',25);if n<>1 then raise exception'LIKE metacharacters were not literal: %',n;end if;
  begin perform public.e10_platform_propose_player_identity_review('r6','source','Source','manual','R6','1','{}','[{"player_id":"not-a-uuid","confidence_status":"unknown","evidence":{}}]','reason','{}','r6-f4');exception when sqlstate'22023'then denied:=true;end;if not denied then raise exception'malformed F4 UUID accepted';end if;denied:=false;
  begin perform public.e10_platform_review_variant_subject_context(null,variant_id,player_id,0,'assert','known',null,'manual_review','r6','reason','{}','r6-x1b');exception when sqlstate'22023'then denied:=true;end;if not denied then raise exception'non-subject context accepted';end if;

@@ -49,9 +49,16 @@ begin
     jsonb_build_array(jsonb_build_object('id',expected,'quantity',4)),'x4d-receive-1');
   perform set_config('role','postgres',true);
   if not (r1->>'ok')::boolean or (r1->>'replay')::boolean then raise exception 'first receipt failed: %',r1; end if;
+  -- Model an actually stored pre-R6 receipt fingerprint.  The current RPC must
+  -- replay from durable receipt facts, not require the post-R6 fingerprint.
+  set local session_replication_role=replica;
+  update public.e10_stock_receipts set request_fingerprint='pre-r6-receipt-fingerprint-v1'
+   where organization_id=o and idempotency_key='x4d-receive-1';
+  set local session_replication_role=origin;
+  if not exists(select 1 from public.e10_stock_receipts where organization_id=o and idempotency_key='x4d-receive-1' and request_fingerprint='pre-r6-receipt-fingerprint-v1')then raise exception 'pre-R6 receipt fixture not stored';end if;
   r1:=public.e10_org_receive_po_line(o,pol,'x4d-item',4,1,1,'x4d-lot-1','2026-09-10T20:00:00Z',
     jsonb_build_array(jsonb_build_object('id',expected,'quantity',4)),'x4d-receive-1');
-  if not (r1->>'replay')::boolean then raise exception 'receipt replay missing'; end if;
+  if not (r1->>'replay')::boolean then raise exception 'pre-R6 stored-fingerprint receipt replay missing'; end if;
   begin perform public.e10_org_receive_po_line(o,pol,'x4d-item',5,0,1,'x4d-lot-1','2026-09-10T20:00:00Z','[]','x4d-receive-1'); raise exception 'receipt mismatch accepted';
   exception when sqlstate '22023' then null; end;
   r2:=public.e10_org_receive_po_line(o,pol5,'x4d-null-alloc',1,0,0,'x4d-null-alloc','2026-09-10T20:30:00Z',null,'x4d-null-alloc');

@@ -65,6 +65,15 @@ begin
   camera_lot_id:=(result#>>'{lines,1,lot_id}')::uuid;
   result:=public.e10_org_lot_reserve_for_demand(o,lot_id,2,'manual','web-order-314','Non-card web order','x4h-reserve');
   reservation_id:=(result->>'reservation_id')::uuid;
+  -- Preserve the pre-R6 persisted fingerprint shape while replaying through
+  -- the current semantic reservation contract.
+  set local role postgres;
+  set local session_replication_role=replica;
+  update public.e10_lot_reservations set request_fingerprint='pre-r6-reservation-fingerprint-v1'
+   where organization_id=o and id=reservation_id;
+  set local session_replication_role=origin;
+  if not exists(select 1 from public.e10_lot_reservations where organization_id=o and id=reservation_id and request_fingerprint='pre-r6-reservation-fingerprint-v1')then raise exception 'pre-R6 reservation fixture not stored';end if;
+  set local role authenticated;
   replay:=public.e10_org_lot_reserve_for_demand(o,lot_id,2,'manual','web-order-314','Non-card web order','x4h-reserve');
   result:=public.e10_org_lot_reserve_for_demand(o,camera_lot_id,1,'sale_order','camera-order-1','Used camera order','x4h-camera-reserve');
   camera_reservation_id:=(result->>'reservation_id')::uuid;

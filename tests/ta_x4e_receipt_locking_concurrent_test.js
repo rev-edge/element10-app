@@ -11,7 +11,7 @@ const jwt=JSON.stringify({sub:x.user,role:'authenticated'});
 const line=(item,n)=>[{line_no:n,configuration_version_id:x.config,inventory_item_id:item,accepted_quantity:1,damaged_quantity:0,quarantined_quantity:0,expected_allocations:[]}];
 
 async function auth(c){await c.query('select set_config($1,$2,true)',['request.jwt.claims',jwt]);await c.query('set local role authenticated');}
-async function waitForLock(observer,pid,label){for(let i=0;i<500;i++){const q=await observer.query("select wait_event_type='Lock' waiting from pg_stat_activity where pid=$1",[pid]);if(q.rows[0]?.waiting)return;await sleep(10);}throw new Error(`${label} never established a real lock wait`);}
+async function waitForLock(observer,pid,holder,label){for(let i=0;i<500;i++){const q=await observer.query('select $2=any(pg_blocking_pids($1)) waiting',[pid,holder]);if(q.rows[0]?.waiting)return;await sleep(10);}throw new Error(`${label} never established a wait on exact holder ${holder}`);}
 async function bounded(promise,label){let timer;try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(`${label} timed out`)),8000);})]);}finally{clearTimeout(timer);}}
 async function cleanup(c){
   await c.query('set session_replication_role=replica');
@@ -36,13 +36,17 @@ async function cleanup(c){
   await c.query('delete from public.e10_organization_role_permissions where organization_id=$1 and role_id=$2',[org,x.role]);
   await c.query('delete from public.e10_organization_roles where organization_id=$1 and id=$2',[org,x.role]);
   await c.query('delete from auth.users where id=$1',[x.user]);
+  await c.query('delete from public.e10_audit_change_records where batch_id in(select id from public.e10_audit_change_batches where request_id=$1 or actor_user_id=$2)',[x.run,x.user]);
+  await c.query('delete from public.e10_audit_change_batches where request_id=$1 or actor_user_id=$2',[x.run,x.user]);
   await c.query('set session_replication_role=origin');
 }
+async function domainState(c){return (await c.query("select jsonb_build_object('receipts',(select count(*)from public.e10_stock_receipts where organization_id=$1 and idempotency_key like $2),'lines',(select count(*)from public.e10_stock_receipt_lines l join public.e10_stock_receipts r on(r.organization_id,r.id)=(l.organization_id,l.stock_receipt_id)where r.organization_id=$1 and r.idempotency_key like $2),'lots',(select count(*)from public.e10_inventory_lots where organization_id=$1 and inventory_item_id=any($3::text[])),'movements',(select count(*)from public.e10_inventory_movements where organization_id=$1 and item_id=any($3::text[])),'allocations',(select count(*)from public.e10_receipt_po_allocations where organization_id=$1 and purchase_order_line_id=$4),'commands',(select count(*)from public.e10_receipt_commands where organization_id=$1 and idempotency_key like $2),'events',(select count(*)from public.e10_commercial_events where organization_id=$1 and subject_id=any($3::text[]))) state",[org,`x4e-lock-${x.run}%`,[x.itemA,x.itemB,x.itemC],x.pol])).rows[0].state;}
 
 async function main(){
   const setup=new Client({connectionString:CONN}),A=new Client({connectionString:CONN}),B=new Client({connectionString:CONN});
   await Promise.all([setup.connect(),A.connect(),B.connect()]);
   try{
+    await setup.query("select set_config('e10.audit_request_id',$1,false)",[x.run]);
     await cleanup(setup);
     await setup.query("insert into auth.users(id,instance_id,aud,role,email,created_at,updated_at)values($1,'00000000-0000-0000-0000-000000000000','authenticated','authenticated',$2,now(),now())",[x.user,`x4e-lock-${x.run}@example.invalid`]);
     await setup.query("insert into public.e10_organization_roles(id,organization_id,key,name,is_system)values($1,$2,$3,'X4e lock',false)",[x.role,org,`x4e-${x.run}`]);
@@ -61,9 +65,10 @@ async function main(){
     // Same idempotency key: B demonstrably waits, then replays A's exact result.
     const sameKey=`x4e-lock-${x.run}-same`;
     await A.query('begin');await A.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[`${org}|receipt-any-command|${sameKey}`]);await auth(A);
+    const apid=(await A.query('select pg_backend_pid() pid')).rows[0].pid;
     await B.query('begin');await auth(B);const bpid=(await B.query('select pg_backend_pid() pid')).rows[0].pid;
     let bResult,bError;const bCall=B.query('select public.e10_org_receive_batch($1,$2,$3,$4::timestamptz,$5::jsonb,$6) r',[org,x.supplier1,x.location1,'2026-09-12T02:00:00Z',JSON.stringify(line(x.itemA,1)),sameKey]).then(q=>{bResult=q.rows[0].r;}).catch(e=>{bError=e;});
-    await waitForLock(setup,bpid,'same-key receipt');
+    await waitForLock(setup,bpid,apid,'same-key receipt');
     const aResult=(await A.query('select public.e10_org_receive_batch($1,$2,$3,$4::timestamptz,$5::jsonb,$6) r',[org,x.supplier1,x.location1,'2026-09-12T02:00:00Z',JSON.stringify(line(x.itemA,1)),sameKey])).rows[0].r;
     await A.query('commit');await bCall;await B.query('commit');
     if(bError||aResult.replay||!bResult.replay||aResult.receipt_id!==bResult.receipt_id)throw new Error(`same-key result mismatch A=${JSON.stringify(aResult)} B=${JSON.stringify(bResult)} E=${bError}`);
@@ -73,10 +78,11 @@ async function main(){
     await A.query('begin');await A.query('select id from public.e10_inventory_items where organization_id=$1 and id=$2 for update',[org,x.itemC]);
     await B.query('begin');await auth(B);const authPid=(await B.query('select pg_backend_pid() pid')).rows[0].pid;let authError;
     const authCall=B.query('select public.e10_org_receive_batch($1,$2,$3,now(),$4::jsonb,$5)',[org,x.supplier1,x.location1,JSON.stringify(line(x.itemC,1)),authKey]).catch(e=>{authError=e;});
-    await waitForLock(setup,authPid,'authority-reread receipt');
+    const authBefore=await domainState(setup);await waitForLock(setup,authPid,apid,'authority-reread receipt');
     await setup.query("delete from public.e10_organization_role_permissions where organization_id=$1 and role_id=$2 and capability='act.create_receiving'",[org,x.role]);
     await A.query('commit');await authCall;await B.query('rollback').catch(()=>{});
     if(!authError||authError.code!=='42501'||authError.message!=='create_receiving_denied')throw new Error(`post-wait revocation escaped ${authError&&authError.code}:${authError&&authError.message}`);
+    if(JSON.stringify(await domainState(setup))!==JSON.stringify(authBefore))throw new Error('capability-revoked batch changed receipt domain state');
     const residue=(await setup.query("select count(*) n from public.e10_stock_receipts where organization_id=$1 and idempotency_key=$2",[org,authKey])).rows[0].n;
     if(Number(residue)!==0)throw new Error('authority loser left receipt residue');
     await setup.query("insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed)values($1,$2,'act.create_receiving',true)",[org,x.role]);
@@ -87,10 +93,11 @@ async function main(){
     await A.query('begin');await A.query('select id from public.e10_inventory_items where organization_id=$1 and id=$2 for update',[org,x.itemC]);
     await B.query('begin');await auth(B);const locationPid=(await B.query('select pg_backend_pid() pid')).rows[0].pid;let locationError;
     const locationCall=B.query("select public.e10_org_receive_po_line($1,$2,$3,1,0,0,null,now(),'[]'::jsonb,$4)",[org,x.pol,x.itemC,locationKey]).catch(e=>{locationError=e;});
-    await waitForLock(setup,locationPid,'single-line destination reread');
+    const locationBefore=await domainState(setup);await waitForLock(setup,locationPid,apid,'single-line destination reread');
     await setup.query('delete from public.e10_location_role_permissions where organization_id=$1 and location_id=$2 and role_id=$3',[org,x.location1,x.role]);
     await A.query('commit');await locationCall;await B.query('rollback').catch(()=>{});
     if(!locationError||locationError.code!=='42501'||locationError.message!=='create_receiving_denied')throw new Error(`post-wait destination revocation escaped ${locationError&&locationError.code}:${locationError&&locationError.message}`);
+    if(JSON.stringify(await domainState(setup))!==JSON.stringify(locationBefore))throw new Error('location-revoked single receipt changed domain state');
     const singleResidue=(await setup.query("select count(*) n from public.e10_stock_receipts where organization_id=$1 and idempotency_key=$2",[org,locationKey])).rows[0].n;
     if(Number(singleResidue)!==0)throw new Error('single-line destination loser left receipt residue');
     await setup.query('insert into public.e10_location_role_permissions(organization_id,location_id,role_id,can_receive)values($1,$2,$3,true)',[org,x.location1,x.role]);
@@ -110,7 +117,7 @@ async function main(){
   }finally{
     await A.query('rollback').catch(()=>{});await B.query('rollback').catch(()=>{});await setup.query('rollback').catch(()=>{});
     await cleanup(setup);
-    const residue=await setup.query("select (select count(*)from public.e10_stock_receipts where organization_id=$1 and idempotency_key like $2)::int receipts,(select count(*)from public.e10_receipt_commands where organization_id=$1 and idempotency_key like $2)::int commands,(select count(*)from public.e10_inventory_items where organization_id=$1 and id=any($3::text[]))::int items,(select count(*)from public.e10_purchase_orders where organization_id=$1 and id=$4)::int purchase_orders,(select count(*)from auth.users where id=$5)::int users",[org,`x4e-lock-${x.run}%`,[x.itemA,x.itemB,x.itemC],x.po,x.user]);
+    const residue=await setup.query("select (select count(*)from public.e10_stock_receipts where organization_id=$1 and idempotency_key like $2)::int receipts,(select count(*)from public.e10_receipt_commands where organization_id=$1 and idempotency_key like $2)::int commands,(select count(*)from public.e10_inventory_items where organization_id=$1 and id=any($3::text[]))::int items,(select count(*)from public.e10_purchase_orders where organization_id=$1 and id=$4)::int purchase_orders,(select count(*)from auth.users where id=$5)::int users,(select count(*)from public.e10_audit_change_batches where request_id=$6 or actor_user_id=$5)::int audit_batches,(select count(*)from public.e10_audit_change_records where batch_id in(select id from public.e10_audit_change_batches where request_id=$6 or actor_user_id=$5))::int audit_records",[org,`x4e-lock-${x.run}%`,[x.itemA,x.itemB,x.itemC],x.po,x.user,x.run]);
     if(Object.values(residue.rows[0]).some(Number))throw new Error(`X4e cleanup residue ${JSON.stringify(residue.rows[0])}`);
     await Promise.all([A.end(),B.end(),setup.end()]);
   }
