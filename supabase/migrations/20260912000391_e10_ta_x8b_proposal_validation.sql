@@ -60,7 +60,7 @@ begin
   end loop;end if;
  end if;
  select coalesce(array_agg(distinct x order by x),'{}')into missing from unnest(missing)x;
- return jsonb_build_object('values',p_values,'missing_fields',to_jsonb(missing),'reference_state',refs,'reference_fingerprint',encode(digest(refs::text,'sha256'),'hex'));
+ return jsonb_build_object('values',p_values,'missing_fields',to_jsonb(missing),'reference_state',refs,'reference_fingerprint',encode(extensions.digest(convert_to(refs::text,'UTF8'),'sha256'),'hex'));
 exception when invalid_text_representation or numeric_value_out_of_range then raise exception using errcode='22023',message='action_proposal_encoding_invalid';
 end $$;
 
