@@ -5,7 +5,7 @@ const CONN=process.env.E10_DB_URL||'postgresql://postgres:postgres@127.0.0.1:543
 const org='e1000000-0000-4000-8000-0000000000a6';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const x=Object.fromEntries(['user','role','supplier','location','product','config'].map(k=>[k,randomUUID()]));
-x.run=randomUUID();x.session=randomUUID();x.items=['compete','cas','dispwin','revwin','auth','replay','corrdisp','corrrev','location','org','reserveauth'].map(k=>`x4g-${k}-${x.run}`);
+x.run=randomUUID();x.session=randomUUID();x.items=['compete','cas','dispwin','revwin','auth','replay','corrdisp','corrrev','location','org','reserveauth','single'].map(k=>`x4g-${k}-${x.run}`);
 const jwt=JSON.stringify({sub:x.user,role:'authenticated'});
 const line=item=>[{line_no:1,configuration_version_id:x.config,inventory_item_id:item,accepted_quantity:0,damaged_quantity:0,quarantined_quantity:3,expected_allocations:[]}];
 async function auth(c){await c.query('select set_config($1,$2,true)',['request.jwt.claims',jwt]);await c.query('set local role authenticated');}
@@ -156,7 +156,16 @@ async function main(){
   await waitForLock(setup,reserveAuthPid,'reserve post-lock authority');await setup.query("delete from public.e10_organization_role_permissions where organization_id=$1 and role_id=$2 and capability='act.reserve_inventory'",[org,x.role]);await A.query('commit');await reserveAuthCall;await B.query('rollback').catch(()=>{});
   if(!reserveAuthError||reserveAuthError.code!=='42501'||reserveAuthError.message!=='reserve_inventory_denied')throw new Error(`reserve post-lock authority leaked projection ${reserveAuthError&&reserveAuthError.code}:${reserveAuthError&&reserveAuthError.message}`);
   const reserveResidue=(await setup.query("select (select count(*) from public.e10_lot_reservations where organization_id=$1 and lot_id=$2) reservations,(select count(*) from public.e10_inventory_movements where organization_id=$1 and idempotency_key=$3) movements",[org,reserveLot,`${org}:lot-reserve:x4g-${x.run}-reserveauth-reserve`])).rows[0];if(Number(reserveResidue.reservations)!==0||Number(reserveResidue.movements)!==0)throw new Error(`reserve revocation residue ${JSON.stringify(reserveResidue)}`);
-  console.log(`TA-X4g disposition races: PASS (initial/CAS/reversal, correction both directions, authority/location/org rereads, replay; waiter pid=${orgPid})`);
+  await setup.query("insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed)values($1,$2,'act.reserve_inventory',true)",[org,x.role]);
+
+  // The legacy single-line name must now use the disposition-aware batch
+  // implementation. A quarantine-only receipt gets origin evidence, two units
+  // are accepted, and reversal removes exactly those two without phantom stock.
+  const single=await receive(setup,x.items[11],`x4g-${x.run}-single-receive`);
+  await setup.query('begin');await auth(setup);await dispose(setup,single,'accept',2,null,0,'single compatibility',`x4g-${x.run}-single-disposition`);const singleReverse=(await setup.query('select public.e10_org_reverse_receipt($1,$2,$3,$4) r',[org,single.receipt_id,'single compatibility reverse',`x4g-${x.run}-single-reverse`])).rows[0].r;await setup.query('commit');
+  const singleProof=(await setup.query("select sr.status receipt_status,i.qty,l.status lot_status,(select count(*) from public.e10_commercial_events ce where ce.organization_id=$1 and ce.payload->>'receipt_line_id'=$4 and ce.event_type='receipt') origins,(select count(*) from public.e10_commercial_events ce where ce.organization_id=$1 and ce.payload->>'reversal_id'=$5 and ce.event_type='correction') reversal_corrections from public.e10_stock_receipts sr join public.e10_stock_receipt_lines rl on(rl.organization_id,rl.stock_receipt_id)=(sr.organization_id,sr.id) join public.e10_inventory_lots l on(l.organization_id,l.id)=(rl.organization_id,rl.inventory_lot_id) join public.e10_inventory_items i on(i.organization_id,i.id)=(l.organization_id,l.inventory_item_id) where sr.organization_id=$1 and sr.id=$2 and i.id=$3",[org,single.receipt_id,x.items[11],single.lines[0].receipt_line_id,singleReverse.reversal_id])).rows[0];
+  if(!singleReverse.ok||singleProof.receipt_status!=='reversed'||singleProof.lot_status!=='reversed'||Number(singleProof.qty)!==0||Number(singleProof.origins)!==1||Number(singleProof.reversal_corrections)!==1)throw new Error(`single reversal compatibility failed ${JSON.stringify(singleProof)} ${JSON.stringify(singleReverse)}`);
+  console.log(`TA-X4g disposition races: PASS (initial/CAS/reversal, compatibility reversal, origin evidence, authority/location/org rereads, replay; waiter pid=${orgPid})`);
  }finally{
   await A.query('rollback').catch(()=>{});await B.query('rollback').catch(()=>{});await setup.query('rollback').catch(()=>{});
   await cleanup(setup);await Promise.all([A.end(),B.end(),setup.end()]);
