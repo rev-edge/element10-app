@@ -858,6 +858,26 @@ derived count. Tests prove batch insert, unrelated card update, reassignment,
 deletion, direct-drift denial, two-connection concurrency and the existing
 catalog authorization gates.
 
+### C6: organization suspension lifecycle
+
+Status: implemented and locally verified 2026-09-12. Awaiting review before C7.
+
+Migration `20260912173214_e10_schema_review_c6_organization_status_history.sql`
+adds `updated_at`, `suspended_at` and an explicit
+`suspension_time_known` discriminator. Existing suspended rows retain an
+unknown effective time instead of receiving an invented timestamp. New status
+changes maintain a consistent current projection.
+
+Every organization receives an append-only baseline, and a platform-admin-only
+command records suspend and resume transitions atomically with reason, evidence,
+actor, idempotency and optimistic concurrency. Suspension is reversible and
+prior intervals remain reportable. Billing delinquency is not folded into this
+state and remains a separate future state machine.
+
+Tests prove baseline creation, ordinary-member denial, suspension, replay,
+stale-revision rejection, resumption, transition semantics and compatibility
+with existing race tests that suspend organizations while writers are blocked.
+
 ## Appendix: exact base-table JSON inventory
 
 ```text
