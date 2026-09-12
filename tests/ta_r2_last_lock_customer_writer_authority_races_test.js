@@ -25,6 +25,7 @@ async function main() {
   const txIds = [];
   let postCase;
   try {
+    await admin.query("select set_config('e10.audit_request_id',$1,false)",[x.run]);
     await admin.query("insert into auth.users(id,instance_id,aud,role,email,created_at,updated_at) values($1,'00000000-0000-0000-0000-000000000000','authenticated','authenticated',$2,now(),now())", [x.user, `${x.run}@x.invalid`]);
     await admin.query("insert into public.e10_organization_roles(id,organization_id,key,name,is_system) values($1,$2,$3,'R2 last lock',false)", [x.role, org, x.run]);
     const caps = ['act.record_commercial_events','act.manage_customers','act.prepare_customer_transactions','act.approve_customer_transactions','act.post_customer_transactions','act.adjust_customer_transactions','act.reconcile_customer_transactions','act.live_run'];
@@ -100,8 +101,9 @@ async function main() {
         'finalizations',(select count(*) from public.e10_customer_transaction_component_finalizations where idempotency_key like $2),
         'receipts',(select count(*) from public.e10_customer_commercial_receipts where idempotency_key like $2),
         'claims',(select count(*) from public.e10_customer_transaction_source_claims where source_line_id like $2),
-        'audit_batches',(select count(*) from public.e10_audit_change_batches where organization_id=$4)
-      ) s`,[customer,`${x.run}%`,draftIds,org]);
+        'audit_batches',(select count(*) from public.e10_audit_change_batches where request_id=$4 or actor_user_id=$5),
+        'audit_records',(select count(*) from public.e10_audit_change_records where batch_id in(select id from public.e10_audit_change_batches where request_id=$4 or actor_user_id=$5))
+      ) s`,[customer,`${x.run}%`,draftIds,x.run,x.user]);
       return JSON.stringify(q.rows[0].s);
     }
 
@@ -153,13 +155,13 @@ async function main() {
     await clean('delete from public.e10_break_events where slot_id=$1',[x.slot]);
     await clean('delete from public.e10_break_slots where id=$1',[x.slot]);
     await clean('delete from public.e10_break_sessions where id=$1',[x.session]);
-    await clean('delete from public.e10_audit_change_records where batch_id in(select id from public.e10_audit_change_batches where object_id like $1 or actor_user_id=$2)',[`%${x.run}%`,x.user]);
-    await clean('delete from public.e10_audit_change_batches where object_id like $1 or actor_user_id=$2',[`%${x.run}%`,x.user]);
+    await clean('delete from public.e10_audit_change_records where batch_id in(select id from public.e10_audit_change_batches where request_id=$1 or actor_user_id=$2)',[x.run,x.user]);
+    await clean('delete from public.e10_audit_change_batches where request_id=$1 or actor_user_id=$2',[x.run,x.user]);
     await clean('delete from public.e10_organization_memberships where user_id=$1',[x.user]);
     await clean('delete from public.e10_organization_role_permissions where role_id=$1',[x.role]);
     await clean('delete from public.e10_organization_roles where id=$1',[x.role]);
     await clean('delete from auth.users where id=$1',[x.user]);
-    const residue=Number((await admin.query("select (select count(*) from auth.users where id=$1)+(select count(*) from public.e10_organization_roles where id=$2)+(select count(*) from public.e10_customer_transaction_source_claims where source_line_id like $3)+(select count(*) from public.e10_customer_commercial_receipts where idempotency_key like $3)+(select count(*) from public.e10_customer_activity_observations where idempotency_key like $3)+(select count(*) from public.e10_audit_change_batches where object_id like $4 or actor_user_id=$1) n",[x.user,x.role,`${x.run}%`,`%${x.run}%`])).rows[0].n);
+    const residue=Number((await admin.query("select (select count(*) from auth.users where id=$1)+(select count(*) from public.e10_organization_roles where id=$2)+(select count(*) from public.e10_customer_transaction_source_claims where source_line_id like $3)+(select count(*) from public.e10_customer_commercial_receipts where idempotency_key like $3)+(select count(*) from public.e10_customer_activity_observations where idempotency_key like $3)+(select count(*) from public.e10_audit_change_batches where request_id=$4 or actor_user_id=$1)+(select count(*) from public.e10_audit_change_records where batch_id in(select id from public.e10_audit_change_batches where request_id=$4 or actor_user_id=$1)) n",[x.user,x.role,`${x.run}%`,x.run])).rows[0].n);
     await clean('set session_replication_role=origin');
     await Promise.all([admin.end(),holder.end(),writer.end()]);
     if(errors.length||residue)throw new Error(`cleanup failed ${JSON.stringify({errors,residue})}`);
