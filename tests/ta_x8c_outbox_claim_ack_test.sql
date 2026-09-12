@@ -6,9 +6,15 @@ declare
   ev1 uuid:='8c000000-0000-4000-8000-000000000011'; ev2 uuid:='8c000000-0000-4000-8000-000000000012'; evb uuid:='8c000000-0000-4000-8000-000000000013';
   q1 uuid:='8c000000-0000-4000-8000-000000000021'; q2 uuid:='8c000000-0000-4000-8000-000000000022'; qb uuid:='8c000000-0000-4000-8000-000000000023';
   ca uuid:='8c000000-0000-4000-8000-000000000031'; ca2 uuid:='8c000000-0000-4000-8000-000000000032'; cb uuid:='8c000000-0000-4000-8000-000000000033';
-  j jsonb; j2 jsonb; tok1 uuid; tok2 uuid; gen1 integer; gen2 integer; t text;
+  j jsonb; j2 jsonb; tok1 uuid; tok2 uuid; gen1 integer; gen2 integer; t text;n bigint:=0;
 begin
   if exists(select 1 from public.e10_outbox_consumers) then raise exception 'X8c migration seeded a consumer'; end if;
+  if exists(select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+    where n.nspname in('public','e10')and p.proname~*'(dispatch|deliver|sender|worker)'
+      and pg_get_functiondef(p.oid)like'%e10_integration_outbox%')then raise exception'X8c activated an external dispatch function';end if;
+  if to_regclass('cron.job')is not null then execute
+    'select count(*)from cron.job where command ilike ''%e10_integration_outbox%''or command ilike ''%e10_claim_outbox%''' into n;end if;
+  if n<>0 then raise exception'X8c activated an outbox cron job: %',n;end if;
   insert into public.e10_organizations(id,slug,name) values(oa,'x8c-func-a','X8c A'),(ob,'x8c-func-b','X8c B');
   insert into public.e10_commercial_events(id,organization_id,event_type,subject_type,subject_id,occurred_at,idempotency_key,source_kind,payload,request_fingerprint) values
     (ev1,oa,'listing_created','inventory_item','x8c-1',now(),'x8c-1','manual','{"listing_id":"1","channel":"manual"}','x8c-1'),
