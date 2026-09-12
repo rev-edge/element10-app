@@ -55,8 +55,8 @@ begin
   begin perform public.e10_org_receive_po_line(o,pol,'x4d-item',5,0,1,'x4d-lot-1','2026-09-10T20:00:00Z','[]','x4d-receive-1'); raise exception 'receipt mismatch accepted';
   exception when sqlstate '22023' then null; end;
   r2:=public.e10_org_receive_po_line(o,pol5,'x4d-null-alloc',1,0,0,'x4d-null-alloc','2026-09-10T20:30:00Z',null,'x4d-null-alloc');
-  r2:=public.e10_org_receive_po_line(o,pol5,'x4d-null-alloc',1,0,0,'x4d-null-alloc','2026-09-10T20:30:00Z','[]','x4d-null-alloc');
-  if not(r2->>'replay')::boolean then raise exception 'legacy NULL allocation did not replay as empty array';end if;
+  r2:=public.e10_org_receive_po_line(o,pol5,'x4d-null-alloc',1.00,0.00,0.00,'x4d-null-alloc',null,'[]','x4d-null-alloc');
+  if not(r2->>'replay')::boolean then raise exception 'legacy NULL allocation / numeric scale / omitted effective-time replay failed';end if;
   r2:=public.e10_org_receive_po_line(o,pol,'x4d-item',4,0,0,'x4d-lot-2','2026-09-10T21:00:00Z',
     jsonb_build_array(jsonb_build_object('id',expected,'quantity',1),jsonb_build_object('id',expected2,'quantity',3)),'x4d-receive-2');
   receipt2:=(r2->>'receipt_id')::uuid;
