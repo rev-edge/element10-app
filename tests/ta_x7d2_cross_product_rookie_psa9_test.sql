@@ -56,6 +56,7 @@ begin
     (gen_random_uuid(),variant_wrong_grade,subject_id,'rookie_designation',1,'assert',true,'F3','{}','f3-rookie-wrong','f3-rookie-wrong');
 
   perform set_config('request.jwt.claims',jsonb_build_object('sub',actor,'role','authenticated')::text,true);
+  execute'set local role authenticated';
   filters:=jsonb_build_object('subject_id',subject_id,'rookie_designation',true,'condition_state','graded','grader_code','PSA','grade_label','9');
   first_page:=public.e10_org_market_screener(o,'catalog','variant','count','completed_sale','2026-01-01','2026-02-01','2026-02-01','USD','none',null,null,filters,'cohort_asc',1,null);
   cursor_id:=(first_page->>'next_cursor')::uuid;
@@ -65,6 +66,9 @@ begin
   first_fp:=first_page->>'query_fingerprint';
   first_org_revision:=(first_page->>'organization_revision')::bigint;
   first_catalog_revision:=(first_page->>'catalog_revision')::bigint;
+  if first_fp is null or first_org_revision is null or first_catalog_revision is null then
+    raise exception'F3 first-page snapshot metadata missing: %',first_page;
+  end if;
   second_page:=public.e10_org_market_screener(o,'catalog','variant','count','completed_sale','2026-01-01','2026-02-01','2026-02-01','USD','none',null,null,filters,'cohort_asc',1,cursor_id);
   if jsonb_array_length(second_page->'rows')is distinct from 1 or second_page->'next_cursor'is distinct from'null'::jsonb
      or second_page->>'query_fingerprint'is distinct from first_fp
@@ -91,6 +95,7 @@ begin
     perform public.e10_org_market_screener(o,'catalog','variant','count','completed_sale','2026-01-01','2026-02-01','2026-02-01','USD','none',null,null,filters,'cohort_asc',1,null);
     raise exception'F3 hostile organization reader allowed';
   exception when insufficient_privilege then null;end;
+  execute'reset role';
 end $$;
 rollback;
 select'TA-X7d.2 F3 cross-product rookie PSA 9 public pagination PASS'result;
