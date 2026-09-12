@@ -79,14 +79,15 @@ begin
     raise exception 'source/ingestion time separation failed occurred=% created=%',event_time,ingested_at;
   end if;
 
-  -- Simulate an accepted receipt movement created before X5c, then reverse it after the trigger exists.
+  -- Even if the movement trigger is unavailable, the receiving compatibility
+  -- wrapper now writes complete receipt-origin evidence before returning.
   alter table public.e10_inventory_movements disable trigger e10_capture_native_inventory_event_trg;
   reversal:=public.e10_org_receive_po_line(o,pol,'x5c1-item',1,0,0,'pre-x5c',backdated-'1 day'::interval,'[]','x5c1-legacy');
   alter table public.e10_inventory_movements enable trigger e10_capture_native_inventory_event_trg;
   receipt:=(reversal->>'receipt_id')::uuid;
   original_movement:=(reversal->>'movement_id')::uuid;
-  if exists(select 1 from public.e10_commercial_events where organization_id=o and inventory_movement_id=original_movement) then
-    raise exception 'legacy receipt unexpectedly had an event';
+  if not exists(select 1 from public.e10_commercial_events where organization_id=o and inventory_movement_id=original_movement) then
+    raise exception 'receipt wrapper failed to preserve origin evidence';
   end if;
   reversal:=public.e10_org_reverse_receipt(o,receipt,'legacy receipt correction','x5c1-legacy-reverse');
   select id,occurred_at,(payload->>'captured_retroactively')::boolean into original_event,event_time,retroactive
@@ -94,8 +95,8 @@ begin
   select id,corrects_event_id into correction_event,linked_original_event
     from public.e10_commercial_events where organization_id=o and inventory_movement_id=(reversal->>'movement_id')::uuid;
   if original_event is null or correction_event is null or linked_original_event<>original_event
-     or not coalesce(retroactive,false) or event_time<>backdated-'1 day'::interval then
-    raise exception 'legacy receipt reversal lineage incomplete original=% linked_original=% correction=% retro=% occurred=%',
+     or coalesce(retroactive,false) or event_time<>backdated-'1 day'::interval then
+    raise exception 'receipt reversal lineage incomplete original=% linked_original=% correction=% retro=% occurred=%',
       original_event,linked_original_event,correction_event,retroactive,event_time;
   end if;
   select count(*) into c from public.e10_commercial_events where organization_id=o
@@ -103,9 +104,9 @@ begin
   if c<>2 then raise exception 'legacy receipt reversal must produce exactly two linked events, got %',c; end if;
   if exists(select 1 from public.e10_commercial_events where organization_id=o
     and inventory_movement_id in (original_movement,(reversal->>'movement_id')::uuid)
-    and (evidence_quality<>'native_system' or source_connection_id<>'inventory-ledger' or source_event_id is null)) then
-    raise exception 'legacy/native envelope backfill incomplete';
+    and (evidence_quality<>'native_system' or source_connection_id not in('receipt-ledger','inventory-ledger') or source_event_id is null)) then
+    raise exception 'receipt/native envelope incomplete';
   end if;
-  raise notice 'TA-X5c.1 source time + legacy reversal linkage: PASS';
+  raise notice 'TA-X5c.1 source time + receipt-origin/reversal linkage: PASS';
 end $$;
 rollback;
