@@ -16,6 +16,7 @@ Owner approval on 2026-09-12 selects shared, capability-authorized replay for th
 - F4 and X1b malformed identities fail as validation errors. Customer search treats `%`, `_`, and `\\` literally.
 - V1 spend retains full-cohort totals on a trailing empty page.
 - X7e signed cursors bind `p_limit`; lifecycle and evidence totals come from the complete ranked cohort rather than the current page.
+- Receipt timestamp replay uses effective-time semantics: omitted `received_at` means “use the immutable recorded effective timestamp.” Supplying that same instant later is equivalent; a different instant is a mismatch. This preserves pre-canonicalization receipts without inventing an unavailable historical omission marker.
 
 ## Local verification
 
