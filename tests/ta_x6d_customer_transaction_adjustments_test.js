@@ -287,6 +287,7 @@ async function main() {
     await admin.query('delete from public.e10_organization_role_permissions where role_id=any($1::uuid[])', [[ids.role, ids.otherRole]]).catch(() => {});
     await admin.query('delete from public.e10_organization_memberships where user_id=any($1::uuid[])', [[ids.user, ids.otherUser]]).catch(() => {});
     await admin.query('delete from public.e10_organization_roles where id=any($1::uuid[])', [[ids.role, ids.otherRole]]).catch(() => {});
+    await admin.query('delete from public.e10_organization_status_transitions where organization_id=$1', [ids.otherOrg]).catch(() => {});
     await admin.query('delete from public.e10_organizations where id=$1', [ids.otherOrg]).catch(() => {});
     await admin.query('delete from auth.users where id=any($1::uuid[])', [[ids.user, ids.otherUser]]).catch(() => {});
     await admin.query('commit').catch(() => {});

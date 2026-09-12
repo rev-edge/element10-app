@@ -70,3 +70,42 @@ https://github.com/rev-edge/element10-app/actions/runs/34701803452
 ```
 
 R3 was not started.
+
+## Local closure addendum, 2026-09-12
+
+Status: R2 is ready for renewed independent review. This addendum records local
+evidence only. Hosted staging and exact-head CI remain R8 work and are not
+claimed here.
+
+Migration `20260912184933_e10_ta_r2_distinct_resale_reconciliation.sql` closes
+the remaining same-slot reconciliation gap. An import that overlaps native sale
+history remains denied unless its exact source claim has a latest reviewed
+`new_transaction` decision. That review permits a distinct resale contribution
+without weakening the default duplicate guard. Released managed native sales
+remain ineligible, while trusted native observations not owned by the managed
+sale subsystem are no longer falsely classified as released sales.
+
+Executable proof now covers:
+
+- all twelve corrected customer writers, each with the exact writer PID blocked
+  by the exact advisory-lock holder, mid-wait capability revocation, `42501`
+  after release and zero mutation residue;
+- native-first unreviewed import denial and import-first native-post denial;
+- a reviewed same-slot `new_transaction` resale, with three official
+  transactions, three official lines and exact CAD gross 65 across one managed
+  native contribution and two import contributions;
+- altered activity scope denied and omitted activity scope derived from the
+  locked native observation;
+- released-after-approval denial, successful-post replay after later release,
+  and distinct native resale identity;
+- trusted non-managed native activity accepted by the draft guard without
+  acquiring managed-sale identity;
+- the pre-existing reviewed `new_transaction` promotion, current-decision
+  revocation race, source-claim serialization and one-contribution proofs.
+
+Clean local replay through the new migration passed. The focused R2 authority,
+X6d reconciliation, X6g native-sale, X6g adversarial and trusted non-managed
+native suites passed. C6 introduced organization-transition history after the
+original X6d/X6g tests; their fixture cleanup now removes that history before
+deleting temporary organizations. This is test cleanup only and does not alter
+runtime behavior.
