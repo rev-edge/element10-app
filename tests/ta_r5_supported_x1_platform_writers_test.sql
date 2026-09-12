@@ -26,6 +26,7 @@ begin
   begin perform public.e10_platform_create_catalog_variant(release_id,'2',null,null,null,null,null,false,null,'{}','[{"player_id":"bad","position":1}]','r5-bad-subject');raise exception'malformed subject accepted';exception when sqlstate'22023'then null;end;
   begin perform public.e10_platform_create_catalog_variant(release_id,'2',null,null,null,null,null,false,null,'{"serial_numerator":1}','[]','r5-copy-attr');raise exception'copy-level variant attribute accepted';exception when sqlstate'22023'then null;end;
   begin perform public.e10_platform_review_catalog_identity_mapping(null,'variant','x',null,null,variant_id,'candidate',null,'{}','r5-null-provider');raise exception'null provider accepted';exception when sqlstate'22023'then null;end;
+  begin perform public.e10_platform_review_catalog_identity_mapping('provider','variant','null-status',null,null,variant_id,null,null,'{}','r5-null-status');raise exception'null mapping status accepted';exception when sqlstate'22023'then null;end;
   begin insert into public.e10_catalog_releases(release_name)values('direct');raise exception'direct platform table write accepted';exception when insufficient_privilege then null;end;
   perform set_config('request.jwt.claims',jsonb_build_object('sub',ordinary,'role','authenticated')::text,true);
   begin perform public.e10_platform_create_catalog_release(null,null,'denied',null,null,null,null,null,null,'{}','r5-denied');raise exception'non-admin platform write accepted';exception when sqlstate'42501'then null;end;

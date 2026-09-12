@@ -11,6 +11,8 @@ const x = {
   product: randomUUID(),
   config: randomUUID(),
   release: randomUUID(),
+  variant: randomUUID(),
+  player: randomUUID(),
 };
 const admin = new Client({ connectionString: db }),
   locker = new Client({ connectionString: db }),
@@ -85,6 +87,8 @@ async function setup() {
     "insert into public.e10_catalog_releases(id,release_name)values($1,'R5 mapping target')",
     [x.release],
   );
+  await admin.query("insert into public.e10_catalog_variants(id,release_id,card_number)values($1,$2,'R5')",[x.variant,x.release]);
+  await admin.query("insert into public.e10_players(id,name)values($1,'R5 player')",[x.player]);
 }
 async function main() {
   await Promise.all([admin, locker, a, b, obs].map((c) => c.connect()));
@@ -125,6 +129,14 @@ async function main() {
     new Set(sr.map((z) => z.v.rows[0].r.product_master_id)).size !== 1
   )
     throw Error("same-key requests did not converge");
+  const changed = "changed-" + run;
+  await locker.query("begin");
+  await locker.query("select pg_advisory_xact_lock(hashtextextended($1,0))",[x.org+"|x1-product-master|"+changed]);
+  const ca=settled(a.query("select e10_org_create_product_master($1,'First',null,'{}',$2)r",[x.org,changed]));
+  const cb=settled(b.query("select e10_org_create_product_master($1,'Second',null,'{}',$2)r",[x.org,changed]));
+  pending=[ca,cb];await blocked(ap,lp,"changed-key A");await blocked(bp,lp,"changed-key B");await locker.query("commit");
+  const cr=await bounded(Promise.all([ca,cb]));pending=[];
+  if(cr.filter(z=>z.ok).length!==1||cr.filter(z=>!z.ok).length!==1||cr.find(z=>!z.ok).error.code!=="22023")throw Error("same-key changed payload was not refused");
   const v1 = settled(
       a.query(
         "select e10_org_create_configuration_version($1,$2,0,'draft','box','each',1,null,'{}',$3)r",
@@ -161,6 +173,21 @@ async function main() {
   if (dr.ok || dr.error.code !== "42501")
     throw Error("tenant post-lock revocation escaped");
   await admin.query("insert into public.e10_organization_memberships(organization_id,user_id,role_id,status)values($1,$2,$3,'active')",[x.org,x.user,x.role]);
+  await locker.query("begin");
+  await locker.query("select id from public.e10_catalog_variants where id=$1 for update",[x.variant]);
+  const itemDenied=settled(a.query("select e10_org_create_unique_item($1,null,$2,'collectible',null,null,null,null,null,'{}','{}',$3)",[x.org,x.variant,"item-revoke-"+run]));
+  pending=[itemDenied];await blocked(ap,lp,"unique-item target final authority");
+  await admin.query("delete from public.e10_organization_memberships where organization_id=$1 and user_id=$2",[x.org,x.user]);
+  await locker.query("commit");const idr=await bounded(itemDenied);pending=[];
+  if(idr.ok||idr.error.code!=="42501")throw Error("unique-item target-lock revocation escaped");
+  await admin.query("insert into public.e10_organization_memberships(organization_id,user_id,role_id,status)values($1,$2,$3,'active')",[x.org,x.user,x.role]);
+  await admin.query('insert into public.e10_platform_admins(user_id)values($1)',[x.user]);
+  await locker.query("begin");await locker.query("select id from public.e10_players where id=$1 for update",[x.player]);
+  const variantDenied=settled(b.query("select e10_platform_create_catalog_variant($1,'R',null,null,null,null,null,false,null,'{}',$2,$3)",[x.release,JSON.stringify([{player_id:x.player,position:1}]),"variant-revoke-"+run]));
+  pending=[variantDenied];await blocked(bp,lp,"variant subject final authority");
+  await admin.query("delete from public.e10_platform_admins where user_id=$1",[x.user]);await locker.query("commit");
+  const vdr=await bounded(variantDenied);pending=[];
+  if(vdr.ok||vdr.error.code!=="42501")throw Error("variant subject-lock revocation escaped");
   await admin.query('insert into public.e10_platform_admins(user_id)values($1)',[x.user]);
   const mapKey = "map-" + run,
     provider = "r5-" + run;
@@ -199,6 +226,8 @@ async function cleanup() {
   await admin.query("reset role");
   await admin.query("set session_replication_role=replica");
   for (const t of [
+    "e10_audit_change_records",
+    "e10_audit_change_batches",
     "e10_x1_creation_commands",
     "e10_product_configuration_versions",
     "e10_product_configurations",
@@ -216,9 +245,12 @@ async function cleanup() {
     "delete from public.e10_catalog_identity_mappings where provider=$1",
     ["r5-" + run],
   );
+  await admin.query("delete from public.e10_catalog_variant_subjects where variant_id=$1",[x.variant]);
+  await admin.query("delete from public.e10_catalog_variants where id=$1",[x.variant]);
   await admin.query("delete from public.e10_catalog_releases where id=$1", [
     x.release,
   ]);
+  await admin.query("delete from public.e10_players where id=$1",[x.player]);
   await admin.query("delete from public.e10_platform_admins where user_id=$1", [
     x.user,
   ]);
@@ -226,6 +258,11 @@ async function cleanup() {
     x.org,
   ]);
   await admin.query("delete from auth.users where id=$1", [x.user]);
+  const residue = Number((await admin.query(
+    "select (select count(*) from public.e10_audit_change_batches where organization_id=$1)+(select count(*) from public.e10_audit_change_records where organization_id=$1)+(select count(*) from public.e10_organizations where id=$1)+(select count(*) from auth.users where id=$2) n",
+    [x.org,x.user],
+  )).rows[0].n);
+  if (residue) throw Error(`R5 cleanup residue: ${residue}`);
   await admin.query("set session_replication_role=origin");
 }
 (async () => {
