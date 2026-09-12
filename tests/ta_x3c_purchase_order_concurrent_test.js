@@ -7,7 +7,7 @@ async function waitBlocked(obs,pid,blocker,label){const end=Date.now()+5000;whil
 async function actor(id){const c=new Client({connectionString:db});await c.connect();await c.query("set statement_timeout='10s';set lock_timeout='9s'");await c.query('select set_config($1,$2,false)',['request.jwt.claims',JSON.stringify({sub:id,role:'authenticated'})]);await c.query('set role authenticated');return c}
 async function main(){
  const s=new Client({connectionString:db}),obs=new Client({connectionString:db});await Promise.all([s.connect(),obs.connect()]);for(const c of[s,obs])await c.query("set statement_timeout='10s';set lock_timeout='9s'");
- const x={org:randomUUID(),prep:randomUUID(),role:randomUUID(),loc:randomUUID(),supplier:randomUUID(),product:randomUUID(),config:randomUUID(),version:randomUUID(),item:'x3c-'+randomUUID(),line:randomUUID(),expected:randomUUID(),invoice:randomUUID(),invoiceLine:randomUUID(),run:randomUUID()};let a,b,pending=[],completed=false;
+ const x={org:randomUUID(),prep:randomUUID(),role:randomUUID(),loc:randomUUID(),supplier:randomUUID(),product:randomUUID(),config:randomUUID(),version:randomUUID(),item:'x3c-'+randomUUID(),line:randomUUID(),expected:randomUUID(),invoice:randomUUID(),invoiceLine:randomUUID(),run:randomUUID()};let a,b,poLine,pending=[],completed=false;
  const lines=JSON.stringify([{id:x.line,line_no:1,configuration_version_id:x.version,ordered_quantity:10,estimated_unit_cost:5}]);
  const createSql='select public.e10_org_create_purchase_order($1,$2,$3,$4,$5,null,$6::jsonb,$7) r';
  try{
@@ -31,7 +31,7 @@ async function main(){
   const pb=outcome(b.query(createSql,[x.org,x.supplier,x.loc,'RACE-1','CAD',lines,idem]));pending=[pb];await waitBlocked(obs,bp,ap,'create idempotency');
   const ar=await a.query(createSql,[x.org,x.supplier,x.loc,'RACE-1','CAD',lines,idem]);await a.query('commit');const br=await bounded(pb);pending=[];if(!br.ok)throw br.error;
   if(ar.rows[0].r.replay!==false||br.value.rows[0].r.replay!==true)throw Error('create expected one insert and one replay');
-  const po=ar.rows[0].r.purchase_order_id;console.log(`[proof] create backend ${bp} waited on exact command lock held by ${ap}; one insert + one replay`);
+  const po=ar.rows[0].r.purchase_order_id;poLine=ar.rows[0].r.line_id_map.find(v=>v.client_id===x.line).stored_id;console.log(`[proof] create backend ${bp} waited on exact command lock held by ${ap}; one insert + one replay`);
 
   const deniedKey=x.run+'-denied';await s.query('begin');const sp=Number((await s.query('select pg_backend_pid() pid')).rows[0].pid);await s.query("select pg_advisory_xact_lock(hashtextextended($1||'|purchase-order-command|'||$2,0))",[x.org,deniedKey]);
   const denied=outcome(b.query(createSql,[x.org,x.supplier,x.loc,'DENIED','CAD',lines,deniedKey]));pending=[denied];await waitBlocked(obs,bp,sp,'post-lock capability');
@@ -58,7 +58,7 @@ async function main(){
 
   const blockedInvoiceCancel=x.run+'-blocked-invoice-cancel';await s.query('begin');await s.query("select pg_advisory_xact_lock(hashtextextended($1||'|purchase-order|'||$2,0))",[x.org,po]);
   const invoiceCancelDenied=outcome(b.query('select public.e10_org_transition_purchase_order($1,$2,1,$3,$4,$5)',[x.org,po,'cancel','blocked invoice allocation',blockedInvoiceCancel]));pending=[invoiceCancelDenied];await waitBlocked(obs,bp,sp,'cancel versus invoice allocation');
-  await s.query('insert into public.e10_invoice_po_allocations(organization_id,invoice_line_id,purchase_order_line_id,allocated_quantity)values($1,$2,$3,1)',[x.org,x.invoiceLine,x.line]);await s.query('commit');const icd=await bounded(invoiceCancelDenied);pending=[];
+  await s.query('insert into public.e10_invoice_po_allocations(organization_id,invoice_line_id,purchase_order_line_id,allocated_quantity)values($1,$2,$3,1)',[x.org,x.invoiceLine,poLine]);await s.query('commit');const icd=await bounded(invoiceCancelDenied);pending=[];
   if(icd.ok||icd.error.code!=='55000')throw Error('cancel did not observe post-lock invoice allocation');
   if(Number((await s.query('select count(*) n from public.e10_purchase_order_commands where organization_id=$1 and idempotency_key=$2',[x.org,blockedInvoiceCancel])).rows[0].n))throw Error('invoice-allocation-denied cancel persisted');
   console.log('[proof] cancel backend observed invoice allocation inserted before exact PO-lock release and denied with zero command residue');
@@ -66,7 +66,7 @@ async function main(){
 
   const blockedCancel=x.run+'-blocked-cancel';await s.query('begin');await s.query("select pg_advisory_xact_lock(hashtextextended($1||'|purchase-order|'||$2,0))",[x.org,po]);
   const cancelDenied=outcome(b.query('select public.e10_org_transition_purchase_order($1,$2,1,$3,$4,$5)',[x.org,po,'cancel','blocked commitment',blockedCancel]));pending=[cancelDenied];await waitBlocked(obs,bp,sp,'cancel versus commitment');
-  await s.query("insert into public.e10_expected_inventory_allocations(id,organization_id,purchase_order_line_id,destination_location_id,expected_quantity,status,planning_reference)values($1,$2,$3,$4,1,'open',$5)",[x.expected,x.org,x.line,x.loc,x.run]);await s.query('commit');const cd=await bounded(cancelDenied);pending=[];
+  await s.query("insert into public.e10_expected_inventory_allocations(id,organization_id,purchase_order_line_id,destination_location_id,expected_quantity,status,planning_reference)values($1,$2,$3,$4,1,'open',$5)",[x.expected,x.org,poLine,x.loc,x.run]);await s.query('commit');const cd=await bounded(cancelDenied);pending=[];
   if(cd.ok||cd.error.code!=='55000')throw Error('cancel did not observe post-lock commitment');
   if(Number((await s.query('select count(*) n from public.e10_purchase_order_commands where organization_id=$1 and idempotency_key=$2',[x.org,blockedCancel])).rows[0].n))throw Error('denied cancel persisted');
   console.log('[proof] cancel backend observed commitment inserted before exact PO-lock release and denied with zero command residue');
@@ -79,7 +79,7 @@ async function main(){
   if(Number((await s.query('select count(*) n from public.e10_purchase_order_commands where organization_id=$1 and idempotency_key=$2',[x.org,staleAmendKey])).rows[0].n))throw Error('stale amend persisted command');
   console.log('[proof] amend backend waited on exact PO lock and failed CAS after concurrent submit with zero command residue');
   await a.query('begin');await a.query("select pg_advisory_xact_lock(hashtextextended($1||'|purchase-order|'||$2,0))",[x.org,po]);
-  const receive=outcome(b.query("select public.e10_org_receive_po_line($1,$2,$3,10,0,0,null,now(),'[]'::jsonb,$4) r",[x.org,x.line,x.item,x.run+'-receive']));pending=[receive];await waitBlocked(obs,bp,ap,'receive versus amend');
+  const receive=outcome(b.query("select public.e10_org_receive_po_line($1,$2,$3,10,0,0,null,now(),'[]'::jsonb,$4) r",[x.org,poLine,x.item,x.run+'-receive']));pending=[receive];await waitBlocked(obs,bp,ap,'receive versus amend');
   const amendLines=JSON.stringify([{id:x.line,line_no:1,configuration_version_id:x.version,ordered_quantity:5,estimated_unit_cost:5}]);
   const amended=await a.query('select public.e10_org_amend_purchase_order($1,$2,2,$3,$4,$5,$6,null,$7::jsonb,$8,$9) r',[x.org,po,x.supplier,x.loc,'RACE-1','CAD',amendLines,'reduce before receipt',x.run+'-amend']);
   if(amended.rows[0].r.revision!==3)throw Error('amend did not commit revision 3');
