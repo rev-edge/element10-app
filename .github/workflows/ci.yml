@@ -148,6 +148,7 @@ jobs:
         run: |
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_r5_immutable_identity_history_test.sql
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_r5_supported_x1_tenant_writers_test.sql
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_r5_supported_x1_platform_writers_test.sql
       - name: TA-X6h source-grained attendance evidence gate
         run: |
           node tests/ta_x6h_attendance_foundation_test.js

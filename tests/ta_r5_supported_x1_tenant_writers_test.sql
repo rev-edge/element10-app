@@ -14,6 +14,7 @@ begin
   if not (public.e10_org_create_product_master(o,'R5 Product',' R5-P ','{"kind":"sealed"}',' r5-product ')->>'replay')::boolean then raise exception'product replay failed';end if;
   c:=public.e10_org_create_product_configuration(o,product_id,'Hobby Box','R5-C','{}','r5-config');config_id:=(c->>'configuration_id')::uuid;
   v:=public.e10_org_create_configuration_version(o,config_id,0,'draft','box','each',24,'R5-BC','{}','r5-version');
+  begin perform public.e10_org_create_configuration_version(o,config_id,0,'draft','box','each',24,null,'{}','r5-version-stale');raise exception'stale configuration version accepted';exception when sqlstate'40001'then null;end;
   i:=public.e10_org_create_unique_item(o,null,null,'collectible','new',null,null,null,null,'{}','{}','r5-item');
   if product_id is null or config_id is null or (v->>'version_no')::integer<>1 or i->>'unique_item_id'is null then raise exception'X1 writer result invalid';end if;
   begin perform public.e10_org_create_product_master(o,'changed',null,'{}','r5-product');raise exception'idempotency mismatch accepted';exception when sqlstate'22023'then null;end;
