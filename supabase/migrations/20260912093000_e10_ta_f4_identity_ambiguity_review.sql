@@ -49,7 +49,6 @@ create table public.e10_catalog_identity_review_decisions(
 create unique index e10_catalog_identity_review_decisions_successor_uq
   on public.e10_catalog_identity_review_decisions(supersedes_decision_id)
   where supersedes_decision_id is not null;
-create index e10_catalog_identity_review_cases_page_idx on public.e10_catalog_identity_review_cases(id);
 create index e10_catalog_identity_review_candidates_player_idx on public.e10_catalog_identity_review_candidates(player_id,case_id);
 create index e10_catalog_identity_review_decisions_case_idx on public.e10_catalog_identity_review_decisions(case_id,revision desc);
 

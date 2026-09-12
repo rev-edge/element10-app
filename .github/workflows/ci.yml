@@ -228,6 +228,7 @@ jobs:
         run: |
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x1_identity_foundation_test.sql
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_f4_identity_ambiguity_review_test.sql
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_f4_identity_ambiguity_review_guards_test.sql
           node tests/ta_f4_identity_ambiguity_review_concurrent_test.js
       - name: TA-X1b governed dated player affiliations and depicted-team context
         run: |
