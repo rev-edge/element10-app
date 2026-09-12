@@ -54,20 +54,38 @@ returns jsonb language sql immutable security definer set search_path=public as 
   'id',value->'id','item_id',value->'item_id','movement_type',value->'movement_type','on_hand_delta',value->'on_hand_delta','reserved_delta',value->'reserved_delta','source_entity_type',value->'source_entity_type','source_entity_id',value->'source_entity_id','source_action',value->'source_action','reason_code',value->'reason_code','created_at',value->'created_at')))from jsonb_array_elements(p_result->'movements')),'[]'::jsonb))else p_result end
 $$;
 
+create function e10.x8_result_sources(p_operation text,p_result jsonb)
+returns jsonb language sql immutable security definer set search_path=public as $$
+ select coalesce(case p_operation
+  when'inventory.page'then(select jsonb_agg(jsonb_build_object('inventory_item_id',v->'id'))from jsonb_array_elements(coalesce(p_result->'items','[]'))v)
+  when'inventory.history'then(select jsonb_agg(jsonb_build_object('inventory_movement_id',v->'id','inventory_item_id',v->'item_id'))from jsonb_array_elements(coalesce(p_result->'movements','[]'))v)
+  when'supplier.workspace'then(select jsonb_agg(jsonb_strip_nulls(jsonb_build_object('kind',v->'kind','document_id',v->'id','revision',v->'revision')))from jsonb_array_elements(coalesce(p_result->'items','[]'))v)
+  when'supplier.actual_cost_history'then(select jsonb_agg(jsonb_strip_nulls(jsonb_build_object('source_kind',v->'source_kind','receipt_id',v->'receipt_id','receipt_line_id',v->'receipt_line_id','inventory_lot_id',v->'inventory_lot_id')))from jsonb_array_elements(coalesce(p_result->'items','[]'))v)
+  when'customer.spend_summary'then(select jsonb_agg(jsonb_build_object('effective_customer_id',v->'effective_customer_id'))from jsonb_array_elements(coalesce(p_result->'items','[]'))v)
+  when'customer.spend_contributions'then(select jsonb_agg(jsonb_build_object('transaction_id',v->'transaction_id','transaction_line_id',v->'transaction_line_id'))from jsonb_array_elements(coalesce(p_result->'items','[]'))v)
+  when'customer.provisional_activity'then(select jsonb_agg(jsonb_build_object('activity_id',v->'id'))from jsonb_array_elements(coalesce(p_result->'items','[]'))v)
+  when'inventory.lifecycle'then(select jsonb_agg(jsonb_build_object('unique_item_id',v->'unique_item_id','episode_key',v->'episode_key','origin_event_id',v->'origin_event_id'))from jsonb_array_elements(coalesce(p_result->'items','[]'))v)
+  when'inventory.unique_item_evidence'then(select jsonb_agg(jsonb_build_object('kind',v->'kind','evidence_id',v->'id'))from jsonb_array_elements(coalesce(p_result->'items','[]'))v)
+  when'inventory.valuation_coverage'then(select jsonb_agg(jsonb_strip_nulls(jsonb_build_object('unique_item_id',v->'unique_item_id','origin_event_id',v->'origin_event_id','valuation_evidence_id',v->'valuation_evidence_id','actual_cost_evidence_id',v->'actual_cost_evidence_id')))from jsonb_array_elements(coalesce(p_result->'items','[]'))v)
+  when'market.screener'then(select jsonb_agg(jsonb_strip_nulls(jsonb_build_object('entity_id',v->'entity_id','catalog_variant_id',v->'catalog_variant_id','release_id',v->'release_id','subject_id',v->'subject_id')))from jsonb_array_elements(coalesce(p_result->'rows','[]'))v)
+  when'market.observation_drilldown'then(select jsonb_agg(jsonb_build_object('observation_id',v->'observation_id'))from jsonb_array_elements(coalesce(p_result->'rows','[]'))v)
+  else'[]'::jsonb end,'[]'::jsonb)
+$$;
+
 create function e10.x8_query_envelope(p_org uuid,p_context uuid,p_operation text,p_args jsonb,p_result jsonb,p_grain text,p_units jsonb,p_unknowns jsonb default'[]'::jsonb)
 returns jsonb language sql stable security definer set search_path=public as $$
  select jsonb_build_object(
   'version','x8-query-v1','operation',p_operation,'organization_id',p_org,'context_id',p_context,
   'query_fingerprint',coalesce(p_result->>'query_fingerprint',p_result->>'request_fingerprint',encode(sha256(convert_to(jsonb_build_object('v','x8-query-v1','org',p_org,'actor',auth.uid(),'operation',p_operation,'args',p_args)::text,'UTF8')),'hex')),
-  'as_of',coalesce(nullif(p_result->'as_of','null'::jsonb),nullif(p_args->'as_of','null'::jsonb)),'cutoff',coalesce(nullif(p_result->'observation_cutoff','null'::jsonb),nullif(p_result->'closing_cutoff','null'::jsonb),nullif(p_args->'observation_cutoff','null'::jsonb),nullif(p_args->'closing_cutoff','null'::jsonb)),
+  'as_of',coalesce(nullif(p_result->'as_of','null'::jsonb),nullif(p_args->'as_of','null'::jsonb)),'cutoff',coalesce(nullif(p_result->'observation_cutoff','null'::jsonb),nullif(p_result->'closing_cutoff','null'::jsonb),nullif(p_args->'observation_cutoff','null'::jsonb),nullif(p_args->'closing_cutoff','null'::jsonb),case when p_operation='supplier.workspace'then to_jsonb(statement_timestamp())end),
   'grain',p_grain,'units',coalesce(p_units,'null'::jsonb),'metric_definition',coalesce(p_result->'metric_version','null'::jsonb),
-  'coverage',coalesce(nullif(p_result->'coverage','null'::jsonb),nullif(p_result->'summary'->'coverage','null'::jsonb),'null'::jsonb),
-  'sources',coalesce(p_result->'sources','[]'::jsonb),'unknowns',coalesce(p_unknowns,'[]'::jsonb)
+  'coverage',coalesce(nullif(p_result->'coverage','null'::jsonb),nullif(p_result->'summary'->'coverage','null'::jsonb),case when p_result->>'coverage_status'is not null then jsonb_build_object('status',p_result->>'coverage_status')end,'null'::jsonb),
+  'sources',coalesce(nullif(p_result->'sources','null'::jsonb),e10.x8_result_sources(p_operation,p_result)),'unknowns',coalesce(p_unknowns,'[]'::jsonb)
    ||case when coalesce(nullif(p_result->'as_of','null'::jsonb),nullif(p_args->'as_of','null'::jsonb))is null then'["as_of"]'::jsonb else'[]'::jsonb end
-   ||case when coalesce(nullif(p_result->'observation_cutoff','null'::jsonb),nullif(p_result->'closing_cutoff','null'::jsonb),nullif(p_args->'observation_cutoff','null'::jsonb),nullif(p_args->'closing_cutoff','null'::jsonb))is null then'["cutoff"]'::jsonb else'[]'::jsonb end
+   ||case when coalesce(nullif(p_result->'observation_cutoff','null'::jsonb),nullif(p_result->'closing_cutoff','null'::jsonb),nullif(p_args->'observation_cutoff','null'::jsonb),nullif(p_args->'closing_cutoff','null'::jsonb),case when p_operation='supplier.workspace'then to_jsonb(statement_timestamp())end)is null then'["cutoff"]'::jsonb else'[]'::jsonb end
    ||case when p_units is null or p_units='null'::jsonb then'["units"]'::jsonb else'[]'::jsonb end
    ||case when nullif(p_result->'metric_version','null'::jsonb)is null then'["metric_definition"]'::jsonb else'[]'::jsonb end
-   ||case when coalesce(nullif(p_result->'coverage','null'::jsonb),nullif(p_result->'summary'->'coverage','null'::jsonb))is null then'["coverage"]'::jsonb else'[]'::jsonb end,
+   ||case when coalesce(nullif(p_result->'coverage','null'::jsonb),nullif(p_result->'summary'->'coverage','null'::jsonb),case when p_result->>'coverage_status'is not null then jsonb_build_object('status',p_result->>'coverage_status')end)is null then'["coverage"]'::jsonb else'[]'::jsonb end,
   'result',p_result)
 $$;
 
@@ -136,8 +154,8 @@ begin
  return e10.x8_query_envelope(p_org,p_context_id,p_operation,p_args,res,grain,units,unknowns);
 end $$;
 
-revoke all on function e10.x8_validate_json(jsonb,integer),e10.x8_assert_args(jsonb,text[]),e10.x8_assert_inventory_filters(jsonb),e10.x8_redact_inventory_result(jsonb),e10.x8_query_envelope(uuid,uuid,text,jsonb,jsonb,text,jsonb,jsonb)from public,anon,authenticated;
-grant execute on function e10.x8_validate_json(jsonb,integer),e10.x8_assert_args(jsonb,text[]),e10.x8_assert_inventory_filters(jsonb),e10.x8_redact_inventory_result(jsonb),e10.x8_query_envelope(uuid,uuid,text,jsonb,jsonb,text,jsonb,jsonb)to service_role;
+revoke all on function e10.x8_validate_json(jsonb,integer),e10.x8_assert_args(jsonb,text[]),e10.x8_assert_inventory_filters(jsonb),e10.x8_redact_inventory_result(jsonb),e10.x8_result_sources(text,jsonb),e10.x8_query_envelope(uuid,uuid,text,jsonb,jsonb,text,jsonb,jsonb)from public,anon,authenticated;
+grant execute on function e10.x8_validate_json(jsonb,integer),e10.x8_assert_args(jsonb,text[]),e10.x8_assert_inventory_filters(jsonb),e10.x8_redact_inventory_result(jsonb),e10.x8_result_sources(text,jsonb),e10.x8_query_envelope(uuid,uuid,text,jsonb,jsonb,text,jsonb,jsonb)to service_role;
 revoke all on function public.e10_org_typed_query(uuid,uuid,text,jsonb)from public,anon;
 grant execute on function public.e10_org_typed_query(uuid,uuid,text,jsonb)to authenticated,service_role;
 comment on function public.e10_org_typed_query(uuid,uuid,text,jsonb)is'Closed TA-X8a typed query allowlist. Business-read-only; query-control metadata writes only.';

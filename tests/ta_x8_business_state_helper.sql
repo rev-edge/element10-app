@@ -18,11 +18,13 @@ grant execute on function pg_temp.x8_business_state()to authenticated,service_ro
 
 create or replace function pg_temp.x8_assert_envelope(p_value jsonb,p_operation text,p_grain text)
 returns void language plpgsql as $$
-declare required_keys constant text[]:=array['version','operation','organization_id','context_id','query_fingerprint','as_of','cutoff','grain','units','metric_definition','coverage','sources','unknowns','result'];k text;
+declare required_keys constant text[]:=array['version','operation','organization_id','context_id','query_fingerprint','as_of','cutoff','grain','units','metric_definition','coverage','sources','unknowns','result'];k text;source_rows integer;result_rows integer;
 begin
  if jsonb_typeof(p_value)<>'object'or p_value->>'version'<>'x8-query-v1'or p_value->>'operation'is distinct from p_operation or p_value->>'grain'is distinct from p_grain then raise exception'X8 envelope identity invalid: %',p_value;end if;
  foreach k in array required_keys loop if not(p_value?k)then raise exception'X8 envelope missing %: %',k,p_value;end if;end loop;
  if jsonb_typeof(p_value->'sources')<>'array'or jsonb_typeof(p_value->'unknowns')<>'array'or p_value->>'query_fingerprint'is null then raise exception'X8 envelope metadata shape invalid: %',p_value;end if;
+ source_rows:=jsonb_array_length(p_value->'sources');result_rows:=coalesce(jsonb_array_length(p_value#>'{result,items}'),jsonb_array_length(p_value#>'{result,rows}'),jsonb_array_length(p_value#>'{result,movements}'),0);
+ if p_operation<>'attendance.weekly'and result_rows>0 and source_rows<>result_rows then raise exception'X8 envelope source mapping incomplete for %: sources %, results %',p_operation,source_rows,result_rows;end if;
  foreach k in array array['as_of','cutoff','units','metric_definition','coverage']loop if p_value->k='null'::jsonb and not(p_value->'unknowns'@>jsonb_build_array(k))then raise exception'X8 envelope null % not declared unknown: %',k,p_value;end if;end loop;
 end $$;
 grant execute on function pg_temp.x8_assert_envelope(jsonb,text,text)to authenticated,service_role;
