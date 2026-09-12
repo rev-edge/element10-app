@@ -1,17 +1,23 @@
 \set ON_ERROR_STOP on
 begin;
 do $$
-declare o uuid:=gen_random_uuid();u uuid:=gen_random_uuid();r uuid:=gen_random_uuid();release_id uuid:=gen_random_uuid();n integer;
+declare o uuid:=gen_random_uuid();o2 uuid:=gen_random_uuid();u uuid:=gen_random_uuid();r uuid:=gen_random_uuid();r2 uuid:=gen_random_uuid();release_id uuid:=gen_random_uuid();n integer;
 begin
  insert into auth.users(id,instance_id,aud,role,email,created_at,updated_at)values(u,'00000000-0000-0000-0000-000000000000','authenticated','authenticated',u||'@r4.invalid',now(),now());
- insert into public.e10_organizations(id,slug,name)values(o,'r4-'||substr(o::text,1,8),'R4');
- insert into public.e10_organization_roles(id,organization_id,key,name,is_system)values(r,o,'r4','R4',false);
- insert into public.e10_organization_memberships(organization_id,user_id,role_id,status)values(o,u,r,'active');
+ insert into public.e10_organizations(id,slug,name)values(o,'r4-'||substr(o::text,1,8),'R4'),(o2,'r4-'||substr(o2::text,1,8),'R4 second');
+ insert into public.e10_organization_roles(id,organization_id,key,name,is_system)values(r,o,'r4','R4',false),(r2,o2,'r4','R4 second',false);
+ insert into public.e10_organization_memberships(organization_id,user_id,role_id,status)values(o,u,r,'active'),(o2,u,r2,'active');
  insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed)values
   (o,r,'act.purchasing_prepare',true),(o,r,'act.create_receiving',true);
  insert into public.e10_catalog_releases(id,release_name)values(release_id,'R4 shared release');
  perform set_config('request.jwt.claims',jsonb_build_object('sub',u,'role','authenticated')::text,true);set local role authenticated;
- select count(*)into n from public.e10_catalog_releases where id=release_id;if n<>1 then raise exception'shared catalog hidden from active member';end if;
+ if e10.current_org() is not null then raise exception'two memberships unexpectedly selected a current org';end if;
+ select count(*)into n from public.e10_catalog_releases where id=release_id;if n<>1 then raise exception'shared catalog hidden from two-org member';end if;
+ reset role;update public.e10_organizations set status='suspended'where id=o;set local role authenticated;
+ select count(*)into n from public.e10_catalog_releases where id=release_id;if n<>1 then raise exception'shared catalog hidden while another membership remained active';end if;
+ reset role;update public.e10_organizations set status='suspended'where id=o2;set local role authenticated;
+ select count(*)into n from public.e10_catalog_releases where id=release_id;if n<>0 then raise exception'shared catalog visible with no active organization membership';end if;
+ reset role;update public.e10_organizations set status='active'where id=o;
  reset role;
  if e10.can_access_commercial_comments(o,'supplier_invoice')then raise exception'invoice comments exposed without actual-cost authority';end if;
  if not e10.can_access_commercial_comments(o,'purchase_order')or not e10.can_access_commercial_comments(o,'stock_receipt')then raise exception'document authority mapping denied';end if;
