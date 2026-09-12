@@ -18,7 +18,6 @@ async function cleanup(c) {
   await c.query("delete from public.e10_receipt_po_allocations where purchase_order_line_id=$1", [x.pol]);
   await c.query("delete from public.e10_stock_receipt_lines where stock_receipt_id in (select id from public.e10_stock_receipts where idempotency_key=$1)", [`x4d-receive-${x.run}`]);
   await c.query("delete from public.e10_stock_receipts where idempotency_key=$1", [`x4d-receive-${x.run}`]);
-  await c.query('set session_replication_role=origin');
   await c.query("delete from public.e10_inventory_reservations where item_id=$1", [x.item]);
   await c.query("delete from public.e10_inventory_movements where item_id=$1", [x.item]);
   await c.query("delete from public.e10_expected_inventory_allocations where id=$1", [x.expected]);
@@ -33,6 +32,7 @@ async function cleanup(c) {
   await c.query("delete from public.e10_suppliers where id=$1", [x.supplier]);
   await c.query("delete from public.e10_organization_memberships where organization_id=$1 and user_id=$2", [org,x.user]);
   await c.query("delete from public.e10_organization_roles where id=$1", [x.role]);
+  await c.query('set session_replication_role=origin');
   await c.query("delete from auth.users where id=$1", [x.user]);
 }
 

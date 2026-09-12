@@ -121,7 +121,9 @@ begin
   r:=public.e10_org_release_invoice_from_po(o,il1,pol1,3,1,2,'partial release','x3d1d-ip-release');
   if r->>'allocated_quantity'<>'4' or r->>'supplier_invoice_revision'<>'4' then raise exception 'release failed'; end if;
   reset role;
+  set local session_replication_role='replica';
   update public.e10_product_configuration_versions set state='active' where id=version_id;
+  set local session_replication_role='origin';
   update public.e10_purchase_orders set status='approved' where id=po1;
   set local role authenticated;
   begin
@@ -141,7 +143,9 @@ begin
     perform public.e10_org_allocate_invoice_to_po(o,il2,pol2,1,1,1,'inactive configuration','x3d1d-inactive-config');
     raise exception 'inactive configuration accepted'; exception when insufficient_privilege then null; end;
   reset role;
+  set local session_replication_role='replica';
   update public.e10_product_configuration_versions set state='active' where id=version_id;
+  set local session_replication_role='origin';
   delete from public.e10_location_role_permissions p
     where p.organization_id=o
       and p.location_id='d31f0000-0000-4000-8000-000000000005'

@@ -39,8 +39,8 @@ async function main() {
     if (updates.filter(v => v.status === 'fulfilled').length !== 1 || updates.filter(v => v.status === 'rejected' && v.reason.code === '40001').length !== 1) throw new Error(`update race ${JSON.stringify(updates)}`);
 
     const identities = await Promise.allSettled([
-      a.query("select public.e10_org_decide_customer_identity($1,$2,'channel_account','market','same-account',null,'attach',null,'review','{}',$3)", [org, x.c1, `${x.run}-identity-a`]),
-      b.query("select public.e10_org_decide_customer_identity($1,$2,'channel_account','market','same-account',null,'attach',null,'review','{}',$3)", [org, x.c2, `${x.run}-identity-b`])
+      a.query("select public.e10_org_decide_customer_identity($1,$2,'channel_account','whatnot','same-account',null,'attach',null,'review','{}',$3)", [org, x.c1, `${x.run}-identity-a`]),
+      b.query("select public.e10_org_decide_customer_identity($1,$2,'channel_account','whatnot','same-account',null,'attach',null,'review','{}',$3)", [org, x.c2, `${x.run}-identity-b`])
     ]);
     if (identities.filter(v => v.status === 'fulfilled').length !== 1 || identities.filter(v => v.status === 'rejected' && v.reason.code === '22023').length !== 1) throw new Error(`identity race ${JSON.stringify(identities)}`);
 

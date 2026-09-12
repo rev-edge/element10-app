@@ -87,8 +87,10 @@ begin
   alter table public.e10_inventory_movements enable trigger e10_capture_native_inventory_event_trg;
   receipt:=(reversal->>'receipt_id')::uuid;
   original_movement:=(reversal->>'movement_id')::uuid;
-  delete from public.e10_commercial_events where organization_id=o and inventory_movement_id=original_movement;
-  if exists(select 1 from public.e10_commercial_events where organization_id=o and inventory_movement_id=original_movement) then
+  delete from public.e10_commercial_events where organization_id=o
+    and (inventory_movement_id=original_movement or payload->>'receipt_id'=receipt::text);
+  if exists(select 1 from public.e10_commercial_events where organization_id=o
+    and (inventory_movement_id=original_movement or payload->>'receipt_id'=receipt::text)) then
     raise exception 'historical originless fixture construction failed';end if;
   -- Hostile session state cannot claim this historical replay is new.
   perform set_config('e10.new_receipt_origin','on',true);
