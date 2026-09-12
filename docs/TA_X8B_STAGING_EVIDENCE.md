@@ -87,7 +87,9 @@ X8b functions. Full SHA-256 values from staging:
 - `e10_action_drafts`, `e10_action_draft_revisions`,
   `e10_action_draft_decisions` and `e10_action_draft_commands` all have RLS
   enabled, zero policies, no `anon` or `authenticated` table privileges, and
-  service-role CRUD access.
+  limited service-role access. Drafts grant `SELECT`, `INSERT` and `UPDATE`;
+  revision, decision and command history grant `SELECT` and `INSERT`. None of
+  the four grants `DELETE`.
 - All nine internal `e10` functions are `SECURITY DEFINER`, fix
   `search_path=public`, deny `PUBLIC`, `anon` and `authenticated`, and grant
   only `service_role`.
