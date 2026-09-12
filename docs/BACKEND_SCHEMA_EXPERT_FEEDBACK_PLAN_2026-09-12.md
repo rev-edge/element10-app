@@ -817,6 +817,31 @@ Local tests prove validated foreign keys, no uncataloged grants, fail-closed
 reserved defaults, false-row denial, platform-operation isolation, registry
 read visibility and client mutation denial.
 
+### C4: platform identity and live presentation bridge
+
+Status: implemented and locally verified 2026-09-12. Awaiting review before C5.
+
+Migration `20260912172412_e10_schema_review_c4_platform_buyer_presentation_bridge.sql`
+adds a shared stable platform registry, append-only reviewed name history and
+explicit legacy channel/provider keys. Whatnot is the initial governed platform.
+Platform IDs are added to customer channel identities, authorized-platform
+presence streams, observed channels, operational break-slot buyers and native
+sales. New unknown platform strings fail closed; recognizable legacy rows are
+backfilled without changing their external account evidence.
+
+The same external account may map to different organization-owned customers
+because customer identity remains scoped by organization and platform. A
+bounded live-buyer lookup returns recognized, ambiguous or unrecognized status
+to the session owner without creating an Element 10 login or a duplicate buyer
+record.
+
+Native sale assignment and release now enqueue service-only presentation events
+from the operational transaction. They do not write `e10_obs_*`; those tables
+remain observed capture evidence rather than the system of record. Tests prove
+platform-admin-only naming, append-only name revisions, optimistic concurrency,
+known/unknown platform stamping, live customer lookup, buyer platform stamping,
+presentation enqueue, release enqueue and zero observed-table side effects.
+
 ## Appendix: exact base-table JSON inventory
 
 ```text
