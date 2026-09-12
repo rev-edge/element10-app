@@ -18,7 +18,7 @@ are collected in `TA_X1_X8_FINAL_ACCEPTANCE_MATRIX.md`.
 | Named case | Status | Exact executable evidence and assertion |
 | --- | --- | --- |
 | Identity across releases | implemented | `tests/ta_x1_identity_foundation_test.sql`, release/variant identity fixture and `language_edition_identity`; `tests/ta_x7d2_catalog_entity_projection_test.sql`, catalog entity identity projection |
-| Identity across copies | implemented | `tests/ta_x1_identity_foundation_test.sql`, `variant_copy_split`, `copy_serial`, and physical identity survives inventory deletion |
+| Identity across copies | implemented | `tests/ta_x1_identity_foundation_test.sql`, `variant_copy_split`, one explicit `copy_serial`, and physical identity survives inventory deletion; `tests/ta_x7d2_catalog_entity_projection_test.sql`, two owned copies of one catalog variant remain distinct |
 | Alias uncertainty | implemented | `tests/ta_x7d0_facet_governance_test.sql`, reviewed assert/revoke chains; `tests/ta_x7d2_screener_cohorts_test.sql`, exact governed facet filtering |
 | Multiple subjects | implemented | `tests/ta_x1_identity_foundation_test.sql`, `multi_subject`; `tests/ta_x7d2_catalog_entity_projection_test.sql`, dual-subject projection |
 | Rookie distinction | implemented | `tests/ta_x7d0_facet_governance_test.sql`, separate designation and subject-season decisions; `tests/ta_x7d2_screener_cohorts_test.sql`, per-subject rookie filter |
@@ -49,10 +49,10 @@ are collected in `TA_X1_X8_FINAL_ACCEPTANCE_MATRIX.md`.
 | Cross-shop privacy | implemented | `tests/a7_hostile_matrix_test.sql`, 29/29 cross-org family matrix; X7/X8 scopes remain organization-bound |
 | Non-card core | implemented | `tests/ta_x4h_noncard_core_test.sql`, Cards-disabled apparel receipt/cost/generic reservation and one unique used camera receipt/cost/reserve/consume with no catalog variant or break session; concurrent companion proves no overcommit |
 | Player affiliation | implemented | `tests/ta_x1b_player_affiliations_test.sql`, dated affiliation and preserved depicted-team context; concurrent correction/revocation companion |
-| AI identity ambiguity | implemented | `tests/ta_x8b_action_draft_test.sql`, unresolved proposal values and inert draft; `tests/ta_x8b_commit_delegation_test.sql`, closed operation allowlist. No identity-merge operation is supported. |
-| Full-dataset grid | implemented | `tests/ta_x7b_spend_reporting_test.js` and `ta_x7e2_inventory_valuation_test.sql`, totals computed across 205 rows before 200-row pagination and stable second page |
+| AI identity ambiguity | implemented | `tests/ta_f4_identity_ambiguity_review_test.sql`, two distinct same-name players, explicit known/unknown confidence, bounded review and rejection preservation; `tests/ta_f4_identity_ambiguity_review_guards_test.sql` and concurrent companion, hostile access, validation, append-only, idempotency, source uniqueness, CAS and post-lock authority. No approval, canonical link, merge, split or automatic candidate generation is supported. |
+| Full-dataset grid | implemented | `tests/ta_x7f_customer_spend_grid_test.js`, aggregate spend bounds and stable sorts apply across the full authorized customer cohort before bounded pagination, with matching full-cohort totals and cursor traversal; 100,000-line and 2,000-transaction resource fixtures are covered by the same suite |
 | Customer net spend | implemented | `tests/ta_x7b_spend_reporting_test.js`, separate merchandise/refund/shipping/tax components and visible metric definition |
-| Customer duplicate sources | implemented | `tests/ta_x6d_customer_transaction_adjustments_test.js`, durable source components; `tests/ta_x6d3_source_reconciliation` gate in CI, one contribution after reconciliation |
+| Customer duplicate sources | implemented | `tests/ta_x6d_customer_transaction_adjustments_test.js`, durable source components and one contribution after source reconciliation; the registered CI step named `TA-X6d.3 reviewed adjustment, unknown-component finalization and source-reconciliation gate` runs that executable suite |
 | Customer identity correction | implemented | `tests/ta_x6e_customer_resolution_test.js` and `ta_x6f_posted_customer_attribution_test.js`, immutable merge/split/reattribution without source rewrite |
 | Customer coverage/privacy | implemented | `tests/ta_x7b_spend_reporting_test.js`, coverage and financial access; `tests/ta_x8b_customer_preview_permissions_test.sql`, financial/contact redaction |
 | Retail/break dimensions | implemented | `tests/ta_x6c_customer_transaction_posting_test.sql`, typed mixed lines; `tests/ta_x7b_spend_reporting_test.js`, official versus provisional and combined dimensions |
@@ -76,7 +76,7 @@ are collected in `TA_X1_X8_FINAL_ACCEPTANCE_MATRIX.md`.
 | Language/edition | implemented | `tests/ta_x1_identity_foundation_test.sql`, `language_edition_identity` creates two releases/variants for identical display strings but distinct language/edition |
 | Portfolio attribution | implemented | `tests/ta_x7e2_inventory_valuation_test.sql`, separate market movement, acquisition count/value, disposal count/value, and comparability |
 | Index/population evidence | implemented | `tests/ta_x7e2_inventory_valuation_test.sql`, index method/version and dated scoped population snapshot; no sale fabrication |
-| Cross-catalog Yamal query | Track B | Semantic backend is implemented by `tests/ta_x7d2_screener_cohorts_test.sql`: subject + per-subject rookie designation/season + condition cohort over full authorized results. The named Yamal demo dataset/UI is not claimed. |
+| Cross-catalog Yamal query | Track B | Backend query behavior is implemented by `tests/ta_x7d2_cross_product_rookie_psa9_test.sql`: one public query combines subject, per-subject rookie designation, graded condition, PSA and grade 9 across two releases, with limit-one continuation and unknown-rookie/grade-8 exclusions. The wrong-subject negative queries a subject with no variants; it is not a separate wrong-subject variant fixture. The named Yamal dataset and UI remain Track B. |
 | Query grain and drill-down | implemented | `tests/ta_x7d2_public_screener_test.sql`, distinct catalog/owned/observation grains; `tests/ta_x7d2_public_drilldown_test.sql`, source-bound cursor and preserved context |
 
 ## Purchasing invariants PUR-01 through PUR-07

@@ -53,15 +53,27 @@ Ordinary purchasing writers, all returning `jsonb`:
 - `e10_org_create_supplier_credit(...)`, with the same header arguments as invoice creation
 - `e10_org_amend_supplier_invoice(p_org uuid,p_supplier_invoice_id uuid,p_expected_revision integer,p_currency text,p_document_date date,p_total_amount numeric,p_lines jsonb,p_reason text,p_idempotency_key text)`
 - `e10_org_amend_supplier_credit(...)`, with the corresponding credit ID
-- `e10_org_review_supplier_invoice`, `e10_org_approve_supplier_invoice`, `e10_org_void_supplier_invoice`, and credit equivalents, each `(p_org uuid,p_document_id uuid,p_expected_revision integer,p_reason text,p_idempotency_key text)`
+- `e10_org_review_supplier_invoice`, `e10_org_approve_supplier_invoice`, and `e10_org_void_supplier_invoice`, each `(p_org uuid,p_supplier_invoice_id uuid,p_expected_revision integer,p_reason text,p_idempotency_key text)`
+- `e10_org_review_supplier_credit`, `e10_org_approve_supplier_credit`, and `e10_org_void_supplier_credit`, each `(p_org uuid,p_supplier_credit_id uuid,p_expected_revision integer,p_reason text,p_idempotency_key text)`
 - `e10_org_allocate_invoice_to_po(p_org uuid,p_invoice_line_id uuid,p_purchase_order_line_id uuid,p_expected_invoice_revision integer,p_expected_purchase_order_revision integer,p_quantity numeric,p_reason text,p_idempotency_key text)`
 - `e10_org_release_invoice_from_po(...)`, same identities/revisions and release quantity
 - `e10_org_allocate_credit_to_invoice(p_org uuid,p_credit_line_id uuid,p_invoice_line_id uuid,p_expected_credit_revision integer,p_expected_invoice_revision integer,p_amount numeric,p_reason text,p_idempotency_key text)`
 - `e10_org_release_credit_from_invoice(...)`, same identities/revisions and release amount
 
-Capabilities are operation-specific: `act.purchasing_prepare`, the reviewed
-approval capability, or `act.resolve_recovery`. Location authority is rechecked
-inside the writer. Invoice approval does not receive stock or assert payment.
+Capabilities are operation-specific:
+
+| Operation | Required capability |
+| --- | --- |
+| Create or amend PO, invoice or credit | `act.purchasing_prepare` |
+| Submit PO or review invoice/credit | `act.purchasing_prepare` |
+| Approve PO, invoice or credit | `act.purchasing_approve` |
+| Cancel/close PO or void invoice/credit | `act.purchasing_cancel` |
+| Create receipt batch | `act.create_receiving` |
+| Reverse receipt or correct disposition | `act.resolve_recovery` |
+| Allocate or release invoice/credit relationships | `act.purchasing_prepare` |
+
+Location authority is rechecked inside the applicable writer. Invoice approval
+does not receive stock or assert payment.
 
 Comment and bounded workspace APIs:
 
@@ -145,7 +157,9 @@ defined in their migrations and wrapped without broadening by X8a:
 - Customer: `e10_org_customer_spend_summary`,
   `e10_org_customer_spend_contributions`,
   `e10_org_customer_spend_lineage`, and
-  `e10_org_customer_provisional_activity`. Capabilities:
+  `e10_org_customer_provisional_activity`. The final full-dataset grid is
+  `e10_org_customer_spend_grid_v2(p_org uuid,p_window_mode text,p_from timestamptz,p_to timestamptz,p_observation_cutoff timestamptz,p_currency text,p_timezone text,p_week_start integer,p_customer uuid DEFAULT NULL,p_purchase_kind text DEFAULT NULL,p_location uuid DEFAULT NULL,p_channel text DEFAULT NULL,p_product uuid DEFAULT NULL,p_configuration uuid DEFAULT NULL,p_copy uuid DEFAULT NULL,p_session uuid DEFAULT NULL,p_capture_source text DEFAULT NULL,p_min_known_official_subtotal numeric DEFAULT NULL,p_max_known_official_subtotal numeric DEFAULT NULL,p_sort text DEFAULT 'customer_id_asc',p_limit integer DEFAULT 100,p_cursor jsonb DEFAULT NULL,p_expected_dataset_revision bigint DEFAULT NULL,p_expected_query_fingerprint text DEFAULT NULL) -> jsonb`.
+  Capabilities:
   `act.view_customer_financials`, engagement and location financial access as
   applicable.
 - Market: `e10_org_market_screener(p_org uuid,p_scope text,p_grouping text,p_metric text,p_observation_kind text,p_observed_from timestamptz,p_observed_to timestamptz,p_as_of timestamptz,p_currency text,p_source_mode text,p_source_kind text,p_source_connections jsonb,p_filters jsonb,p_sort text,p_limit integer,p_cursor uuid) -> jsonb` and
@@ -178,6 +192,32 @@ normative in `TA_X8_IMPLEMENTATION_CONTRACT.md` sections "X8a exact target and
 schema map" and "Common validation and envelope". Unknown operation, argument,
 table or function names fail. Query-control context/cursor metadata is the only
 allowed write; business state is unchanged.
+
+`customer.spend_summary` now dispatches to the X7f v2 full-dataset grid while
+retaining the same operation string. It accepts the v2 aggregate bounds, stable
+sort, JSON cursor, expected dataset revision and expected query fingerprint.
+It rejects mixed v1/v2 cursor arguments and redacts customer names when contact
+visibility is absent.
+
+## Player identity ambiguity review
+
+These are platform-admin review APIs, not organization-member catalog writers:
+
+- `e10_platform_propose_player_identity_review(p_source_namespace text,p_source_key text,p_source_display_name text,p_proposer_kind text,p_proposer_name text,p_proposer_version text,p_source_evidence jsonb,p_candidates jsonb,p_reason text,p_evidence jsonb,p_idempotency_key text) -> jsonb`
+- `e10_platform_reject_player_identity_review(p_case_id uuid,p_expected_revision bigint,p_reason text,p_evidence jsonb,p_idempotency_key text) -> jsonb`
+- `e10_platform_player_identity_review_cases(p_status text DEFAULT NULL,p_limit integer DEFAULT 50,p_after_case_id uuid DEFAULT NULL) -> jsonb`
+
+They require current platform-admin authority and preserve distinct UUID player
+identities when display names match. Candidate confidence is explicitly known
+with a numeric value in `[0,1]`, or unknown with null confidence. Model proposals
+require a model version. Tables and decision history are append-only.
+
+This contract deliberately has no approve, canonical-link, merge, split or
+automatic-candidate-generation operation. Rejection does not mutate players or
+provider mappings. An exact proposal replay returns the original proposal
+operation result, so its returned status is historical and must not be treated
+as a current case-status read after a later rejection. Use the bounded reader
+for current state.
 
 ### Reviewable action drafts
 
@@ -212,6 +252,8 @@ Database acknowledgement is not proof of provider delivery.
 - X8 normative contract: `TA_X8_IMPLEMENTATION_CONTRACT.md`
 - X8 evidence: `TA_X8A_STAGING_EVIDENCE.md`,
   `TA_X8B_STAGING_EVIDENCE.md`, `TA_X8C_STAGING_EVIDENCE.md`
+- Final closures: `TA_X4H_X7F_STAGING_EVIDENCE.md`,
+  `TA_F3_STAGING_EVIDENCE.md`, `TA_F4_STAGING_EVIDENCE.md`
 - SQL and two-connection fixtures: `tests/ta_x1_*` through `tests/ta_x8_*`
 
 ## Unsupported and deferred behavior
