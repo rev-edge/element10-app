@@ -89,6 +89,18 @@ begin
       'line_no',1,'configuration_version_id','a7000000-0000-4000-8000-00000000e305','ordered_quantity',10,
       'estimated_unit_cost',12.50)),'x3c-create-2');
   po:=(r->>'purchase_order_id')::uuid; perform set_config('e10.test.x3c_po',po::text,true);
+  if r#>>'{line_id_map,0,client_id}'<>'a7000000-0000-4000-8000-00000000e307'
+    or r#>>'{line_id_map,0,stored_id}'=r#>>'{line_id_map,0,client_id}'then raise exception'public PO line identity map missing: %',r;end if;
+  perform set_config('e10.test.x3c_line',r#>>'{line_id_map,0,stored_id}',true);
+  perform set_config('role','postgres',true);
+  if not exists(select 1 from public.e10_purchase_order_lines where organization_id=o and purchase_order_id=po
+      and id=md5(o::text||'|e10_purchase_order_lines|'||'a7000000-0000-4000-8000-00000000e307'::uuid::text)::uuid)
+    or exists(select 1 from public.e10_purchase_order_lines where organization_id=o and purchase_order_id=po
+      and id='a7000000-0000-4000-8000-00000000e307')then
+    raise exception 'public PO writer did not persist the deterministic tenant-scoped line identity: %',
+      (select jsonb_agg(id) from public.e10_purchase_order_lines where organization_id=o and purchase_order_id=po);
+  end if;
+  perform set_config('role','authenticated',true);
   r:=public.e10_org_create_purchase_order(o,'a7000000-0000-4000-8000-00000000e302','a7000000-0000-4000-8000-00000000e301',
     'X3C-PO-2','CAD',null,jsonb_build_array(jsonb_build_object('id','a7000000-0000-4000-8000-00000000e307',
       'line_no',1,'configuration_version_id','a7000000-0000-4000-8000-00000000e305','ordered_quantity',10,
@@ -208,18 +220,21 @@ begin
         'configuration_version_id','a7000000-0000-4000-8000-00000000e305','ordered_quantity',2,'estimated_unit_cost',14)),
     'add and renumber','x3c-amend-add');
   if r->>'status'<>'draft' or (r->>'revision')::integer<>5 then raise exception 'add/renumber amendment invalid'; end if;
+  perform set_config('e10.test.x3c_line2',(
+    select value->>'stored_id' from jsonb_array_elements(r->'line_id_map') value
+    where value->>'client_id'='a7000000-0000-4000-8000-00000000e308')::text,true);
   r:=public.e10_org_amend_purchase_order(o,po,5,'a7000000-0000-4000-8000-00000000e302',
     'a7000000-0000-4000-8000-00000000e301','X3C-PO-2','CAD',null,
     jsonb_build_array(jsonb_build_object('id','a7000000-0000-4000-8000-00000000e308','line_no',1,
       'configuration_version_id','a7000000-0000-4000-8000-00000000e305','ordered_quantity',2,'estimated_unit_cost',14)),
     'remove old line','x3c-amend-remove');
   r:=public.e10_org_transition_purchase_order(o,po,6,'submit','ready after amendment','x3c-resubmit');
-  begin perform public.e10_org_receive_po_line(o,'a7000000-0000-4000-8000-00000000e307','x3c-item',1,0,0,null,now(),'[]','x3c-cancelled-line');
+  begin perform public.e10_org_receive_po_line(o,current_setting('e10.test.x3c_line')::uuid,'x3c-item',1,0,0,null,now(),'[]','x3c-cancelled-line');
     raise exception 'cancelled PO line remained receivable'; exception when sqlstate '55000' then null; end;
   perform set_config('request.jwt.claims',jsonb_build_object('sub','a7000000-0000-4000-8000-00000000e312','role','authenticated')::text,true);
   r:=public.e10_org_transition_purchase_order(o,po,7,'approve','approved after amendment','x3c-reapprove');
   perform set_config('request.jwt.claims',jsonb_build_object('sub','a7000000-0000-4000-8000-00000000e311','role','authenticated')::text,true);
-  r:=public.e10_org_receive_po_line(o,'a7000000-0000-4000-8000-00000000e308','x3c-item',2,0,0,null,
+  r:=public.e10_org_receive_po_line(o,current_setting('e10.test.x3c_line2')::uuid,'x3c-item',2,0,0,null,
     '2026-09-11T19:00:00Z','[]','x3c-receive-active');
   if r->>'replay'<>'false' then raise exception 'active-line receipt failed'; end if;
   perform set_config('request.jwt.claims',jsonb_build_object('sub','a7000000-0000-4000-8000-00000000e312','role','authenticated')::text,true);
@@ -229,7 +244,7 @@ begin
   if r->>'replay'<>'true' or r->>'status'<>'closed' or (r->>'revision')::integer<>9 then
     raise exception 'terminal transition replay failed: %',r; end if;
   perform set_config('request.jwt.claims',jsonb_build_object('sub','a7000000-0000-4000-8000-00000000e311','role','authenticated')::text,true);
-  r:=public.e10_org_receive_po_line(o,'a7000000-0000-4000-8000-00000000e308','x3c-item',2,0,0,null,
+  r:=public.e10_org_receive_po_line(o,current_setting('e10.test.x3c_line2')::uuid,'x3c-item',2,0,0,null,
     '2026-09-11T19:00:00Z','[]','x3c-receive-active');
   if r->>'replay'<>'true' then raise exception 'historical receipt replay failed after PO close'; end if;
 end $$;
@@ -309,9 +324,9 @@ do $$
 declare o uuid:='e1000000-0000-4000-8000-0000000000a6'; po uuid:=current_setting('e10.test.x3c_po')::uuid;
 begin
   if not exists(select 1 from public.e10_purchase_order_lines where organization_id=o and purchase_order_id=po
-      and id='a7000000-0000-4000-8000-00000000e308' and line_no=1 and state='active')
+      and id=current_setting('e10.test.x3c_line2')::uuid and line_no=1 and state='active')
     or not exists(select 1 from public.e10_purchase_order_lines where organization_id=o and purchase_order_id=po
-      and id='a7000000-0000-4000-8000-00000000e307' and line_no=2 and state='cancelled') then
+      and id=current_setting('e10.test.x3c_line')::uuid and line_no=2 and state='cancelled') then
     raise exception 'add/renumber/remove line state invalid'; end if;
   if (select count(*) from public.e10_purchase_order_revisions where organization_id=o and purchase_order_id=po)<>9 then
     raise exception 'revision history incomplete'; end if;

@@ -276,12 +276,36 @@ begin
     'd31b0000-0000-4000-8000-000000000001','d31b0000-0000-4000-8000-000000000007',
     'X3D1B-EVENT-HISTORY','CAD',null,5,null,null,null,null,null,lines,'x3d1b-history-create');
   v_document_id:=(created->>'supplier_invoice_id')::uuid;
+  if created#>>'{line_id_map,0,client_id}'<>line_id::text or created#>>'{line_id_map,0,stored_id}'=line_id::text then
+    raise exception 'public invoice create line identity map missing: %',created;
+  end if;
+  perform set_config('role','postgres',true);
+  if not exists(select 1 from public.e10_supplier_invoice_lines where organization_id='d31b0000-0000-4000-8000-000000000001'
+      and supplier_invoice_id=v_document_id
+      and id=md5('d31b0000-0000-4000-8000-000000000001'::uuid::text||'|e10_supplier_invoice_lines|'||line_id::text)::uuid)
+    or exists(select 1 from public.e10_supplier_invoice_lines where organization_id='d31b0000-0000-4000-8000-000000000001'
+      and supplier_invoice_id=v_document_id and id=line_id)then
+    raise exception 'public invoice create did not persist tenant-scoped line identity';
+  end if;
+  perform set_config('role','authenticated',true);
   amended:=public.e10_org_amend_supplier_invoice(
     'd31b0000-0000-4000-8000-000000000001',v_document_id,1,'CAD',null,6,
     jsonb_set(jsonb_set(lines,'{0,description}','"event revision two"'::jsonb),
       '{0,line_amount}','6'::jsonb),
     'second immutable revision','x3d1b-history-amend');
   if amended->>'revision'<>'2' then raise exception 'create-amend history setup failed'; end if;
+  if amended#>>'{line_id_map,0,stored_id}'<>created#>>'{line_id_map,0,stored_id}'then
+    raise exception 'public invoice amend did not preserve scoped line identity: %',amended;
+  end if;
+  perform set_config('role','postgres',true);
+  if not exists(select 1 from public.e10_supplier_invoice_lines where organization_id='d31b0000-0000-4000-8000-000000000001'
+      and supplier_invoice_id=v_document_id
+      and id=md5('d31b0000-0000-4000-8000-000000000001'::uuid::text||'|e10_supplier_invoice_lines|'||line_id::text)::uuid)
+    or exists(select 1 from public.e10_supplier_invoice_lines where organization_id='d31b0000-0000-4000-8000-000000000001'
+      and supplier_invoice_id=v_document_id and id=line_id)then
+    raise exception 'public invoice amend changed tenant-scoped line identity';
+  end if;
+  perform set_config('role','authenticated',true);
   amended:=public.e10_org_amend_supplier_invoice(
     'd31b0000-0000-4000-8000-000000000001',v_document_id,2,'CAD',null,7,
     jsonb_set(jsonb_set(lines,'{0,description}','"event revision three"'::jsonb),
