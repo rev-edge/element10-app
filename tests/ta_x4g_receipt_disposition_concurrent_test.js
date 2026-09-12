@@ -5,7 +5,7 @@ const CONN=process.env.E10_DB_URL||'postgresql://postgres:postgres@127.0.0.1:543
 const org='e1000000-0000-4000-8000-0000000000a6';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const x=Object.fromEntries(['user','role','supplier','location','product','config'].map(k=>[k,randomUUID()]));
-x.run=randomUUID();x.items=['compete','cas','dispwin','revwin','auth','replay'].map(k=>`x4g-${k}-${x.run}`);
+x.run=randomUUID();x.items=['compete','cas','dispwin','revwin','auth','replay','corrdisp','corrrev','location','org'].map(k=>`x4g-${k}-${x.run}`);
 const jwt=JSON.stringify({sub:x.user,role:'authenticated'});
 const line=item=>[{line_no:1,configuration_version_id:x.config,inventory_item_id:item,accepted_quantity:0,damaged_quantity:0,quarantined_quantity:3,expected_allocations:[]}];
 async function auth(c){await c.query('select set_config($1,$2,true)',['request.jwt.claims',jwt]);await c.query('set local role authenticated');}
@@ -109,7 +109,41 @@ async function main(){
   const replayCall=dispose(B,replayReceipt,'damage',1,null,0,'same',replayKey).then(r=>{replayResult=r;}).catch(e=>{replayError=e;});
   await waitForLock(setup,replayPid,'same-key disposition');await A.query('commit');await replayCall;await B.query('commit');
   if(replayError||original.replay||!replayResult.replay||original.decision_id!==replayResult.decision_id)throw new Error(`same-key disposition mismatch ${replayError||JSON.stringify(replayResult)}`);
-  console.log(`TA-X4g disposition races: PASS (compete pid=${competePid}; CAS pid=${casPid}; disposition-wins pid=${dispWinPid}; reversal-wins pid=${revWinPid}; authority pid=${authPid}; replay pid=${replayPid})`);
+
+  // A correction naming a predecessor wins against reversal. The reversal
+  // detects the generation change and rolls back without a command or event.
+  const corrDisp=await receive(setup,x.items[6],`x4g-${x.run}-corrdisp-receive`);await setup.query('begin');await auth(setup);const corrDispBase=await dispose(setup,corrDisp,'accept',2,null,0,'base',`x4g-${x.run}-corrdisp-base`);await setup.query('commit');
+  await A.query('begin');await auth(A);const corrDispWinner=await dispose(A,corrDisp,'damage',1,corrDispBase.decision_id,1,'correction wins',`x4g-${x.run}-corrdisp-correct`);
+  await B.query('begin');await auth(B);const corrDispPid=(await B.query('select pg_backend_pid() pid')).rows[0].pid;let corrDispReverseError;
+  const corrDispReverseCall=B.query('select public.e10_org_reverse_receipt_batch($1,$2,$3,$4)',[org,corrDisp.receipt_id,'losing reversal',`x4g-${x.run}-corrdisp-reverse`]).catch(e=>{corrDispReverseError=e;});
+  await waitForLock(setup,corrDispPid,'correction before reversal');await A.query('commit');await corrDispReverseCall;await B.query('rollback').catch(()=>{});
+  if(!corrDispWinner.ok||!corrDispReverseError||corrDispReverseError.code!=='40001'||corrDispReverseError.message!=='receipt_disposition_changed')throw new Error(`correction-wins race escaped ${corrDispReverseError&&corrDispReverseError.code}:${corrDispReverseError&&corrDispReverseError.message}`);
+  const corrDispProof=(await setup.query('select (select count(*) from public.e10_receipt_disposition_decisions where organization_id=$1 and stock_receipt_line_id=$2) decisions,(select count(*) from public.e10_stock_receipt_reversals where organization_id=$1 and stock_receipt_id=$3) reversals',[org,corrDisp.lines[0].receipt_line_id,corrDisp.receipt_id])).rows[0];
+  if(Number(corrDispProof.decisions)!==2||Number(corrDispProof.reversals)!==0)throw new Error(`correction-wins residue ${JSON.stringify(corrDispProof)}`);
+
+  // Reversal wins against an actual correction naming a predecessor. The
+  // waiter rereads terminal state and leaves no successor decision or command.
+  const corrRev=await receive(setup,x.items[7],`x4g-${x.run}-corrrev-receive`);await setup.query('begin');await auth(setup);const corrRevBase=await dispose(setup,corrRev,'accept',2,null,0,'base',`x4g-${x.run}-corrrev-base`);await setup.query('commit');
+  await A.query('begin');await auth(A);const corrRevWinner=(await A.query('select public.e10_org_reverse_receipt_batch($1,$2,$3,$4) r',[org,corrRev.receipt_id,'reversal wins correction race',`x4g-${x.run}-corrrev-reverse`])).rows[0].r;
+  await B.query('begin');await auth(B);const corrRevPid=(await B.query('select pg_backend_pid() pid')).rows[0].pid;let corrRevError;
+  const corrRevCall=dispose(B,corrRev,'damage',1,corrRevBase.decision_id,1,'losing correction',`x4g-${x.run}-corrrev-correct`).catch(e=>{corrRevError=e;});
+  await waitForLock(setup,corrRevPid,'reversal before correction');await A.query('commit');await corrRevCall;await B.query('rollback').catch(()=>{});
+  if(!corrRevWinner.ok||!corrRevError||corrRevError.code!=='55000'||corrRevError.message!=='receipt_disposition_closed')throw new Error(`reversal-wins-correction race escaped ${corrRevError&&corrRevError.code}:${corrRevError&&corrRevError.message}`);
+  const corrRevProof=(await setup.query('select (select count(*) from public.e10_receipt_disposition_decisions where organization_id=$1 and stock_receipt_line_id=$2) decisions,(select count(*) from public.e10_receipt_disposition_commands where organization_id=$1 and idempotency_key=$3) losing_commands',[org,corrRev.lines[0].receipt_line_id,`x4g-${x.run}-corrrev-correct`])).rows[0];
+  if(Number(corrRevProof.decisions)!==1||Number(corrRevProof.losing_commands)!==0)throw new Error(`reversal-wins-correction residue ${JSON.stringify(corrRevProof)}`);
+
+  // Destination permission and organization status are both reread after a
+  // real receipt-row wait, not trusted from the pre-lock authorization check.
+  const locReceipt=await receive(setup,x.items[8],`x4g-${x.run}-location-receive`);
+  await A.query('begin');await A.query('select id from public.e10_stock_receipts where organization_id=$1 and id=$2 for update',[org,locReceipt.receipt_id]);await B.query('begin');await auth(B);const locPid=(await B.query('select pg_backend_pid() pid')).rows[0].pid;let locError;
+  const locCall=dispose(B,locReceipt,'accept',1,null,0,'location revoked',`x4g-${x.run}-location-disposition`).catch(e=>{locError=e;});await waitForLock(setup,locPid,'destination revocation');await setup.query('delete from public.e10_location_role_permissions where organization_id=$1 and location_id=$2 and role_id=$3',[org,x.location,x.role]);await A.query('commit');await locCall;await B.query('rollback').catch(()=>{});
+  if(!locError||locError.code!=='42501'||locError.message!=='receipt_disposition_denied')throw new Error(`destination revocation escaped ${locError&&locError.code}:${locError&&locError.message}`);await setup.query('insert into public.e10_location_role_permissions(organization_id,location_id,role_id,can_receive)values($1,$2,$3,true)',[org,x.location,x.role]);
+
+  const orgReceipt=await receive(setup,x.items[9],`x4g-${x.run}-org-receive`);
+  await A.query('begin');await A.query('select id from public.e10_stock_receipts where organization_id=$1 and id=$2 for update',[org,orgReceipt.receipt_id]);await B.query('begin');await auth(B);const orgPid=(await B.query('select pg_backend_pid() pid')).rows[0].pid;let orgError;
+  const orgCall=dispose(B,orgReceipt,'accept',1,null,0,'organization suspended',`x4g-${x.run}-org-disposition`).catch(e=>{orgError=e;});await waitForLock(setup,orgPid,'organization suspension');await setup.query("update public.e10_organizations set status='suspended' where id=$1",[org]);await A.query('commit');await orgCall;await B.query('rollback').catch(()=>{});
+  if(!orgError||orgError.code!=='42501'||orgError.message!=='receipt_disposition_denied')throw new Error(`organization suspension escaped ${orgError&&orgError.code}:${orgError&&orgError.message}`);await setup.query("update public.e10_organizations set status='active' where id=$1",[org]);
+  console.log(`TA-X4g disposition races: PASS (initial/CAS/reversal, correction both directions, authority/location/org rereads, replay; waiter pid=${orgPid})`);
  }finally{
   await A.query('rollback').catch(()=>{});await B.query('rollback').catch(()=>{});await setup.query('rollback').catch(()=>{});
   await cleanup(setup);await Promise.all([A.end(),B.end(),setup.end()]);

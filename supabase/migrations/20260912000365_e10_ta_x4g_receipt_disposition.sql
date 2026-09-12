@@ -103,6 +103,49 @@ $$;
 revoke all on function e10.receipt_line_effective_quantities(uuid,uuid) from public,anon,authenticated;
 grant execute on function e10.receipt_line_effective_quantities(uuid,uuid) to service_role;
 
+-- Receipt-backed lots are the materialized projection used by the existing lot
+-- writers. Fail closed if that projection ever disagrees with the shared
+-- effective-quantity interpretation. Legacy lots without a receipt line are
+-- deliberately outside this assertion.
+create function e10.assert_receipt_lot_projection(p_org uuid,p_lot_id uuid) returns void
+language plpgsql stable security definer set search_path=public as $$
+declare line_id uuid;lot record;q record;
+begin
+  select l.stock_receipt_line_id,l.accepted_quantity,l.quarantined_quantity,r.status receipt_status
+    into lot from public.e10_inventory_lots l
+    join public.e10_stock_receipt_lines rl on(rl.organization_id,rl.id)=(l.organization_id,l.stock_receipt_line_id)
+    join public.e10_stock_receipts r on(r.organization_id,r.id)=(rl.organization_id,rl.stock_receipt_id)
+    where l.organization_id=p_org and l.id=p_lot_id;
+  line_id:=lot.stock_receipt_line_id;
+  if not found or line_id is null or lot.receipt_status not in('posted','corrected') then return;end if;
+  select * into q from e10.receipt_line_effective_quantities(p_org,line_id);
+  if not found or lot.accepted_quantity is distinct from q.effective_accepted
+    or lot.quarantined_quantity is distinct from q.unresolved_quarantined then
+    raise exception using errcode='55000',message='receipt_lot_projection_diverged';
+  end if;
+end $$;
+revoke all on function e10.assert_receipt_lot_projection(uuid,uuid) from public,anon,authenticated;
+grant execute on function e10.assert_receipt_lot_projection(uuid,uuid) to service_role;
+
+-- Preserve X4b byte-compatible API behavior while making its receipt-backed
+-- availability decision consume the shared X4g interpretation under the same
+-- per-lot advisory lock. The original implementation remains service-only.
+alter function public.e10_org_lot_reserve(uuid,uuid,numeric,uuid,text)
+  rename to _e10_org_lot_reserve_x4b;
+revoke all on function public._e10_org_lot_reserve_x4b(uuid,uuid,numeric,uuid,text)
+  from public,anon,authenticated;
+grant execute on function public._e10_org_lot_reserve_x4b(uuid,uuid,numeric,uuid,text) to service_role;
+create function public.e10_org_lot_reserve(
+  p_org uuid,p_lot_id uuid,p_quantity numeric,p_break_session_id uuid,p_idempotency_key text
+) returns jsonb language plpgsql security definer set search_path=public as $$
+begin
+  perform pg_advisory_xact_lock(hashtextextended(p_org::text||'|lot|'||p_lot_id::text,0));
+  perform e10.assert_receipt_lot_projection(p_org,p_lot_id);
+  return public._e10_org_lot_reserve_x4b(p_org,p_lot_id,p_quantity,p_break_session_id,p_idempotency_key);
+end $$;
+revoke all on function public.e10_org_lot_reserve(uuid,uuid,numeric,uuid,text) from public,anon;
+grant execute on function public.e10_org_lot_reserve(uuid,uuid,numeric,uuid,text) to authenticated,service_role;
+
 create or replace function e10.normalize_commercial_event_envelope() returns trigger
 language plpgsql security definer set search_path=public as $$
 begin
@@ -209,6 +252,7 @@ begin
     or exists(select 1 from public.e10_stock_receipt_reversals rv
       where rv.organization_id=p_org and rv.stock_receipt_line_id=p_receipt_line_id) then
     raise exception using errcode='55000',message='receipt_disposition_closed';end if;
+  perform e10.assert_receipt_lot_projection(p_org,line.inventory_lot_id);
 
   if p_predecessor_decision_id is null then
     root_id:=decision_id;new_revision:=1;available_quarantine:=line.lot_quarantined;
@@ -321,11 +365,53 @@ create function public.e10_org_reverse_receipt_batch(
   p_org uuid,p_receipt_id uuid,p_reason text,p_idempotency_key text
 ) returns jsonb
 language plpgsql security definer set search_path=public as $$
-declare before_revision bigint;after_revision bigint;result jsonb;
+declare before_revision bigint;after_revision bigint;result jsonb;rv record;original_event uuid;
 begin
   select r.disposition_revision into before_revision from public.e10_stock_receipts r
     where r.organization_id=p_org and r.id=p_receipt_id;
   result:=public._e10_org_reverse_receipt_batch_x4f(p_org,p_receipt_id,p_reason,p_idempotency_key);
+  -- X4f's movement trigger cannot find an original receipt movement when a
+  -- line was received wholly into quarantine. If a later disposition created
+  -- accepted stock, complete the missing reversal event here and correct the
+  -- terminal disposition event that authorized that stock.
+  for rv in
+    select r.id reversal_id,r.stock_receipt_line_id line_id,r.inventory_lot_id lot_id,
+      r.inventory_movement_id movement_id,l.inventory_item_id,m.on_hand_delta,m.actor_uid
+    from public.e10_stock_receipt_reversals r
+    join public.e10_inventory_lots l on(l.organization_id,l.id)=(r.organization_id,r.inventory_lot_id)
+    left join public.e10_inventory_movements m on(m.organization_id,m.id)=(r.organization_id,r.inventory_movement_id)
+    where r.organization_id=p_org and r.stock_receipt_id=p_receipt_id
+      and not exists(select 1 from public.e10_commercial_events ce
+        where ce.organization_id=r.organization_id and ce.payload->>'reversal_id'=r.id::text)
+  loop
+    select ce.id into original_event
+    from public.e10_receipt_disposition_decisions d
+    join public.e10_commercial_events ce on ce.organization_id=d.organization_id
+      and ce.source_connection_id='receipt-ledger' and ce.source_event_id=d.id::text
+    where d.organization_id=p_org and d.stock_receipt_line_id=rv.line_id
+      and d.action='accept'
+      and not exists(select 1 from public.e10_receipt_disposition_decisions s
+        where s.organization_id=d.organization_id and s.predecessor_decision_id=d.id)
+    order by d.decided_at desc,d.id desc limit 1;
+    if original_event is null then
+      select ce.id into original_event from public.e10_commercial_events ce
+      where ce.organization_id=p_org and ce.event_type='receipt'
+        and ce.payload->>'receipt_line_id'=rv.line_id::text order by ce.created_at,ce.id limit 1;
+    end if;
+    if original_event is null then raise exception using errcode='55000',message='receipt_evidence_missing';end if;
+    perform set_config('e10.receipt_reversal_evidence','on',true);
+    insert into public.e10_commercial_events(organization_id,event_type,event_schema_version,subject_type,subject_id,
+      occurred_at,occurred_at_precision,idempotency_key,source_kind,source_connection_id,source_reference,source_event_id,
+      correlation_id,evidence_quality,payload,corrects_event_id,created_by,request_fingerprint,inventory_movement_id)
+    values(p_org,'correction',1,'inventory_item',rv.inventory_item_id,now(),'exact',
+      p_org::text||':receipt-reversal-event:'||p_idempotency_key||':'||rv.line_id,'native','receipt-ledger',
+      'stock_receipt_line:'||rv.line_id,rv.reversal_id::text,p_receipt_id::text,'native_system',
+      jsonb_build_object('movement_id',rv.movement_id,'movement_type','correction','on_hand_delta',coalesce(rv.on_hand_delta,0),
+        'reserved_delta',0,'source_action','reverse','reason_code','correction','receipt_id',p_receipt_id,
+        'receipt_line_id',rv.line_id,'lot_id',rv.lot_id,'reversal_id',rv.reversal_id,'command',p_idempotency_key),
+      original_event,coalesce(rv.actor_uid,auth.uid()),md5(rv.reversal_id::text||'|correction|'||rv.inventory_item_id),rv.movement_id)
+    on conflict(organization_id,inventory_movement_id) where inventory_movement_id is not null do nothing;
+  end loop;
   if not coalesce((result->>'replay')::boolean,false) then
     select r.disposition_revision into after_revision from public.e10_stock_receipts r
       where r.organization_id=p_org and r.id=p_receipt_id;
