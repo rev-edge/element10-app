@@ -29,13 +29,19 @@ begin
   if arg_key='source_connections'and(arg_type<>'array'or exists(select 1 from jsonb_array_elements(arg_value)e where jsonb_typeof(e)<>'string'))then raise exception using errcode='22023',message='x8_query_args_invalid';end if;
   if arg_key<>all(array['limit','week_start','freshness_days','expected_dataset_revision','filters','source_connections'])and arg_type<>'string'then raise exception using errcode='22023',message='x8_query_args_invalid';end if;
  end loop;
- if p_args?'filters'then
-  for arg_key,arg_value in select key,value from jsonb_each(p_args->'filters')loop
-   if arg_value='null'::jsonb then continue;end if;arg_type:=jsonb_typeof(arg_value);
-   if arg_key='year'and arg_type not in('string','number')then raise exception using errcode='22023',message='x8_query_args_invalid';end if;
-   if arg_key<>'year'and arg_type<>'string'then raise exception using errcode='22023',message='x8_query_args_invalid';end if;
-  end loop;
- end if;
+end $$;
+
+create function e10.x8_assert_inventory_filters(p_filters jsonb)
+returns void language plpgsql immutable security definer set search_path=public as $$
+declare k text;v jsonb;t text;
+begin
+ if p_filters is null or jsonb_typeof(p_filters)<>'object'or octet_length(p_filters::text)>65536 or exists(select 1 from jsonb_object_keys(p_filters)as supplied(key)where supplied.key<>all(array['cat','set','year','grade','q']))then raise exception using errcode='22023',message='x8_query_args_invalid';end if;
+ perform e10.x8_validate_json(p_filters,0);
+ for k,v in select key,value from jsonb_each(p_filters)loop
+  if v='null'::jsonb then continue;end if;t:=jsonb_typeof(v);
+  if k='year'and t not in('string','number')then raise exception using errcode='22023',message='x8_query_args_invalid';end if;
+  if k<>'year'and t<>'string'then raise exception using errcode='22023',message='x8_query_args_invalid';end if;
+ end loop;
 end $$;
 
 create function e10.x8_redact_inventory_result(p_result jsonb)
@@ -73,7 +79,7 @@ begin
  case p_operation
  when'inventory.page'then
   perform e10.x8_assert_args(p_args,array['after','limit','filters']);
-  perform e10.x8_assert_args(coalesce(p_args->'filters','{}'::jsonb),array['cat','set','year','grade','q']);
+  perform e10.x8_assert_inventory_filters(coalesce(p_args->'filters','{}'::jsonb));
   if not coalesce((p_args->>'limit')::integer between 1 and 500,false)then raise exception using errcode='22023',message='x8_query_args_invalid';end if;
   res:=public.e10_org_inv_page(p_org,p_args->>'after',(p_args->>'limit')::integer,coalesce(p_args->'filters','{}'::jsonb));
   res:=e10.x8_redact_inventory_result(res);grain:='inventory_item';units:=jsonb_build_object('quantity','stored_item_quantity');unknowns:='["coverage","revision","cutoff"]';
@@ -128,8 +134,8 @@ begin
  return e10.x8_query_envelope(p_org,p_context_id,p_operation,p_args,res,grain,units,unknowns);
 end $$;
 
-revoke all on function e10.x8_validate_json(jsonb,integer),e10.x8_assert_args(jsonb,text[]),e10.x8_redact_inventory_result(jsonb),e10.x8_query_envelope(uuid,uuid,text,jsonb,jsonb,text,jsonb,jsonb)from public,anon,authenticated;
-grant execute on function e10.x8_validate_json(jsonb,integer),e10.x8_assert_args(jsonb,text[]),e10.x8_redact_inventory_result(jsonb),e10.x8_query_envelope(uuid,uuid,text,jsonb,jsonb,text,jsonb,jsonb)to service_role;
+revoke all on function e10.x8_validate_json(jsonb,integer),e10.x8_assert_args(jsonb,text[]),e10.x8_assert_inventory_filters(jsonb),e10.x8_redact_inventory_result(jsonb),e10.x8_query_envelope(uuid,uuid,text,jsonb,jsonb,text,jsonb,jsonb)from public,anon,authenticated;
+grant execute on function e10.x8_validate_json(jsonb,integer),e10.x8_assert_args(jsonb,text[]),e10.x8_assert_inventory_filters(jsonb),e10.x8_redact_inventory_result(jsonb),e10.x8_query_envelope(uuid,uuid,text,jsonb,jsonb,text,jsonb,jsonb)to service_role;
 revoke all on function public.e10_org_typed_query(uuid,uuid,text,jsonb)from public,anon;
 grant execute on function public.e10_org_typed_query(uuid,uuid,text,jsonb)to authenticated,service_role;
 comment on function public.e10_org_typed_query(uuid,uuid,text,jsonb)is'Closed TA-X8a typed query allowlist. Business-read-only; query-control metadata writes only.';
