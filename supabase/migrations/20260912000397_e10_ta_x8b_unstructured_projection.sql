@@ -10,6 +10,7 @@ begin
  end if;
  if p_operation<>'customer_transaction.create_draft'then raise exception using errcode='22023',message='action_operation_unsupported';end if;
  input_lines:=case when jsonb_typeof(p_values->'lines')='array'then p_values->'lines'else'[]'::jsonb end;
+ allow_all_financial:=case when jsonb_array_length(input_lines)=0 then e10.can_view_customer_financials_at(p_org,null)else true end;
  projected:=(p_values-'lines')-'note';
  for line in select value from jsonb_array_elements(input_lines)loop
   location_id:=nullif(line->>'location_id','')::uuid;
@@ -34,7 +35,8 @@ begin
  if d.operation='purchase_order.create'then can_all_fin:=can_purchase_fin;
  else
   input_lines:=case when jsonb_typeof(r.proposed_values->'lines')='array'then r.proposed_values->'lines'else'[]'::jsonb end;
-  select not exists(select 1 from jsonb_array_elements(input_lines)line where not e10.can_view_customer_financials_at(p_org,nullif(line->>'location_id','')::uuid))into can_all_fin;
+  if jsonb_array_length(input_lines)=0 then can_all_fin:=e10.can_view_customer_financials_at(p_org,null);
+  else select not exists(select 1 from jsonb_array_elements(input_lines)line where not e10.can_view_customer_financials_at(p_org,nullif(line->>'location_id','')::uuid))into can_all_fin;end if;
  end if;
  show_unstructured:=can_contact and can_all_fin;
  return jsonb_build_object('draft_id',d.id,'operation',d.operation,'status',d.status,'current_revision',d.current_revision,'revision',r.revision,'approved_revision',d.approved_revision,
