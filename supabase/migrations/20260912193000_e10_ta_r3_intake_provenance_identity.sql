@@ -19,6 +19,7 @@ create table public.e10_intake_commit_authorizations(
   intake_batch_id uuid not null,source_row_number bigint not null,predecessor_observation_id uuid not null,
   primary key(transaction_id,backend_pid,organization_id,intake_batch_id,source_row_number)
 );
+alter table public.e10_intake_commit_authorizations enable row level security;
 revoke all on public.e10_intake_commit_authorizations from public,anon,authenticated;
 grant all on public.e10_intake_commit_authorizations to service_role;
 
