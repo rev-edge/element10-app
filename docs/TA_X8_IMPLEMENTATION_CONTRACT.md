@@ -368,7 +368,7 @@ e10_org_market_observation_drilldown(p_org uuid,p_parent_query_fingerprint text,
   optional opaque `cursor`. Grain `accepted_receipt_cost_evidence`, units named
   by currency and configuration base unit. Missing cost remains unavailable.
 - `customer.spend_summary`: required finite `from,to,observation_cutoff`, ISO
-  currency, timezone, `week_start` 0..6 and `limit` 1..100; optional customer,
+  currency, timezone, ISO `week_start` 1..7 and `limit` 1..100; optional customer,
   purchase-kind, location, channel, product, configuration, copy, session,
   capture-source, cursor customer ID, expected dataset revision and query
   fingerprint. Existing exact signature and paired expected revision/fingerprint
@@ -385,13 +385,20 @@ e10_org_market_observation_drilldown(p_org uuid,p_parent_query_fingerprint text,
   `after_occurred_at,after_activity_id`; paired expected dataset revision/query
   fingerprint. Grain `provisional_activity`; it is labeled non-posted and never
   added to spend.
-- `attendance.weekly`: required finite range/cutoff, timezone, `week_start` 0..6
-  and `limit` 1..100; optional customer/source class/provider key/week cursor;
-  paired revision/fingerprint. Grain `customer_week`; units are source-defined
-  presence seconds with coverage and gap disclosure, never video watch time.
+- `attendance.weekly`: required finite range/cutoff, timezone, ISO `week_start`
+  1..7 and `limit` 1..54; optional customer/source class/provider key/week
+  cursor; paired revision/fingerprint. Each row is one local calendar week for
+  the selected organization scope, optionally filtered to one effective
+  customer. It is not labeled `customer_week` when no customer filter exists.
+  The target's `session_count_grain` and `duration_grain` fields are
+  authoritative; durations are observed presence seconds with coverage and gap
+  disclosure, never video watch time.
 - `inventory.lifecycle`: required finite `as_of`, `limit` 1..100; optional unique
-  item and opaque cursor. Grain `inventory_lifecycle_event`; source identities
-  and ambiguity come from X7e.
+  item and opaque cursor. Each item is one unique-item ownership episode keyed
+  by `unique_item_id,episode_key,origin_event_id`, with episode-level age,
+  exposure and disposition metrics. It is not labeled as one lifecycle event.
+  Contributing event identities, truncation, finality, precision and ambiguity
+  come from X7e.
 - `inventory.unique_item_evidence`: required unique item, finite `as_of`, `limit`
   1..50; optional cursor. Grain `evidence_observation`.
 - `inventory.valuation_coverage`: required method, method version, ISO currency,
@@ -409,6 +416,15 @@ e10_org_market_observation_drilldown(p_org uuid,p_parent_query_fingerprint text,
   source mode and `limit`
   1..50; optional source kind/connections and cursor. Parent snapshot and source
   rights must still be valid for the same actor/org.
+
+The envelope never declares a grain or unit finer than the target result. For
+heterogeneous supplier workspace rows it uses `supplier_document` with the
+target's `kind`; for customer summary it uses `effective_customer`; for spend
+contributions it uses `posted_transaction_line_contribution`; for provisional
+activity it uses `provisional_activity`; for unique-item evidence it uses
+`evidence_record`; for valuation it uses `unique_item_holding`; and market
+operations pass through the target's cohort/observation grain and units. Numeric
+units are copied from target fields or stated as unavailable, never inferred.
 
 On every call, before target-specific work and again after any blocking target
 lock, the dispatcher/context guard checks active organization, `auth.uid()`,
@@ -432,11 +448,23 @@ Public RPCs are:
 
 All are anon-closed. Tables remain client-closed. Creator or org admin may read,
 preview, amend or cancel; amend also requires the operation's prepare capability.
-Any current member with the operation's approval capability may approve. The
-same actor may prepare and approve because existing policy does not impose a
-universal distinct-person rule; no new blanket maker/checker rule is invented.
-Commit requires the operation's prepare capability and may be performed by the
-creator or an org admin. The ordinary delegated writer rechecks its own authority.
+Any current member with the operation's approval capability may preview and
+approve an eligible proposal, with the same financial/contact redaction applied
+to both calls. This does not grant amend, cancel or commit. The same actor may
+prepare and approve because existing policy does not impose a universal
+distinct-person rule; no new blanket maker/checker rule is invented. Commit
+requires the operation's prepare capability and may be performed by the creator
+or an org admin. The ordinary delegated writer rechecks its own authority.
+
+Allowed transitions are exact: create produces `draft`; amend is allowed from
+`draft` or `approved`, appends a new revision and returns to `draft` with approval
+cleared; approval requires `status='draft'` and
+`current_revision=p_expected_revision`, then records that revision as approved;
+commit requires `status='approved'` and
+`current_revision=approved_revision=p_expected_revision`; cancellation is
+allowed from `draft` or `approved`; `committed` and `cancelled` are terminal.
+Cancellation and commit serialize on the same draft row, so exactly one terminal
+transition can win.
 
 Values and provenance are operation-specific objects, each at most 256 KiB;
 source references are at most 100 entries and 64 KiB total. Recursive unknown
@@ -453,7 +481,24 @@ Approval and commit recompute it. A change yields a stale-reference conflict and
 requires an amended revision and new approval. Amend always clears approved
 revision/status and appends a new complete revision; old approval history remains.
 
-Every mutation uses command-lock then draft-lock ordering. Authorization is
+Commit locks the X8 command and draft first, then pre-acquires the ordinary
+writer's existing advisory idempotency lock using the server-derived downstream
+key and the writer's exact namespace (`purchase-order-command` or
+`customer-commercial`). Advisory acquisition is reentrant in the same
+transaction, so the delegated writer later observes the same lock. Only after
+that potentially blocking lock returns does X8 lock every referenced mutable row
+in a canonical order by relation and primary key, recompute the complete
+fingerprint, and invoke the writer. Reference locks are held through the ordinary
+write and X8 result recording. Any mismatch raises and rolls back the whole
+transaction. The implementation test must hold that delegated-writer advisory
+lock in one connection, start commit in another, mutate and commit a referenced
+row while X8 waits, release the advisory lock, and prove X8's post-wait
+fingerprint check fails with no ordinary row, command, event or partial X8
+transition.
+
+Every mutation uses X8-command-lock then draft-lock ordering. Commit continues
+with the downstream advisory lock and canonical reference-row locks described
+above. Authorization is
 checked before target inspection and repeated after each blocking lock. Approval
 and commit require `current_revision=approved_revision=p_expected_revision` as
 appropriate. Commit derives an operation-namespaced ordinary idempotency key:
