@@ -86,20 +86,55 @@ comment/whitespace formatting inside `e10.module_bundle` and
 `e10.verify_handle_claim`. The SQL behavior of those two old functions was not
 changed by this correction.
 
-A compact system-catalog manifest compared application-owned function
-signatures/security/ACL/search paths and all table, column, constraint, RLS/ACL
-and index structure. Local and staging counts and SHA-256 values match exactly:
+A committed, reproducible system-catalog manifest now covers both application
+schemas and every requested object class. Run it against the clean local replay
+and the explicitly targeted staging pooler:
 
-| Catalog | Count | SHA-256 |
-| --- | ---: | --- |
-| Functions and ACL/search-path metadata | 192 | `aecb12197f092a17d127302c98803a853f219c1da2638ad3e0f9389647c7f40a` |
-| Tables and RLS/ACL metadata | 170 | `42439609414807b59cdb579d522e3c4c91e35be69d56ac9808288a89a78d1387` |
-| Columns, types, nullability and defaults | 2042 | `5d0d0256f7819ecb25c2122713f37eaebd0a15020046911cea2e5c3b9c2d9fbc` |
-| Constraints and validation state | 1671 | `0a5e0854dd2f62a34c2c3143b4ab60e7a9824b9f1fe81ec68d08d52984202dc6` |
-| Index definitions | 649 | `34818e18e0ad9310d3093debff330059ba25beb148cb45222e73b2f68cfe13c6` |
+```sh
+cd /Users/tsconnely/dev/element10-app
+psql postgresql://postgres:postgres@127.0.0.1:54322/postgres \
+  -X -v ON_ERROR_STOP=1 -f tests/ta_final_schema_manifest.sql \
+  > /tmp/e10-local-manifest.txt
+psql "$STAGING_URL" -X -v ON_ERROR_STOP=1 \
+  -f tests/ta_final_schema_manifest.sql \
+  > /tmp/e10-staging-manifest.txt
+diff -u /tmp/e10-local-manifest.txt /tmp/e10-staging-manifest.txt
+```
+
+The manifest emits one SHA-256 row per object and deliberately does not erase
+differences through whitespace normalization. It produced 5,529 catalog rows
+on each target:
+
+| Category | Local | Staging | Result |
+| --- | ---: | ---: | --- |
+| Function metadata, including signatures, result, language, volatility, strictness, security definer, leakproof, parallel, search-path/config and ACL | 336 | 336 | exact |
+| Raw function definitions | 336 | 336 | 334 exact; 2 historical text-only exceptions below |
+| Tables, relkind, RLS/forced-RLS and ACL | 170 | 170 | exact |
+| Columns, types, nullability, defaults, identity and generated state | 2,042 | 2,042 | exact |
+| Constraints, validation and deferrability | 1,671 | 1,671 | exact |
+| Index definitions | 649 | 649 | exact |
+| Noninternal trigger definitions and enabled state | 228 | 228 | exact |
+| RLS policy commands, roles, mode, USING and WITH CHECK expressions | 97 | 97 | exact |
+
+The raw manifest file hashes differ only because the following two
+`function_definition` rows differ:
+
+| Function | Local definition SHA-256 | Staging definition SHA-256 | Exact difference |
+| --- | --- | --- | --- |
+| `e10.module_bundle(p_key text)` | `e521ed210ee9ab593cff25f3c7a61a20e7ff062d2918993abdd574d4991800a7` | `fb908a9f71636ae7897aff386dd851ad2aea14546e95a764e9b1c12072c431cc` | Local retains explanatory comments and multiline CASE formatting; staging has the same six-key-to-`core` CASE on one line. |
+| `public.e10_verify_handle_claim(p_claim_id uuid)` | `70b61bee557daead35755d17db3cccd8bd52edec84a484d192bfc0976fad32fa` | `47be731efd878feafa2d63a8dcc06fd0cbc92dfb06cd194c569dda3e02868bfe` | Local retains nine numbered inline comments; staging omits only those comments. Executable statements are identical. |
+
+The complete schema-dump diff independently contains only those comment and
+formatting changes plus the random `pg_dump` restrict/unrestrict token. No
+arbitrary normalizer was used to make these exceptions disappear. The complete
+manifest file hashes are local
+`8f89959df5476c4bda03d7a72b6b6df250b52780dac3f5a7bb91f2d646656913`
+and staging
+`b990c5026c877cf2284c7035f58beca78981905f7499e00ab9e4818186c943ba`.
 
 This manifest excludes nonapplication system schemas. It proves the current
-application schema shape, not equality of staging fixture data with an empty
+application schema shape and explicitly records its two text-only historical
+exceptions; it does not claim equality of staging fixture data with an empty
 local database.
 
 Production was not contacted by the corrective and received no write.

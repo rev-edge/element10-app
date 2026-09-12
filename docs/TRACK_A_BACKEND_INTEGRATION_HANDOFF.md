@@ -212,8 +212,9 @@ allowed write; business state is unchanged.
 `window_mode` is present, while retaining the same operation string and the
 reviewed legacy delegate when it is absent. The v2 route accepts aggregate
 bounds, stable sort, JSON cursor, expected dataset revision and expected query
-fingerprint. It rejects mixed v1/v2 cursor arguments and redacts customer names
-when contact visibility is absent.
+fingerprint. It rejects mixed v1/v2 cursor arguments. The X8 v2 projection
+always removes customer display names from items and cursors; this is stricter
+than the direct X7f reader and is not conditional on contact authority.
 
 ## Player identity ambiguity review
 
