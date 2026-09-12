@@ -95,10 +95,11 @@ async function main(){const s=new Client({connectionString:db}),a=new Client({co
   const beforeWriter=Number((await s.query('select revision from public.e10_reporting_dataset_revisions where organization_id=$1',[x.org])).rows[0].revision);
   apid=(await a.query('select pg_backend_pid() pid')).rows[0].pid;
   await s.query('begin');await s.query("update public.e10_break_sessions set ended_at=ended_at+interval '1 second' where id=$1",[sessions[0]]);
-  pendingReader=a.query(report,[x.org,from,to,cutoff,'UTC',1,x.customer,'companion','companion',54,null,beforeWriter,null]);
+  pendingReader=a.query(report,[x.org,from,to,cutoff,'UTC',1,x.customer,'companion','companion',54,null,beforeWriter,null])
+    .then(value=>({ok:true,value}),error=>({ok:false,error}));
   waited=false;for(let n=0;n<100;n++){const q=(await i.query("select wait_event_type from pg_stat_activity where pid=$1",[apid])).rows[0];if(q&&q.wait_event_type==='Lock'){waited=true;break}await new Promise(r=>setTimeout(r,20));}
   if(!waited){await s.query('rollback');throw Error('report reader did not wait behind revision writer')}
-  await s.query('commit');if(!await denied(pendingReader,'40001','attendance_dataset_revision_stale'))throw Error('reader behind writer returned mixed revision');pendingReader=null;
+  await s.query('commit');const readerResult=await pendingReader;if(readerResult.ok||readerResult.error.code!=='40001'||readerResult.error.message!=='attendance_dataset_revision_stale')throw Error('reader behind writer returned mixed revision');pendingReader=null;
   console.log('[proof] reader waited behind writer and rejected stale revision');
 
   const partial=(await a.query(review,[x.org,null,0,'assert','companion','companion','2026-01-12','2026-01-19','partial',1,'known partial overlap',{},x.run+'-partial'])).rows[0].r;
