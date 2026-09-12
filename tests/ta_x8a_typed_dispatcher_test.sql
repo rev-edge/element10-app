@@ -20,6 +20,8 @@ begin
  if j->>'grain'<>'inventory_movement'or j#>>'{result,movements,0,item_id}'is distinct from'x8ad-item'then raise exception'inventory history envelope invalid %',j;end if;
  if j#>'{result,movements,0}'?'note'or j#>'{result,movements,0}'?'meta'then raise exception'movement private field leaked %',j;end if;
  begin perform public.e10_org_typed_query(o,cid,'inventory.page','{"limit":10,"sql":"select 1"}');raise exception'unknown argument accepted';exception when invalid_parameter_value then null;end;
+ begin perform public.e10_org_typed_query(o,cid,'inventory.page','{"limit":null,"filters":{}}');raise exception'null limit accepted';exception when invalid_parameter_value then null;end;
+ begin perform public.e10_org_typed_query(o,cid,'inventory.page','{"limit":10,"filters":{"unknown_filter":true}}');raise exception'unknown nested filter accepted';exception when invalid_parameter_value then null;end;
  begin perform public.e10_org_typed_query(o,cid,'arbitrary.sql','{}');raise exception'unknown operation accepted';exception when invalid_parameter_value then null;end;
  begin perform public.e10_org_typed_query(o,cid,'inventory.page',jsonb_build_object('limit',10,'filters',jsonb_build_object('q',repeat('x',2001))));raise exception'oversized nested string accepted';exception when invalid_parameter_value then null;end;
  begin perform public.e10_org_typed_query(o2,cid,'inventory.page','{"limit":10,"filters":{}}');raise exception'foreign org context accepted';exception when insufficient_privilege then null;end;
