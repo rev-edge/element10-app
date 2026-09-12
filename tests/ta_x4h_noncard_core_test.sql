@@ -71,13 +71,13 @@ begin
   transition:=public.e10_org_lot_consume(o,camera_reservation_id,1,'x4h-camera-consume');
   history:=public.e10_org_supplier_actual_cost_history(o,supplier,config_id,'CAD','2026-09-13T00:00:00Z',10,null);
   camera_history:=public.e10_org_supplier_actual_cost_history(o,supplier,camera_config_id,'CAD','2026-09-13T00:00:00Z',10,null);
-  if (result->>'replay')::boolean or not (replay->>'replay')::boolean
-    or replay->>'reservation_id'<>reservation_id::text then raise exception 'generic reservation replay invalid';end if;
-  if history#>>'{items,0,actual_unit_cost}'<>'11' or history#>>'{items,0,accepted_quantity}'<>'10'
-    or history#>>'{items,0,inventory_lot_id}'<>lot_id::text then raise exception 'non-card cost history invalid: %',history;end if;
-  if camera_history#>>'{items,0,actual_unit_cost}'<>'200' or camera_history#>>'{items,0,accepted_quantity}'<>'1'
-    or camera_history#>>'{items,0,inventory_lot_id}'<>camera_lot_id::text
-    or transition->>'status'<>'consumed' or transition->>'consumed_quantity'<>'1' then
+  if (result->>'replay')::boolean is distinct from false or (replay->>'replay')::boolean is distinct from true
+    or replay->>'reservation_id' is distinct from reservation_id::text then raise exception 'generic reservation replay invalid';end if;
+  if history#>>'{items,0,actual_unit_cost}' is distinct from '11' or history#>>'{items,0,accepted_quantity}' is distinct from '10'
+    or history#>>'{items,0,inventory_lot_id}' is distinct from lot_id::text then raise exception 'non-card cost history invalid: %',history;end if;
+  if camera_history#>>'{items,0,actual_unit_cost}' is distinct from '200' or camera_history#>>'{items,0,accepted_quantity}' is distinct from '1'
+    or camera_history#>>'{items,0,inventory_lot_id}' is distinct from camera_lot_id::text
+    or transition->>'status' is distinct from 'consumed' or transition->>'consumed_quantity' is distinct from '1' then
     raise exception 'unique camera receipt/cost/reserve/consume invalid history=% transition=%',camera_history,transition;end if;
   begin
     perform public.e10_org_lot_reserve_for_demand(o,lot_id,1,null,'null-kind','Null kind','x4h-null-kind');
