@@ -920,6 +920,36 @@ continues to serve the current-decision anti-join. No player-specific index was
 added because the subject relation already has `(player_id, variant_id)`. No
 JSON expression index was added.
 
+### C9: semantic lifecycle classification
+
+Status: completed and locally verified 2026-09-12.
+
+No schema migration is justified by this checkpoint. The classification test
+inventories every current public `e10_*` table and assigns exactly one lifecycle:
+
+- `mutable_current_state`: present state may change; generic `updated_at` is
+  useful only when no domain transition history already supplies authority.
+- `append_only`: events, decisions, revisions, commands, receipts and evidence;
+  occurrence/review/domain time is authoritative and `updated_at` is misleading.
+- `relationship`: identity is the participating keys; a surrogate ID is not
+  added unless another row must address the relationship independently.
+- `singleton_or_compatibility`: naturally scoped state or a retirement bridge;
+  preserve its natural key pending explicit replacement.
+- `snapshot`: immutable backup or captured state, with capture/domain time.
+
+`schema_review_c9_lifecycle_classification_test.sql` derives the complete live
+inventory from PostgreSQL metadata, asserts one classification for every table
+and anchors representative semantics for break events, organization
+memberships, organizations and OBS config. On this checkpoint's schema it
+classifies all 182 tables.
+
+Selective conclusions: C6 already added justified organization current-state
+timestamps plus authoritative transition history. C5 fixed checklist derived
+state transactionally. No remaining table has evidence strong enough to add a
+generic timestamp or surrogate identifier without an owner lifecycle or
+retirement ruling. Therefore C9 deliberately adds no blanket DDL and preserves
+all natural/composite identities.
+
 ## Appendix: exact base-table JSON inventory
 
 ```text
