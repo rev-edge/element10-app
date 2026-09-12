@@ -29,7 +29,7 @@ of the R-series or of the whole application.
 | R6 validation/error/replay contracts | Implemented, including explicit pre-R6 stored-fingerprint receipt/reservation/event replay | Await final independent verdict |
 | R7 scope dispositions | Implemented with legacy-truncate closure and retained compatibility boundaries | Await final independent verdict |
 | R8 final verification | Runtime and staging evidence complete; exact-head CI and renewed independent review in progress | Do not self-accept |
-| C1-C9 schema expert corrections | All nine completed and locally verified by builder; final record `ce463d6` | Independent review and environment verification of this newer delta; no staging rollout is claimed |
+| C1-C9 schema expert corrections | All nine completed; current live verification confirms their migration names are included in staging's 145/145 ledger parity | Preserve in combined regression and final review |
 | Multilingual backend | Requirements queued; no implementation evidence found | Preferences, translated labels/aliases, locale/fallback and stable message contracts after external corrections |
 | Track B | Existing prototype work plus receiving preflight; latest accessible review still requires contract reconciliation | Refresh receiving design against current engine before implementation; owner retains UI acceptance |
 | Production | No rollout authorized by this reconciliation | Separate explicit production go/no-go |
@@ -89,9 +89,8 @@ proposed `TA_C5_RECEIVING_RECONCILIATION.md` name during this audit.
 - [C1-C9 execution and completion audit](BACKEND_SCHEMA_EXPERT_FEEDBACK_PLAN_2026-09-12.md#execution-checkpoints)
 - [Backend integration contracts](TRACK_A_BACKEND_INTEGRATION_HANDOFF.md)
 
-The C-series packet reports clean replay, focused C1-C9 suites, C5 concurrency,
-catalog regressions and default-privilege checks passing, with two pre-existing
-lint findings. This reconciliation checked the chat, committed artifacts and
-test inventory, not a fresh execution of those database tests. Neither staging
-nor production was contacted. Historical status and environment claims must not
-be extended to newer commits without fresh evidence.
+The older `ce463d6` C-series packet reported local replay and did not itself
+contact staging or production. The current R2-R8 closure subsequently contacted
+staging explicitly and verified all 145 migration names, including C1-C9, plus
+schema parity. Production was not contacted. Historical environment claims are
+not extended beyond their recorded observations.
