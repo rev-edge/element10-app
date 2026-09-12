@@ -60,10 +60,10 @@ async function main(){
   // wait, then re-read topology and reject C rather than committing stale validity.
   await a.query('begin');await a.query(merge,[org,q.c,q.d,0,0,0,'merge','operator_review',[],'topology overlap','{}',q.run+'-topology-merge']);
   const bpid=Number((await b.query('select pg_backend_pid() pid')).rows[0].pid);
-  const blocked=bounded(b.query(rpc,[org,t1,3,q.c,'stale topology','{}',q.run+'-topology-attr']));
+  const blocked=bounded(b.query(rpc,[org,t1,3,q.c,'stale topology','{}',q.run+'-topology-attr'])).then(value=>({ok:true,value}),error=>({ok:false,error}));
   let waited=false;for(let i=0;i<40&&!waited;i++){waited=Number((await s.query("select count(*) n from pg_locks where pid=$1 and locktype='advisory' and not granted",[bpid])).rows[0].n)>0;if(!waited)await new Promise(r=>setTimeout(r,50));}
   if(!waited){await a.query('rollback');throw Error('topology overlap did not establish exact backend wait');}
-  await a.query('commit');const topology=await Promise.allSettled([blocked]);if(topology[0].status!=='rejected'||topology[0].reason.code!=='22023'||topology[0].reason.message!=='transaction_customer_attribution_requires_effective_customer')throw Error('topology recheck failed');
+  await a.query('commit');const topology=await blocked;if(topology.ok||topology.error.code!=='22023'||topology.error.message!=='transaction_customer_attribution_requires_effective_customer')throw Error('topology recheck failed');
   await s.query("delete from public.e10_organization_role_permissions where organization_id=$1 and role_id=$2 and capability='act.correct_customer_attribution'",[org,q.role]);denied=false;try{await a.query(rpc,[org,t1,3,q.d,'missing','{}',q.run+'-missing']);}catch(e){denied=e.code==='42501';}if(!denied)throw Error('missing cap allowed');
   const acl=(await s.query("select has_function_privilege('anon','public.e10_org_decide_customer_transaction_attribution(uuid,uuid,integer,uuid,text,jsonb,text)','execute') anon,has_function_privilege('authenticated','public.e10_org_decide_customer_transaction_attribution(uuid,uuid,integer,uuid,text,jsonb,text)','execute') auth,(select relrowsecurity from pg_class where oid='public.e10_customer_transaction_attribution_decisions'::regclass) rls")).rows[0];if(acl.anon||!acl.auth||!acl.rls)throw Error('ACL/RLS failed');
   console.log('TA-X6f posted customer attribution: PASS');
