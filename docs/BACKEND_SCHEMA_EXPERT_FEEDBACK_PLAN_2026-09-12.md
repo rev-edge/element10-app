@@ -878,6 +878,28 @@ Tests prove baseline creation, ordinary-member denial, suspension, replay,
 stale-revision rejection, resumption, transition semantics and compatibility
 with existing race tests that suspend organizations while writers are blocked.
 
+### C7: central mutable-data audit index
+
+Status: implemented and locally verified 2026-09-12. Awaiting review before C8.
+
+Migration `20260912173502_e10_schema_review_c7_central_audit_index.sql`
+adds append-only audit batches and field-level records for mutable organization,
+role, permission, module, location, supplier, offering, product and custom-field
+master data. Existing domain events, decisions, revisions and receipts remain
+the authority and are deliberately excluded from generic capture.
+
+Triggers act as a coverage net and accept transaction-local request/reason
+context from reviewed RPCs. Contact, address, extension JSON and custom values
+are never copied into audit records; salted-independent SHA-256 change digests
+show whether protected content changed without exposing it. Audit reads require
+platform administration or organization administration plus
+`act.permissions_config`.
+
+Retention is classified as standard, restricted or legal hold, but no deletion
+period is invented. Tests prove contextual batches, exact ordinary deltas,
+restricted redaction, absence of plaintext secrets, append-only protection,
+authorized/unauthorized reads and exclusion of authoritative domain histories.
+
 ## Appendix: exact base-table JSON inventory
 
 ```text
