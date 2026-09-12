@@ -69,6 +69,19 @@ async function main() {
     const proof = (await setup.query("select coalesce(sum(quantity),0) lot_reserved,(select coalesce(sum(qty),0) from public.e10_inventory_reservations where organization_id=$1 and item_id=$2 and status='active') legacy_reserved from public.e10_lot_reservations where organization_id=$1 and lot_id=$3 and status='active'", [org, ids.item, ids.lot])).rows[0];
     if (Number(proof.lot_reserved) !== 4 || Number(proof.legacy_reserved) !== 4) throw new Error(`generic reservation projections diverged ${JSON.stringify(proof)}`);
 
+    const itemDenyKey = `item-deny-${run}`;
+    await A.query('begin'); await A.query('select id from public.e10_inventory_items where organization_id=$1 and id=$2 for update', [org, ids.item2]);
+    await B.query('begin'); await B.query('select set_config($1,$2,true)', ['request.jwt.claims', jwt]);
+    let itemDenied;
+    const itemDeniedCall = B.query("select public.e10_org_lot_reserve_for_demand($1,$2,1,'manual',$3,'Item-lock revoked demand',$4)", [org, ids.lot2, `item-deny-${run}`, itemDenyKey]).catch((e) => { itemDenied = e; });
+    await waitForLock(setup, bpid, 'generic item-row post-wait revocation');
+    await setup.query("delete from public.e10_organization_role_permissions where organization_id=$1 and role_id=$2 and capability='act.reserve_inventory'", [org, ids.role]);
+    await A.query('commit'); await itemDeniedCall; await B.query('rollback').catch(() => {});
+    if (!itemDenied || itemDenied.code !== '42501') throw new Error(`item-row post-wait revocation was not denied: ${itemDenied && itemDenied.code}`);
+    let residue = await setup.query("select (select count(*) from public.e10_lot_reservations where organization_id=$1 and lot_id=$2) lot_rows,(select count(*) from public.e10_inventory_reservations where organization_id=$1 and item_id=$3) legacy_rows,(select count(*) from public.e10_inventory_movements where organization_id=$1 and item_id=$3) movement_rows", [org, ids.lot2, ids.item2]);
+    if (Object.values(residue.rows[0]).some((v) => Number(v) !== 0)) throw new Error(`item-row revoked generic reservation left residue ${JSON.stringify(residue.rows[0])}`);
+    await setup.query("insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed) values($1,$2,'act.reserve_inventory',true)", [org, ids.role]);
+
     const denyKey = `deny-${run}`;
     await A.query('begin'); await A.query("select pg_advisory_xact_lock(hashtextextended($1||'|lot-demand-command|'||$2,0))", [org, denyKey]);
     await B.query('begin'); await B.query('select set_config($1,$2,true)', ['request.jwt.claims', jwt]);
@@ -78,9 +91,9 @@ async function main() {
     await setup.query("delete from public.e10_organization_role_permissions where organization_id=$1 and role_id=$2 and capability='act.reserve_inventory'", [org, ids.role]);
     await A.query('commit'); await deniedCall; await B.query('rollback').catch(() => {});
     if (!denied || denied.code !== '42501') throw new Error(`post-wait revocation was not denied: ${denied && denied.code}`);
-    const residue = await setup.query("select (select count(*) from public.e10_lot_reservations where organization_id=$1 and lot_id=$2) lot_rows,(select count(*) from public.e10_inventory_reservations where organization_id=$1 and item_id=$3) legacy_rows,(select count(*) from public.e10_inventory_movements where organization_id=$1 and item_id=$3) movement_rows", [org, ids.lot2, ids.item2]);
+    residue = await setup.query("select (select count(*) from public.e10_lot_reservations where organization_id=$1 and lot_id=$2) lot_rows,(select count(*) from public.e10_inventory_reservations where organization_id=$1 and item_id=$3) legacy_rows,(select count(*) from public.e10_inventory_movements where organization_id=$1 and item_id=$3) movement_rows", [org, ids.lot2, ids.item2]);
     if (Object.values(residue.rows[0]).some((v) => Number(v) !== 0)) throw new Error(`revoked generic reservation left residue ${JSON.stringify(residue.rows[0])}`);
-    console.log(`TA-X4h generic reservation concurrency: PASS (one winner, no overcommit, exact post-wait revocation, zero denied residue)`);
+    console.log(`TA-X4h generic reservation concurrency: PASS (one winner, no overcommit, command and item-row post-wait revocation, zero denied residue)`);
   } finally {
     await A.query('rollback').catch(() => {}); await B.query('rollback').catch(() => {});
     await cleanup(setup);

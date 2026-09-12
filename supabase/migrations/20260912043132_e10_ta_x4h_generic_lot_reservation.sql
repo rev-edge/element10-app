@@ -30,7 +30,7 @@ begin
     raise exception using errcode='42501',message='reserve_inventory_denied';
   end if;
   if p_quantity is null or p_quantity<=0 or p_quantity::text in('NaN','Infinity','-Infinity')
-    or p_demand_type not in('sale_order','manual')
+    or p_demand_type is null or p_demand_type not in('sale_order','manual')
     or p_demand_reference is null or btrim(p_demand_reference)='' or octet_length(p_demand_reference)>160
     or p_demand_label is null or btrim(p_demand_label)='' or octet_length(p_demand_label)>500
     or p_idempotency_key is null or btrim(p_idempotency_key)='' or octet_length(p_idempotency_key)>160 then
@@ -79,6 +79,13 @@ begin
   select i.qty into v_item_qty from public.e10_inventory_items i
     where i.organization_id=p_org and i.id=v_lot.inventory_item_id for update;
   if not found then raise exception using errcode='P0002',message='inventory_item_not_found'; end if;
+  if auth.uid() is distinct from actor or not exists(select 1 from public.e10_organizations where id=p_org and status='active')
+    or not e10.is_org_member(p_org) or not e10.has_org_cap(p_org,'act.reserve_inventory') then
+    raise exception using errcode='42501',message='reserve_inventory_denied';
+  end if;
+  if not exists(select 1 from public.e10_locations where organization_id=p_org and id=v_lot.location_id and status='active') then
+    raise exception using errcode='55000',message='lot_location_inactive';
+  end if;
   select coalesce(sum(r.qty),0) into v_item_reserved from public.e10_inventory_reservations r
     where r.organization_id=p_org and r.item_id=v_lot.inventory_item_id and r.status='active';
   select coalesce(sum(case when lr.status='active' then lr.quantity else 0 end),0)+coalesce(sum(lr.consumed_quantity),0)
@@ -123,4 +130,4 @@ grant execute on function public.e10_org_lot_reserve_for_demand(uuid,uuid,numeri
   to authenticated,service_role;
 
 comment on function public.e10_org_lot_reserve_for_demand(uuid,uuid,numeric,text,text,text,text) is
-  'Atomic idempotent lot reservation for non-session demand. Uses sale_order or manual demand identity and does not fabricate a break session.';
+  'Atomic idempotent lot reservation for non-session demand. sale_order and manual demand references are opaque caller provenance, not validated order authority; no break session is fabricated.';
