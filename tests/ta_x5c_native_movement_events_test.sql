@@ -90,6 +90,13 @@ begin
   delete from public.e10_commercial_events where organization_id=o and inventory_movement_id=original_movement;
   if exists(select 1 from public.e10_commercial_events where organization_id=o and inventory_movement_id=original_movement) then
     raise exception 'historical originless fixture construction failed';end if;
+  -- Hostile session state cannot claim this historical replay is new.
+  perform set_config('e10.new_receipt_origin','on',true);
+  reversal:=public.e10_org_receive_po_line(o,pol,'x5c1-item',1,0,0,'pre-x5c',backdated-'1 day'::interval,'[]','x5c1-legacy');
+  if not coalesce((reversal->>'replay')::boolean,false) then raise exception 'historical receipt replay missing';end if;
+  select (payload->>'captured_retroactively')::boolean into retroactive
+    from public.e10_commercial_events where organization_id=o and inventory_movement_id=original_movement;
+  if not coalesce(retroactive,false) then raise exception 'hostile GUC falsified historical receipt provenance';end if;
   reversal:=public.e10_org_reverse_receipt(o,receipt,'legacy receipt correction','x5c1-legacy-reverse');
   select id,occurred_at,(payload->>'captured_retroactively')::boolean into original_event,event_time,retroactive
     from public.e10_commercial_events where organization_id=o and inventory_movement_id=original_movement;
