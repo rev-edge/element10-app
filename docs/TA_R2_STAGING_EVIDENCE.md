@@ -109,3 +109,29 @@ native suites passed. C6 introduced organization-transition history after the
 original X6d/X6g tests; their fixture cleanup now removes that history before
 deleting temporary organizations. This is test cleanup only and does not alter
 runtime behavior.
+
+## Independent-review correction addendum
+
+The earlier twelve-writer suite is retained as supplemental first-lock coverage.
+The acceptance proof is now
+`tests/ta_r2_last_lock_customer_writer_authority_races_test.js`: each writer is
+first exercised successfully against valid state, then blocked at its final
+mutation-relevant row or advisory lock. The exact capability is revoked while
+the exact backend PID is waiting. After release, every writer returns its exact
+`42501` denial and its command-specific domain/event/receipt residue remains
+zero.
+
+Distinct-sale review is symmetric. Native-first then import and import-first
+then native both deny by default. Either chronological direction proceeds only
+when the exact later source claim has a current reviewed `new_transaction`
+decision. The official-total proof now contains four transactions and four
+lines: two native and two import contributions, with exact gross reconciliation.
+
+Trusted non-managed native evidence is also proven through the public command
+boundary. An authenticated operator uses the public create-draft, approve and
+post commands against a trusted native activity that has no
+`e10_native_break_sales` row. The resulting official line retains native source
+and activity identity. This proves the public path, not only the storage trigger.
+
+These corrections are local evidence for renewed independent review. They do
+not declare R2 accepted, and they do not claim hosted staging or exact-head CI.
