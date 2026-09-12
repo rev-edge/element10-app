@@ -55,15 +55,15 @@ Ordinary purchasing writers, all returning `jsonb`:
 - `e10_org_amend_purchase_order(p_org uuid,p_purchase_order_id uuid,p_expected_revision integer,p_supplier_id uuid,p_destination_location_id uuid,p_order_number text,p_currency text,p_expected_at timestamptz,p_lines jsonb,p_reason text,p_idempotency_key text)`
 - `e10_org_transition_purchase_order(p_org uuid,p_purchase_order_id uuid,p_expected_revision integer,p_action text,p_reason text,p_idempotency_key text)`
 - `e10_org_create_supplier_invoice(p_org uuid,p_supplier_id uuid,p_supplier_document_number text,p_currency text,p_document_date date,p_total_amount numeric,p_source_connection text,p_external_document_id text,p_payload_fingerprint text,p_duplicate_review_outcome text,p_duplicate_review_reason text,p_lines jsonb,p_idempotency_key text)`
-- `e10_org_create_supplier_credit(...)`, with the same header arguments as invoice creation
+- `e10_org_create_supplier_credit(p_org uuid,p_supplier_id uuid,p_supplier_document_number text,p_currency text,p_document_date date,p_total_amount numeric,p_source_connection text,p_external_document_id text,p_payload_fingerprint text,p_duplicate_review_outcome text,p_duplicate_review_reason text,p_lines jsonb,p_idempotency_key text)`
 - `e10_org_amend_supplier_invoice(p_org uuid,p_supplier_invoice_id uuid,p_expected_revision integer,p_currency text,p_document_date date,p_total_amount numeric,p_lines jsonb,p_reason text,p_idempotency_key text)`
-- `e10_org_amend_supplier_credit(...)`, with the corresponding credit ID
+- `e10_org_amend_supplier_credit(p_org uuid,p_supplier_credit_id uuid,p_expected_revision integer,p_currency text,p_document_date date,p_total_amount numeric,p_lines jsonb,p_reason text,p_idempotency_key text)`
 - `e10_org_review_supplier_invoice`, `e10_org_approve_supplier_invoice`, and `e10_org_void_supplier_invoice`, each `(p_org uuid,p_supplier_invoice_id uuid,p_expected_revision integer,p_reason text,p_idempotency_key text)`
 - `e10_org_review_supplier_credit`, `e10_org_approve_supplier_credit`, and `e10_org_void_supplier_credit`, each `(p_org uuid,p_supplier_credit_id uuid,p_expected_revision integer,p_reason text,p_idempotency_key text)`
 - `e10_org_allocate_invoice_to_po(p_org uuid,p_invoice_line_id uuid,p_purchase_order_line_id uuid,p_expected_invoice_revision integer,p_expected_purchase_order_revision integer,p_quantity numeric,p_reason text,p_idempotency_key text)`
-- `e10_org_release_invoice_from_po(...)`, same identities/revisions and release quantity
+- `e10_org_release_invoice_from_po(p_org uuid,p_invoice_line_id uuid,p_purchase_order_line_id uuid,p_expected_invoice_revision integer,p_expected_purchase_order_revision integer,p_quantity numeric,p_reason text,p_idempotency_key text)`
 - `e10_org_allocate_credit_to_invoice(p_org uuid,p_credit_line_id uuid,p_invoice_line_id uuid,p_expected_credit_revision integer,p_expected_invoice_revision integer,p_amount numeric,p_reason text,p_idempotency_key text)`
-- `e10_org_release_credit_from_invoice(...)`, same identities/revisions and release amount
+- `e10_org_release_credit_from_invoice(p_org uuid,p_credit_line_id uuid,p_invoice_line_id uuid,p_expected_credit_revision integer,p_expected_invoice_revision integer,p_amount numeric,p_reason text,p_idempotency_key text)`
 
 Capabilities are operation-specific:
 
@@ -136,17 +136,30 @@ Customer identity and transaction entry points are indexed in migrations
 - `e10_org_amend_customer_transaction_draft(p_org uuid,p_draft uuid,p_expected_revision integer,p_customer uuid,p_currency text,p_occurred_at timestamptz,p_precision text,p_note text,p_lines jsonb,p_idempotency_key text)`
 - `e10_org_approve_customer_transaction_draft(p_org uuid,p_draft uuid,p_expected_revision integer,p_idempotency_key text)`
 - `e10_org_post_customer_transaction_draft(p_org uuid,p_draft uuid,p_expected_revision integer,p_idempotency_key text)`
-- `e10_org_adjust_customer_transaction(...)`, exact 19-argument adjustment signature in migration `20260911003000`
-- `e10_org_finalize_customer_transaction_component(...)`, exact 13-argument finalization signature in migration `20260911004500`
-- `e10_org_decide_customer_transaction_reconciliation(...)`, exact reviewed case signature in migration `20260911010000`
-- `e10_org_decide_customer_resolution(...)` and `e10_org_decide_customer_transaction_attribution(...)`, exact immutable correction signatures in migrations `20260911011500` and `20260911013000`
-- `e10_org_commit_native_break_sale(...)` and `e10_org_release_native_break_sale(...)`, exact slot-revision signatures in migration `20260911014500`
+- `e10_org_adjust_customer_transaction(p_org uuid,p_transaction_id uuid,p_transaction_line_id uuid,p_adjustment_kind text,p_effect text,p_currency text,p_merchandise_amount numeric,p_shipping_amount numeric,p_tax_amount numeric,p_occurred_at timestamptz,p_occurred_at_precision text,p_reason text,p_source_kind text,p_source_connection_id text,p_source_event_id text,p_source_component_id text,p_reinstates_cancellation_id uuid,p_evidence jsonb,p_idempotency_key text) -> jsonb`
+- `e10_org_finalize_customer_transaction_component(p_org uuid,p_transaction_id uuid,p_transaction_line_id uuid,p_component text,p_final_amount numeric,p_currency text,p_reason text,p_source_kind text,p_source_connection_id text,p_source_event_id text,p_source_component_id text,p_evidence jsonb,p_idempotency_key text) -> jsonb`
+- `e10_org_decide_customer_transaction_reconciliation(p_org uuid,p_case uuid,p_expected_revision integer,p_action text,p_match_basis text,p_transaction_id uuid,p_transaction_line_id uuid,p_reason text,p_evidence jsonb,p_idempotency_key text) -> jsonb`
+- `e10_org_decide_customer_resolution(p_org uuid,p_source_customer_id uuid,p_target_customer_id uuid,p_expected_source_revision bigint,p_expected_target_revision bigint,p_expected_resolution_revision integer,p_action text,p_review_basis text,p_identity_decision_ids uuid[],p_reason text,p_evidence jsonb,p_idempotency_key text) -> jsonb`
+- `e10_org_decide_customer_transaction_attribution(p_org uuid,p_transaction_id uuid,p_expected_revision integer,p_customer_id uuid,p_reason text,p_evidence jsonb,p_idempotency_key text) -> jsonb`
+- `e10_org_commit_native_break_sale(p_org uuid,p_session uuid,p_slot uuid,p_expected_slot_revision bigint,p_buyer_user uuid,p_buyer_handle text,p_quantity numeric,p_price numeric,p_currency text,p_sale_method text,p_occurred_at timestamptz,p_incentives jsonb,p_evidence jsonb,p_idempotency_key text) -> jsonb`
+- `e10_org_release_native_break_sale(p_org uuid,p_session uuid,p_slot uuid,p_sale uuid,p_expected_slot_revision bigint,p_reason text,p_evidence jsonb,p_idempotency_key text) -> jsonb`
 
-Capabilities remain distinct: `act.manage_customers`,
-`act.prepare_customer_transactions`, `act.approve_customer_transactions`,
-`act.post_customer_transactions`, and reconciliation authority. No default
-role grant is implied. Provisional activity and native board sales do not post
-official spend. Posting does not assert settlement.
+Capabilities are operation-specific:
+
+| Operation | Required capability |
+| --- | --- |
+| Create/update customer or decide customer identity | `act.manage_customers` |
+| Create/amend customer transaction draft | `act.prepare_customer_transactions` |
+| Approve customer transaction draft | `act.approve_customer_transactions` |
+| Post customer transaction draft | `act.post_customer_transactions` |
+| Adjust customer transaction | `act.adjust_customer_transactions` |
+| Finalize an unknown transaction component or decide source reconciliation | `act.reconcile_customer_transactions` |
+| Merge, unmerge or reject customer resolution | `act.merge_customers` |
+| Correct posted customer attribution | `act.correct_customer_attribution` |
+| Commit or release a native break sale | `act.live_run` plus session ownership where the writer requires it |
+
+No default role grant is implied. Provisional activity and native board sales
+do not post official spend. Posting does not assert settlement.
 
 This completed X6 slice is transaction and identity reconciliation, not a full
 CRM. It does not store customer contact records, communication preferences,
