@@ -199,6 +199,11 @@ begin
     raise exception 'invoice/PO allocation released below linked physical receipt';
   exception when sqlstate '55000' then null; end;
   reset role;
+  begin
+    update public.e10_invoice_po_allocations a set purchase_order_line_id=gen_random_uuid()
+      where a.organization_id=o and a.invoice_line_id=invoice_line_id and a.purchase_order_line_id=po_line_id;
+    raise exception 'invoice/PO allocation identity changed';
+  exception when sqlstate '55000' then null; end;
   select a.allocated_quantity into quantity from public.e10_invoice_po_allocations a
     where a.organization_id=o and a.invoice_line_id=invoice_line_id and a.purchase_order_line_id=po_line_id;
   if quantity<>6 then raise exception 'physical allocation floor changed: %',quantity; end if;

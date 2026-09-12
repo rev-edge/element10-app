@@ -73,6 +73,10 @@ create function e10.guard_invoice_po_below_physical_receipts() returns trigger
 language plpgsql security definer set search_path=public as $$
 declare required_quantity numeric;remaining_quantity numeric;
 begin
+  if tg_op='UPDATE' and (new.organization_id,new.invoice_line_id,new.purchase_order_line_id)
+    is distinct from (old.organization_id,old.invoice_line_id,old.purchase_order_line_id) then
+    raise exception using errcode='55000',message='invoice_po_allocation_identity_immutable';
+  end if;
   required_quantity:=e10.receipt_invoice_po_required_quantity(
     coalesce(new.organization_id,old.organization_id),coalesce(new.invoice_line_id,old.invoice_line_id),
     coalesce(new.purchase_order_line_id,old.purchase_order_line_id));
