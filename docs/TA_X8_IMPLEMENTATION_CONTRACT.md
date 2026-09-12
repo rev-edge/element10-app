@@ -68,7 +68,9 @@ Supported v1 operations and existing authoritative targets:
 - `inventory.history` -> `e10_org_inv_history`
 - `supplier.workspace` -> `e10_org_supplier_workspace`
 - `supplier.actual_cost_history` -> `e10_org_supplier_actual_cost_history`
-- `customer.spend_summary` -> `e10_org_customer_spend_summary`
+- `customer.spend_summary` -> `e10_org_customer_spend_grid_v2` when
+  `window_mode` is present; otherwise the preserved v1 delegate targets
+  `e10_org_customer_spend_summary`
 - `customer.spend_contributions` -> `e10_org_customer_spend_contributions`
 - `customer.provisional_activity` -> `e10_org_customer_provisional_activity`
 - `attendance.weekly` -> `e10_org_weekly_attendance`
@@ -339,6 +341,7 @@ e10_org_inv_history(p_org uuid,p_after_created timestamptz,p_after_id uuid,p_lim
 e10_org_supplier_workspace(p_org uuid,p_supplier_id uuid,p_limit integer,p_cursor text)
 e10_org_supplier_actual_cost_history(p_org uuid,p_supplier_id uuid,p_configuration_version_id uuid,p_currency text,p_as_of timestamptz,p_limit integer,p_cursor text)
 e10_org_customer_spend_summary(p_org uuid,p_from timestamptz,p_to timestamptz,p_observation_cutoff timestamptz,p_currency text,p_timezone text,p_week_start integer,p_customer uuid,p_purchase_kind text,p_location uuid,p_channel text,p_product uuid,p_configuration uuid,p_copy uuid,p_session uuid,p_capture_source text,p_limit integer,p_after_customer_id uuid,p_expected_dataset_revision bigint,p_expected_query_fingerprint text)
+e10_org_customer_spend_grid_v2(p_org uuid,p_window_mode text,p_from timestamptz,p_to timestamptz,p_observation_cutoff timestamptz,p_currency text,p_timezone text,p_week_start integer,p_customer uuid DEFAULT NULL,p_purchase_kind text DEFAULT NULL,p_location uuid DEFAULT NULL,p_channel text DEFAULT NULL,p_product uuid DEFAULT NULL,p_configuration uuid DEFAULT NULL,p_copy uuid DEFAULT NULL,p_session uuid DEFAULT NULL,p_capture_source text DEFAULT NULL,p_min_known_official_subtotal numeric DEFAULT NULL,p_max_known_official_subtotal numeric DEFAULT NULL,p_sort text DEFAULT 'customer_id_asc',p_limit integer DEFAULT 100,p_cursor jsonb DEFAULT NULL,p_expected_dataset_revision bigint DEFAULT NULL,p_expected_query_fingerprint text DEFAULT NULL)
 e10_org_customer_spend_contributions(p_org uuid,p_from timestamptz,p_to timestamptz,p_observation_cutoff timestamptz,p_currency text,p_customer uuid,p_purchase_kind text,p_location uuid,p_channel text,p_product uuid,p_configuration uuid,p_copy uuid,p_session uuid,p_capture_source text,p_limit integer,p_after_occurred_at timestamptz,p_after_transaction_id uuid,p_after_line_id uuid,p_expected_dataset_revision bigint,p_expected_query_fingerprint text)
 e10_org_customer_provisional_activity(p_org uuid,p_from timestamptz,p_to timestamptz,p_observation_cutoff timestamptz,p_currency text,p_customer uuid,p_limit integer,p_after_occurred_at timestamptz,p_after_activity_id uuid,p_expected_dataset_revision bigint,p_expected_query_fingerprint text)
 e10_org_weekly_attendance(p_org uuid,p_from timestamptz,p_to timestamptz,p_observation_cutoff timestamptz,p_timezone text,p_week_start integer,p_customer uuid,p_source_class text,p_provider_key text,p_limit integer,p_after_week_start date,p_expected_dataset_revision bigint,p_expected_query_fingerprint text)
@@ -367,13 +370,22 @@ e10_org_market_observation_drilldown(p_org uuid,p_parent_query_fingerprint text,
   `configuration_version_id`, ISO currency, finite `as_of`, `limit` 1..100;
   optional opaque `cursor`. Grain `accepted_receipt_cost_evidence`, units named
   by currency and configuration base unit. Missing cost remains unavailable.
-- `customer.spend_summary`: required finite `from,to,observation_cutoff`, ISO
-  currency, timezone, ISO `week_start` 1..7 and `limit` 1..100; optional customer,
-  purchase-kind, location, channel, product, configuration, copy, session,
-  capture-source, cursor customer ID, expected dataset revision and query
-  fingerprint. Existing exact signature and paired expected revision/fingerprint
-  rules apply. Grain `effective_customer`; metric definition is the X7b
-  net-merchandise contract; contact fields are never returned.
+- `customer.spend_summary`: the preserved v1 route applies when `window_mode`
+  is absent and retains its finite `from,to,observation_cutoff`, UUID
+  `after_customer_id` cursor and X7b behavior. The current X7f route applies
+  when `window_mode` is present. It requires `window_mode` (`bounded` or
+  `known_history`), finite `to` and `observation_cutoff`, ISO currency,
+  timezone, ISO `week_start` 1..7 and `limit` 1..100. `from` is required for
+  `bounded` and null for `known_history`. Optional aggregate bounds are
+  `min_known_official_subtotal` and `max_known_official_subtotal`; stable sort
+  is `customer_id_asc`, `display_name_asc`,
+  `known_official_subtotal_asc`, or `known_official_subtotal_desc`; continuation
+  uses the opaque JSON `cursor` with paired expected dataset revision and query
+  fingerprint. Customer and the existing typed row filters remain optional.
+  Mixing the v1 `after_customer_id` with v2 arguments fails. Grain is
+  `effective_customer`; totals and aggregate filters are computed over the full
+  authorized cohort before pagination. Contact fields are removed from v2 items
+  and cursors by the X8 projection.
 - `customer.spend_contributions`: required finite
   `from,to,observation_cutoff`, ISO currency and `limit` 1..100; optional
   customer, purchase-kind, location, channel, product, configuration, copy,

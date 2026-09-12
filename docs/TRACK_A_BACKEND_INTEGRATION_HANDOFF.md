@@ -6,13 +6,18 @@ Audience: Track B and future backend consumers. This is the discoverable index
 for the staging-complete X1-X8 foundation. Exact behavior remains defined by the
 cited migration and contract, not by client assumptions.
 
-## Rules shared by every client call
+## Rules shared by integration calls
 
-- Pass the selected organization explicitly. Never infer the first membership.
-- Public client RPCs require a real authenticated JWT, active organization,
-  active membership, and their named capability or object authority. Supplying
-  an ID is never authority.
-- Mutators use an explicit idempotency key. Exact replay returns the prior
+- Organization-scoped client RPCs require the explicitly selected organization,
+  a real authenticated JWT, an active organization and membership, and their
+  named capability or object authority. Never infer the first membership.
+  Supplying an ID is never authority.
+- Shared reviewed-catalog readers use their catalog-specific authority and do
+  not accept an organization merely to imitate tenant scope.
+- The F4 identity-review APIs are platform-admin APIs with no organization
+  argument. The X8c outbox claim/ack APIs are service-role-only and are not
+  browser APIs. Their sections below are authoritative over the org-client rule.
+- Mutating client RPCs use an explicit idempotency key. Exact replay returns the prior
   result; changed reuse fails. Revisioned resources also require the current
   expected revision and return a conflict when stale.
 - Treat SQLSTATE `42501` as authorization/scope refusal, `22023` as invalid or
@@ -143,6 +148,16 @@ Capabilities remain distinct: `act.manage_customers`,
 role grant is implied. Provisional activity and native board sales do not post
 official spend. Posting does not assert settlement.
 
+This completed X6 slice is transaction and identity reconciliation, not a full
+CRM. It does not store customer contact records, communication preferences,
+consent provenance, visibility-controlled organization tags, private customer
+notes or fulfillment addresses. Clients must not place those values in generic
+evidence JSON or infer that `act.manage_customers` exposes a nonexistent contact
+projection. Those fields require a later privacy-reviewed schema and independent
+permissions. Likewise, no generic versioned typed-extension registry exists;
+the framework's namespace/type/units/validation/cardinality/permission/index
+rules remain mandatory for any later extension implementation.
+
 ## Reporting contracts
 
 These are bounded reads. Their exact long signatures and response fields are
@@ -193,11 +208,12 @@ schema map" and "Common validation and envelope". Unknown operation, argument,
 table or function names fail. Query-control context/cursor metadata is the only
 allowed write; business state is unchanged.
 
-`customer.spend_summary` now dispatches to the X7f v2 full-dataset grid while
-retaining the same operation string. It accepts the v2 aggregate bounds, stable
-sort, JSON cursor, expected dataset revision and expected query fingerprint.
-It rejects mixed v1/v2 cursor arguments and redacts customer names when contact
-visibility is absent.
+`customer.spend_summary` dispatches to the X7f v2 full-dataset grid when
+`window_mode` is present, while retaining the same operation string and the
+reviewed legacy delegate when it is absent. The v2 route accepts aggregate
+bounds, stable sort, JSON cursor, expected dataset revision and expected query
+fingerprint. It rejects mixed v1/v2 cursor arguments and redacts customer names
+when contact visibility is absent.
 
 ## Player identity ambiguity review
 

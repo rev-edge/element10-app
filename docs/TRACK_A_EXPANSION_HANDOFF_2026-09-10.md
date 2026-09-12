@@ -32,6 +32,12 @@ scheduled monitors, chatbot behavior, collector showcase, external dispatch,
 secrets, unresolved commercial policy, production deployment and `main` merge
 remain outside this completed staging foundation.
 
+Two broader framework seams were not named in the approved X1 through X8 batch
+outcome and are not claimed as implemented: a generic versioned typed-extension
+registry, and full CRM contact/consent/preferences/tags/private-notes storage.
+The completion matrix records their exact current state and later design
+constraints. Existing JSON evidence is not a substitute for either seam.
+
 ## Later owner authorization
 
 The owner subsequently approved the expanded Track A implementation goal via Codex, including isolated tests and explicitly targeted staging migrations. See BOARD.md, "September 10 owner authorization: expanded Track A goal." The documentation-only and parked-implementation limits in the original relay below are historical and superseded for that approved backend scope. Production cutover, UI work, and excluded integrations remain unauthorized. Direct Claude Code delivery remains unconfirmed; the active executor is the existing Codex task `Track A: Data Layer`.

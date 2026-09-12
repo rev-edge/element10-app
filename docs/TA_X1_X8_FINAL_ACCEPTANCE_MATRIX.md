@@ -109,6 +109,24 @@ as implemented functionality.
 - The retained commercial and licensing decisions are future owner rulings, not
   defects in the approved foundation slice.
 
+## Framework compatibility seams outside the executed batch scope
+
+The framework is broader than the owner-authorized X1 through X8 outcome in
+`BOARD.md`. The authorization enumerates canonical identity, purchasing and
+inventory, typed intake/lifecycle evidence, provisional versus posted customer
+transactions, reporting, and query/action seams. The execution plan's X6 batch
+is customer reconciliation, not a complete CRM. The following framework seams
+are therefore recorded as future compatibility requirements, not silently
+claimed as implemented:
+
+| Framework seam | Current implementation | Classification |
+| --- | --- | --- |
+| Versioned typed extensions with owner namespace, stable field ID, type, units, allowed values, validation, cardinality, permissions and index eligibility | Core schemas use typed columns and bounded JSON evidence, but no generic extension registry or engine exists. JSON evidence cannot redefine core identity, quantity, cost, lifecycle or authorization. | Future separately designed backend slice. It was not named in any TA-X1 through TA-X8 execution batch, and no generic engine is invented by this closure. |
+| Customer contact details, communication preferences/consent provenance and visibility-controlled org tags/private notes | X6 supplies stable org customer identity, channel identities/aliases, optional verified-user linkage, creation actors/timestamps, reviewed attribution and transaction behavior. It intentionally supplies no contact record, consent/preference or org-tag/private-note store. | Future privacy-reviewed CRM slice. `TA_X6E_CUSTOMER_MERGE_SPLIT_PLAN.md` explicitly states that X6e does not add contact records, consent or private notes. Existing acceptance proves restricted contact data is not leaked; it does not claim that these optional records are stored. |
+
+These classifications do not authorize their implementation and do not weaken
+their framework constraints when a later slice is designed.
+
 ## Audit conclusion
 
 The repository, CI, staging ledger, executable tests, evidence packets and

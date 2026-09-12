@@ -160,3 +160,37 @@ The production check ran inside a read-only transaction and returned:
 `e10_schema=false|f4_cases=false|migration_count=12|latest=20260716110000|f4_propose_function=false`
 
 No production write occurred.
+
+## Advisor disclosure
+
+Current staging advisors were captured after F4. Neither security nor
+performance advisors report an `ERROR`.
+
+Security totals:
+
+- `rls_enabled_no_policy`: INFO 120. Three are the intentionally client-closed
+  F4 cases, candidates and decisions tables. Direct authenticated table grants
+  are absent, so adding permissive policies would weaken the reviewed contract.
+- `authenticated_security_definer_function_executable`: WARN 159. Three are the
+  intended F4 authenticated entry points. Each pins `search_path=public`,
+  validates current platform-admin authority before and after its locks, and is
+  covered by ordinary/hostile/revocation tests.
+- `auth_leaked_password_protection`: WARN 1. This is the existing project-level
+  Auth setting and was not changed by F4.
+
+Performance totals:
+
+- `unindexed_foreign_keys`: INFO 242. F4 contributes the cases `created_by` and
+  decisions `reviewed_by` references to `auth.users`. They are audit references,
+  not reader predicates in the bounded F4 contract; no speculative index was
+  added at this staging-only, zero-production-traffic checkpoint.
+- `auth_rls_initplan`: WARN 14, pre-existing and unrelated to F4.
+- `unused_index`: INFO 57. The F4 candidate-to-player lookup index is new and
+  necessarily unused before real traffic. It supports the bounded candidate
+  projection and is retained.
+- `auth_db_connections_absolute`: INFO 1, an existing project configuration
+  notice unrelated to F4.
+
+References: [RLS with no policy](https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy),
+[authenticated security-definer execution](https://supabase.com/docs/guides/database/database-linter?lint=0029_authenticated_security_definer_function_executable),
+and [unindexed foreign keys](https://supabase.com/docs/guides/database/database-linter?lint=0001_unindexed_foreign_keys).
