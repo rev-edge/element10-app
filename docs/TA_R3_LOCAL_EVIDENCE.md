@@ -42,3 +42,12 @@ The R3 proof includes native/system rejection, normalization persistence,
 ordinary duplicate denial, reviewed replacement, committed-batch lifecycle
 denial and a manual-correction versus reviewed-reimport race with one winner.
 No hosted environment or production was contacted.
+
+Independent-review hardening replaced the caller-controlled transaction-setting
+prototype with service-only authorization rows bound to transaction ID, backend
+PID, organization, batch and source row. Ordinary commits clear any such context.
+The proof forges the retired setting and still receives
+`stable_source_event_duplicate`. It also proves authenticated commit denial for
+a service-staged native batch, reserved `corrected:` key denial, exact-PID
+overlap on a held lineage lock, an exact stale-predecessor loser, one current
+successor and fail-closed cleanup including tagged C7 audit rows.

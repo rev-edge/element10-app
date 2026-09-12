@@ -14,10 +14,18 @@ grant execute on function e10.reject_committed_intake_batch_change() to service_
 create trigger e10_intake_batches_committed_immutable_trg before update or delete
 on public.e10_intake_batches for each row execute function e10.reject_committed_intake_batch_change();
 
+create table public.e10_intake_commit_authorizations(
+  transaction_id bigint not null,backend_pid integer not null,organization_id uuid not null,
+  intake_batch_id uuid not null,source_row_number bigint not null,predecessor_observation_id uuid not null,
+  primary key(transaction_id,backend_pid,organization_id,intake_batch_id,source_row_number)
+);
+revoke all on public.e10_intake_commit_authorizations from public,anon,authenticated;
+grant all on public.e10_intake_commit_authorizations to service_role;
+
 create function e10.enforce_stable_market_source_event() returns trigger
 language plpgsql set search_path=public as $$
 declare
-  v_event text;v_prior uuid;v_row bigint;v_classes jsonb;v_allowed uuid;
+  v_event text;v_prior uuid;v_row bigint;v_batch uuid;v_allowed uuid;
 begin
   new.source_connection_id:=nullif(btrim(new.source_connection_id),'');
   new.source_reference:=nullif(btrim(new.source_reference),'');
@@ -37,15 +45,14 @@ begin
       where s.organization_id=o.organization_id and s.superseded_observation_id=o.id)
   order by o.recorded_at desc,o.id desc limit 1;
   if v_prior is null then return new;end if;
-  begin
-    v_classes:=nullif(current_setting('e10.corrected_intake_classifications',true),'')::jsonb;
-  exception when others then v_classes:=null;
-  end;
-  select source_row_number into v_row from public.e10_intake_rows
-    where organization_id=new.organization_id and id=new.intake_row_id;
-  select (e->>'superseded_observation_id')::uuid into v_allowed
-  from jsonb_array_elements(coalesce(v_classes,'[]'::jsonb)) e
-  where e->>'classification'='replacement' and (e->>'source_row_number')::bigint=v_row;
+  select r.source_row_number,c.intake_batch_id into v_row,v_batch
+  from public.e10_intake_rows r join public.e10_intake_commits c
+    on(c.organization_id,c.id)=(r.organization_id,new.intake_commit_id)
+  where r.organization_id=new.organization_id and r.id=new.intake_row_id;
+  select predecessor_observation_id into v_allowed
+  from public.e10_intake_commit_authorizations
+  where transaction_id=txid_current() and backend_pid=pg_backend_pid()
+    and organization_id=new.organization_id and intake_batch_id=v_batch and source_row_number=v_row;
   if v_allowed is distinct from v_prior then
     raise exception using errcode='23505',message='stable_source_event_duplicate';
   end if;
@@ -66,7 +73,7 @@ create function public.e10_org_stage_intake(
 ) returns jsonb language plpgsql security definer set search_path=public as $$
 declare v_rows jsonb;
 begin
-  if p_source_kind in ('native','system') then
+  if p_source_kind in ('native','system') and current_setting('role',true)<>'service_role' then
     raise exception using errcode='42501',message='intake_source_provenance_invalid';
   end if;
   select jsonb_agg(
@@ -85,10 +92,16 @@ revoke all on function public._e10_org_commit_intake_r3(uuid,uuid,bigint,text) f
 grant execute on function public._e10_org_commit_intake_r3(uuid,uuid,bigint,text) to service_role;
 create function public.e10_org_commit_intake(p_org uuid,p_batch_id uuid,p_expected_review_revision bigint,p_idempotency_key text)
 returns jsonb language plpgsql security definer set search_path=public as $$
+declare v_source text;
 begin
   if p_idempotency_key like 'corrected:%' then
     raise exception using errcode='22023',message='intake_idempotency_namespace_reserved';
   end if;
+  select source_kind into v_source from public.e10_intake_batches where organization_id=p_org and id=p_batch_id;
+  if v_source in ('native','system') and current_setting('role',true)<>'service_role' then
+    raise exception using errcode='42501',message='intake_source_provenance_invalid';
+  end if;
+  delete from public.e10_intake_commit_authorizations where transaction_id=txid_current() and backend_pid=pg_backend_pid();
   perform pg_advisory_xact_lock(hashtextextended(p_org::text||'|observation-lineage-graph',0));
   return public._e10_org_commit_intake_r3(p_org,p_batch_id,p_expected_review_revision,p_idempotency_key);
 end $$;
@@ -99,9 +112,21 @@ revoke all on function public._e10_org_commit_corrected_intake_r3(uuid,uuid,bigi
 grant execute on function public._e10_org_commit_corrected_intake_r3(uuid,uuid,bigint,jsonb,text) to service_role;
 create function public.e10_org_commit_corrected_intake(p_org uuid,p_batch_id uuid,p_expected_review_revision bigint,p_classifications jsonb,p_idempotency_key text)
 returns jsonb language plpgsql security definer set search_path=public as $$
+declare v_result jsonb;v_source text;
 begin
-  perform set_config('e10.corrected_intake_classifications',coalesce(p_classifications,'[]'::jsonb)::text,true);
-  return public._e10_org_commit_corrected_intake_r3(p_org,p_batch_id,p_expected_review_revision,p_classifications,p_idempotency_key);
+  select source_kind into v_source from public.e10_intake_batches where organization_id=p_org and id=p_batch_id;
+  if v_source in ('native','system') and current_setting('role',true)<>'service_role' then
+    raise exception using errcode='42501',message='intake_source_provenance_invalid';
+  end if;
+  delete from public.e10_intake_commit_authorizations where transaction_id=txid_current() and backend_pid=pg_backend_pid();
+  insert into public.e10_intake_commit_authorizations(transaction_id,backend_pid,organization_id,intake_batch_id,source_row_number,predecessor_observation_id)
+  select txid_current(),pg_backend_pid(),p_org,p_batch_id,(e->>'source_row_number')::bigint,(e->>'superseded_observation_id')::uuid
+  from jsonb_array_elements(coalesce(p_classifications,'[]'::jsonb))e
+  where e->>'classification'='replacement' and coalesce(e->>'source_row_number','')~'^[1-9][0-9]*$'
+    and coalesce(e->>'superseded_observation_id','')~'^[0-9a-fA-F-]{36}$';
+  v_result:=public._e10_org_commit_corrected_intake_r3(p_org,p_batch_id,p_expected_review_revision,p_classifications,p_idempotency_key);
+  delete from public.e10_intake_commit_authorizations where transaction_id=txid_current() and backend_pid=pg_backend_pid();
+  return v_result;
 end $$;
 
 alter function public.e10_org_correct_market_observation(uuid,uuid,text,text,uuid,timestamptz,text,numeric,numeric,text,jsonb,text,text)
