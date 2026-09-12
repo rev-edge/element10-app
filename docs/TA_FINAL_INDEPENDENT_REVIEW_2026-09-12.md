@@ -1,5 +1,23 @@
 # Track A final independent review
 
+## Current disposition after external review
+
+The final acceptance recorded later in this historical ledger is superseded.
+The external review of f93aaa7 reports reproduced inventory, authorization,
+customer-spend, provenance and evidence-coverage defects. Those counterexamples
+have not yet been independently reproduced by this coordinator. Unconditional
+acceptance is withdrawn pending reproduction, corrective regression tests and
+renewed staging verification. Prior PASS records remain historical evidence,
+not proof against the newly reported counterexamples.
+
+The owner authorized correction of the review findings first, followed by
+multilingual backend foundations. Track A is preparing a full finding matrix
+and dependency-ordered plan. Production, main, cutover and Track B screen work
+remain outside this execution. The external counterexample kit was not supplied;
+the detailed report is available and can be used to reconstruct failing tests.
+
+## Historical review record
+
 Review baseline: `2b1f31fca4198c14d35953214e469af286d6c999`.
 Date: 2026-09-12. Status: acceptance remains open.
 
