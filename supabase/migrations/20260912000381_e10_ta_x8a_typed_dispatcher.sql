@@ -25,6 +25,8 @@ begin
  for arg_key,arg_value in select key,value from jsonb_each(p_args)loop
   if arg_value='null'::jsonb then continue;end if;arg_type:=jsonb_typeof(arg_value);
   if arg_key=any(array['limit','week_start','freshness_days','expected_dataset_revision'])and(arg_type<>'number'or(arg_value#>>'{}')!~'^[0-9]+$')then raise exception using errcode='22023',message='x8_query_args_invalid';end if;
+  if arg_key=any(array['after_created','from','to','observation_cutoff','as_of','closing_cutoff','opening_cutoff','observed_from','observed_to','after_occurred_at'])then begin if arg_type<>'string'or not isfinite((arg_value#>>'{}')::timestamptz)then raise exception using errcode='22023',message='x8_query_args_invalid';end if;exception when others then raise exception using errcode='22023',message='x8_query_args_invalid';end;end if;
+  if arg_key='after_week_start'then begin if arg_type<>'string'or not isfinite((arg_value#>>'{}')::date)then raise exception using errcode='22023',message='x8_query_args_invalid';end if;exception when others then raise exception using errcode='22023',message='x8_query_args_invalid';end;end if;
   if arg_key='filters'and arg_type<>'object'then raise exception using errcode='22023',message='x8_query_args_invalid';end if;
   if arg_key='source_connections'and(arg_type<>'array'or exists(select 1 from jsonb_array_elements(arg_value)e where jsonb_typeof(e)<>'string'))then raise exception using errcode='22023',message='x8_query_args_invalid';end if;
   if arg_key<>all(array['limit','week_start','freshness_days','expected_dataset_revision','filters','source_connections'])and arg_type<>'string'then raise exception using errcode='22023',message='x8_query_args_invalid';end if;
