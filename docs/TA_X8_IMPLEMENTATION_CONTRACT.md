@@ -1,6 +1,6 @@
 # TA-X8 implementation contract
 
-Status: proposed for independent review. No X8 migration is authorized by this
+Status: revision 2 proposed for independent review. No X8 migration is authorized by this
 document alone.
 
 Authorities:
@@ -57,7 +57,7 @@ organization without deleting the original context.
 ### Dispatcher
 
 `e10_org_typed_query(p_org uuid, p_context_id uuid, p_operation text,
-p_args jsonb)` is `STABLE SECURITY DEFINER`, anon-closed, and available only to
+p_args jsonb)` is `VOLATILE SECURITY DEFINER`, anon-closed, and available only to
 `authenticated` and `service_role`. It uses a literal `CASE` allowlist. It never
 accepts SQL, relation names, function names, operators, projection strings, or
 unbounded export flags. Unknown operations and unknown argument keys fail.
@@ -87,10 +87,10 @@ operation, context, organization, result, query fingerprint, as-of/cutoff,
 metric/grain/unit definition where applicable, source references, coverage, and
 explicit unknowns returned by the underlying contract.
 
-The dispatcher is declared `STABLE` so a supported query cannot perform a
-commercial or inventory mutation. Operations whose current implementation
-cannot execute inside that read-only function contract remain unsupported until
-corrected; they are not silently routed through a volatile escape.
+The dispatcher does not claim that volatility is a security boundary. Its exact
+nested call graph is reviewed below. Query-control metadata is the only permitted
+write. Before/after tests assert that no commercial, inventory, purchasing,
+customer, identity, evidence, draft, outbox payload or idempotency state changes.
 
 Explicitly unsupported in v1:
 
@@ -191,7 +191,8 @@ external action, or applying a model suggestion.
   operation, approval, capability or delegated arguments.
 - Preview is an exact rendering of one immutable revision.
 - Changed revision invalidates approval.
-- Maker/checker capability separation is enforced.
+- Separate prepare and approval capabilities are enforced. The same actor may
+  exercise both when they currently hold both; X8 adds no distinct-actor rule.
 - Capability, membership, organization, destination permission and referenced
   entity changes between approval and commit fail closed.
 - Competing commits and exact retries yield one action-draft command and one
@@ -211,7 +212,9 @@ The existing `e10_integration_outbox` gains nullable claim owner, random claim
 token, claim generation, claimed timestamp and lease expiry. Its existing event,
 destination, payload and unique effect identity remain unchanged.
 
-`e10_outbox_acknowledgements` is append-only and records organization, outbox
+`e10_outbox_claim_commands` stores claim-request idempotency key, request
+fingerprint and the historical bounded result. `e10_outbox_acknowledgements` is
+append-only and records organization, outbox
 row, consumer, claim generation/token, success/failure disposition, retry time,
 idempotency fingerprint and recorded time. It records database protocol state,
 not proof that an external provider performed an effect.
@@ -226,11 +229,12 @@ anon or `PUBLIC` path.
 p_idempotency_key)`:
 
 - validates active org and enabled registered consumer before target inspection;
-- clamps limit to 1..100 and lease to 5..300 seconds;
-- selects only pending/failed rows whose retry time is due, destination is
+- rejects limits outside 1..100 and leases outside 5..300 seconds;
+- selects only pending/failed rows whose retry time is due (`NULL` means due), destination is
   allowed and prior lease is absent/expired;
 - orders by next-attempt/created/id and locks with `FOR UPDATE SKIP LOCKED`;
-- assigns one random token and incremented generation per row;
+- assigns one random token and incremented generation per row and increments
+  `attempt_count` exactly once when ownership is granted;
 - returns only bounded event identity, destination, payload, token, generation
   and lease expiry;
 - makes exact request replay stable and changed-key reuse fail.
@@ -248,7 +252,8 @@ p_idempotency_key)`:
 - accepts only `delivered`, `retry` or `dead`;
 - locks the outbox row and rechecks active org, enabled consumer, owner, token,
   generation and unexpired lease;
-- `delivered` sets the existing delivered state and timestamp;
+- `delivered` sets the existing delivered state and timestamp and clears all
+  active claim fields;
 - `retry` sets failed, clears the claim and schedules a bounded next attempt;
 - `dead` sets terminal dead and clears the claim;
 - appends one acknowledgement record and returns a stable result;
@@ -259,6 +264,253 @@ and malformed outcome fail without changing the row. Acknowledgement does not
 contact a provider. Future delivery must use the immutable
 `organization_id/commercial_event_id/destination_key` effect identity and prove
 provider-side replay safety separately.
+
+## X8a exact target and schema map
+
+### Nested side effects
+
+The implementation must verify these identities from `pg_proc` at build time and
+pin them in tests. A function's volatility label is descriptive, not authority.
+
+- `inventory.page` calls `public.e10_org_inv_page(uuid,text,integer,jsonb)` and
+  `_e10_inv_item_json`. It reads inventory only and writes nothing.
+- `inventory.history` calls
+  `public.e10_org_inv_history(uuid,timestamptz,uuid,integer,text)`. It reads the
+  retained movement ledger only and writes nothing.
+- `supplier.workspace` calls
+  `public.e10_org_supplier_workspace(uuid,uuid,integer,text)`. It reads
+  purchasing documents/comments and writes nothing.
+- `supplier.actual_cost_history` calls
+  `public.e10_org_supplier_actual_cost_history(uuid,uuid,uuid,text,timestamptz,integer,text)`.
+  It reads accepted receipt/cost evidence and writes nothing.
+- `customer.spend_summary`, `customer.spend_contributions` and
+  `customer.provisional_activity` call their exact X7b public functions. Those
+  functions are `VOLATILE` because they take `FOR SHARE` locks on
+  `e10_reporting_dataset_revisions`; they perform no insert, update or delete.
+- `attendance.weekly` calls the exact X7a public function. It takes `FOR SHARE`
+  on the same dataset revision and performs no insert, update or delete.
+- `inventory.lifecycle`, `inventory.unique_item_evidence` and
+  `inventory.valuation_coverage` call their exact X7e public readers and perform
+  no write.
+- `market.screener` and `market.observation_drilldown` call their exact X7d
+  public readers. They write only actor/org-bound rows through
+  `e10.save_market_query_context` and `e10.save_market_query_cursor`. This is an
+  explicit query-control metadata exception needed for snapshot/cursor
+  integrity. It is not a business-state mutation or shared result cache.
+
+The X8 query context itself is also query-control metadata. Thus X8 is
+business-read-only, not transaction-level `READ ONLY`. The allowed write set is
+exactly `e10_query_contexts`, `e10_query_context_commands`,
+`e10_market_query_contexts`, and `e10_market_query_cursors`. Tests compare all
+other user tables before/after every operation. A future target with any other
+nested write fails the call-graph gate and is not added to the allowlist.
+
+### Common validation and envelope
+
+Every `p_args` must be an object, at most 64 KiB, with no recursively unknown
+keys. Strings are at most 2,000 bytes unless an existing target has a narrower
+limit. Arrays are at most 100 elements. Numeric values must be finite. Times
+must be finite timestamps. `limit` is required where shown and bounded to the
+target's existing maximum; the dispatcher rejects rather than silently expands
+it. Paired cursor components must both be null or both present.
+
+Every response is:
+
+```text
+{version, operation, organization_id, context_id, query_fingerprint,
+ as_of, cutoff, grain, units, metric_definition, coverage, sources,
+ unknowns, result}
+```
+
+Fields unavailable from the target are literal JSON `null` plus a named entry
+in `unknowns`; the dispatcher does not invent them. `sources` contains stable
+database entity/event/observation identities already returned by the target,
+never a fabricated external URL.
+
+### Per-operation arguments
+
+The dispatcher delegates to these exact existing signatures. Defaults shown are
+the target defaults, but X8 still requires and narrows arguments as specified
+below:
+
+```text
+e10_org_inv_page(p_org uuid,p_after text,p_limit int,p_filters jsonb)
+e10_org_inv_history(p_org uuid,p_after_created timestamptz,p_after_id uuid,p_limit int,p_item_id text)
+e10_org_supplier_workspace(p_org uuid,p_supplier_id uuid,p_limit integer,p_cursor text)
+e10_org_supplier_actual_cost_history(p_org uuid,p_supplier_id uuid,p_configuration_version_id uuid,p_currency text,p_as_of timestamptz,p_limit integer,p_cursor text)
+e10_org_customer_spend_summary(p_org uuid,p_from timestamptz,p_to timestamptz,p_observation_cutoff timestamptz,p_currency text,p_timezone text,p_week_start integer,p_customer uuid,p_purchase_kind text,p_location uuid,p_channel text,p_product uuid,p_configuration uuid,p_copy uuid,p_session uuid,p_capture_source text,p_limit integer,p_after_customer_id uuid,p_expected_dataset_revision bigint,p_expected_query_fingerprint text)
+e10_org_customer_spend_contributions(p_org uuid,p_from timestamptz,p_to timestamptz,p_observation_cutoff timestamptz,p_currency text,p_customer uuid,p_purchase_kind text,p_location uuid,p_channel text,p_product uuid,p_configuration uuid,p_copy uuid,p_session uuid,p_capture_source text,p_limit integer,p_after_occurred_at timestamptz,p_after_transaction_id uuid,p_after_line_id uuid,p_expected_dataset_revision bigint,p_expected_query_fingerprint text)
+e10_org_customer_provisional_activity(p_org uuid,p_from timestamptz,p_to timestamptz,p_observation_cutoff timestamptz,p_currency text,p_customer uuid,p_limit integer,p_after_occurred_at timestamptz,p_after_activity_id uuid,p_expected_dataset_revision bigint,p_expected_query_fingerprint text)
+e10_org_weekly_attendance(p_org uuid,p_from timestamptz,p_to timestamptz,p_observation_cutoff timestamptz,p_timezone text,p_week_start integer,p_customer uuid,p_source_class text,p_provider_key text,p_limit integer,p_after_week_start date,p_expected_dataset_revision bigint,p_expected_query_fingerprint text)
+e10_org_inventory_lifecycle(p_org uuid,p_as_of timestamptz,p_unique_item_id uuid,p_limit integer,p_cursor text)
+e10_org_unique_item_evidence(p_org uuid,p_unique_item_id uuid,p_as_of timestamptz,p_limit integer,p_cursor text)
+e10_org_inventory_valuation_coverage(p_org uuid,p_method text,p_method_version text,p_currency text,p_closing_cutoff timestamptz,p_opening_cutoff timestamptz,p_freshness_days integer,p_limit integer,p_cursor text)
+e10_org_market_screener(p_org uuid,p_scope text,p_grouping text,p_metric text,p_observation_kind text,p_observed_from timestamptz,p_observed_to timestamptz,p_as_of timestamptz,p_currency text,p_source_mode text,p_source_kind text,p_source_connections jsonb,p_filters jsonb,p_sort text,p_limit integer,p_cursor uuid)
+e10_org_market_observation_drilldown(p_org uuid,p_parent_query_fingerprint text,p_cohort_key text,p_observation_kind text,p_observed_from timestamptz,p_observed_to timestamptz,p_as_of timestamptz,p_currency text,p_source_mode text,p_source_kind text,p_source_connections jsonb,p_limit integer,p_cursor uuid)
+```
+
+- `inventory.page`: optional `after`; required `limit` 1..500; optional
+  `filters` with only `cat,set,year,grade,q`. Result grain `inventory_item`, units
+  `stored_item_quantity`; coverage/revision/cutoff are unavailable. X8 uses a
+  permitted projection helper that excludes `note`, raw `meta`, private cost and
+  contact fields from `_e10_inv_item_json` output.
+- `inventory.history`: optional paired `after_created,after_id`; required
+  `limit` 1..500; optional `item_id`. Result grain `inventory_movement`, units
+  from `on_hand_delta/reserved_delta`; coverage unavailable. X8 projects a
+  fixed allowlist and excludes free-form `note` plus raw `meta` unless a later
+  reviewed field-level contract authorizes them.
+- `supplier.workspace`: required `supplier_id`, `limit` 1..100; optional
+  opaque `cursor`. Existing financial authorization controls the financial
+  projection. Result sources are document IDs/revisions; grain is
+  `purchasing_document`; cutoff is request time.
+- `supplier.actual_cost_history`: required `supplier_id`,
+  `configuration_version_id`, ISO currency, finite `as_of`, `limit` 1..100;
+  optional opaque `cursor`. Grain `accepted_receipt_cost_evidence`, units named
+  by currency and configuration base unit. Missing cost remains unavailable.
+- `customer.spend_summary`: required finite `from,to,observation_cutoff`, ISO
+  currency, timezone, `week_start` 0..6 and `limit` 1..100; optional customer,
+  purchase-kind, location, channel, product, configuration, copy, session,
+  capture-source, cursor customer ID, expected dataset revision and query
+  fingerprint. Existing exact signature and paired expected revision/fingerprint
+  rules apply. Grain `effective_customer`; metric definition is the X7b
+  net-merchandise contract; contact fields are never returned.
+- `customer.spend_contributions`: required finite
+  `from,to,observation_cutoff`, ISO currency and `limit` 1..100; optional
+  customer, purchase-kind, location, channel, product, configuration, copy,
+  session and capture-source; paired expected revision/fingerprint;
+  cursor is the all-or-none triple `after_occurred_at,after_transaction_id,
+  after_line_id`. Grain `posted_transaction_line_contribution`.
+- `customer.provisional_activity`: required finite range/cutoff, ISO currency and
+  `limit` 1..100; optional customer; all-or-none cursor
+  `after_occurred_at,after_activity_id`; paired expected dataset revision/query
+  fingerprint. Grain `provisional_activity`; it is labeled non-posted and never
+  added to spend.
+- `attendance.weekly`: required finite range/cutoff, timezone, `week_start` 0..6
+  and `limit` 1..100; optional customer/source class/provider key/week cursor;
+  paired revision/fingerprint. Grain `customer_week`; units are source-defined
+  presence seconds with coverage and gap disclosure, never video watch time.
+- `inventory.lifecycle`: required finite `as_of`, `limit` 1..100; optional unique
+  item and opaque cursor. Grain `inventory_lifecycle_event`; source identities
+  and ambiguity come from X7e.
+- `inventory.unique_item_evidence`: required unique item, finite `as_of`, `limit`
+  1..50; optional cursor. Grain `evidence_observation`.
+- `inventory.valuation_coverage`: required method, method version, ISO currency,
+  finite closing cutoff, freshness days 1..3650 and `limit` 1..100; optional
+  finite opening cutoff and cursor. Grain and units are returned by X7e; missing
+  valuation/cost remains unknown.
+- `market.screener`: required scope, grouping, metric, observation kind,
+  finite `observed_from,observed_to,as_of`, ISO currency, source mode and
+  `limit` 1..100; optional
+  source kind/connections, typed filters, sort and cursor. Only the X7d filter
+  schema is accepted recursively. Grain, cohort, units, rights/coverage,
+  revisions and query fingerprint are passed through unchanged.
+- `market.observation_drilldown`: required parent fingerprint, cohort key,
+  observation kind, finite `observed_from,observed_to,as_of`, ISO currency,
+  source mode and `limit`
+  1..50; optional source kind/connections and cursor. Parent snapshot and source
+  rights must still be valid for the same actor/org.
+
+On every call, before target-specific work and again after any blocking target
+lock, the dispatcher/context guard checks active organization, `auth.uid()`,
+context actor/org equality, expiry/revocation and current membership. Context ID
+is an identifier, never bearer authority. Context tables are RLS-enabled,
+client-closed and service-role-only. The creator may revoke their own context;
+an org admin may revoke any context in that org. Revocation checks are repeated
+after the context row lock. Expired contexts are retained as bounded audit
+metadata for 30 days; no query results are cached by X8.
+
+## X8b exact RPC and transition map
+
+Public RPCs are:
+
+- `e10_org_create_action_draft(p_org,p_operation,p_values,p_field_provenance,p_source_references,p_idempotency_key)`
+- `e10_org_amend_action_draft(p_org,p_draft_id,p_expected_revision,p_values,p_field_provenance,p_source_references,p_idempotency_key)`
+- `e10_org_preview_action_draft(p_org,p_draft_id,p_revision)`
+- `e10_org_approve_action_draft(p_org,p_draft_id,p_expected_revision,p_idempotency_key)`
+- `e10_org_cancel_action_draft(p_org,p_draft_id,p_expected_revision,p_reason,p_idempotency_key)`
+- `e10_org_commit_action_draft(p_org,p_draft_id,p_expected_revision,p_idempotency_key)`
+
+All are anon-closed. Tables remain client-closed. Creator or org admin may read,
+preview, amend or cancel; amend also requires the operation's prepare capability.
+Any current member with the operation's approval capability may approve. The
+same actor may prepare and approve because existing policy does not impose a
+universal distinct-person rule; no new blanket maker/checker rule is invented.
+Commit requires the operation's prepare capability and may be performed by the
+creator or an org admin. The ordinary delegated writer rechecks its own authority.
+
+Values and provenance are operation-specific objects, each at most 256 KiB;
+source references are at most 100 entries and 64 KiB total. Recursive unknown
+keys, nonfinite numbers and oversized strings fail. Missing and ambiguous fields
+are derived by server validators from typed values and current referenced rows;
+the caller cannot declare a required field resolved. Preview projects only the
+operation allowlist and redacts financial/contact values unless the caller has
+the same current permission required by the underlying read contract.
+
+Create operations have no target revision. Instead, every referenced supplier,
+location, product/configuration, customer, activity and source row contributes a
+server-derived identity/status/revision fingerprint stored on the draft revision.
+Approval and commit recompute it. A change yields a stale-reference conflict and
+requires an amended revision and new approval. Amend always clears approved
+revision/status and appends a new complete revision; old approval history remains.
+
+Every mutation uses command-lock then draft-lock ordering. Authorization is
+checked before target inspection and repeated after each blocking lock. Approval
+and commit require `current_revision=approved_revision=p_expected_revision` as
+appropriate. Commit derives an operation-namespaced ordinary idempotency key:
+`x8:<operation>:<draft UUID>:<revision>:<SHA-256 of X8 commit key>`. The caller
+cannot supply the downstream key. X8 stores that key and the exact ordinary
+result. Exact retry first rechecks current authority, then returns the stored
+result; changed operation/revision/payload under the same X8 key fails.
+
+Current writer verification is mandatory at implementation: PO creation must
+still create status `draft`, require active org/member `act.purchasing_prepare`,
+validate supplier/destination/`can_receive_at`/active configurations, lock its
+idempotency key and append one revision/event. Customer draft creation must
+still create only status `draft`, require member
+`act.prepare_customer_transactions`, validate every typed line and source/entity
+link, lock its idempotency key and append one complete revision. X8 adds no bypass.
+
+## X8c exact lease and idempotency ordering
+
+Claim command fingerprint includes version, org, consumer, requested limit and
+lease seconds. One command row stores the immutable returned row IDs, tokens,
+generations and lease expiries. Exact replay first rechecks active org and enabled
+consumer. It returns the historical result with `authoritative=false` unless
+every recorded token is still the current unexpired claim. It never renews a
+lease or implies current ownership. Changed reuse fails.
+
+Consumer authorization is checked before selecting outbox rows and again after
+each selected row lock. Destination entitlement is checked both times. The
+fresh `clock_timestamp()` after lock acquisition determines lease eligibility
+and expiry. Claiming increments `attempt_count` once. `next_attempt_at IS NULL`
+means immediately due. Claim limit is 1..100, lease 5..300 seconds, destination
+and consumer keys are 1..160 bytes, and counters may not overflow `integer`.
+
+Acknowledgement command fingerprint includes version, org, consumer, outbox row,
+token, generation, outcome, bounded retry interval and bounded error digest.
+Error text is at most 2,000 bytes. Retry delay is 5..86,400 seconds. Exact replay
+first rechecks active org and enabled consumer, then returns the stored historical
+result even though the original token was cleared; it performs no second state
+change. Without an existing acknowledgement receipt, expired/cleared/replaced
+tokens fail. Changed reuse fails.
+
+Ack and reclaim serialize on the outbox row. Ack uses fresh wall-clock time after
+the row lock and succeeds only before lease expiry. Reclaim is eligible only at
+or after expiry and writes a new generation/token. Therefore whichever obtains
+the row under its valid time condition wins; a stale ack can never acknowledge
+the new generation. Consumer disablement or destination removal is checked after
+the lock and denies both claim and ack, including exact replay, without mutation.
+
+`delivered`, `retry` and `dead` all clear owner/token/claimed/lease fields.
+`delivered` sets `delivered_at`; other states keep it null. `retry` sets status
+failed and `next_attempt_at=clock_timestamp()+retry interval`; `dead` sets dead
+with no retry time. Every outcome sets bounded `last_error` consistently and
+updates `updated_at`. The immutable effect identity remains
+`organization_id/commercial_event_id/destination_key`; acknowledgement proves
+only the database protocol transition, not external exactly-once delivery.
+
+No consumer, destination entitlement, credential, dispatcher, job or schedule
+is seeded by X8c.
 
 ### X8c acceptance
 
