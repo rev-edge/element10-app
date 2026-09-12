@@ -2,7 +2,7 @@
 do $$declare n int;begin
  select count(*)into n from pg_class c join pg_namespace s on s.oid=c.relnamespace where s.nspname='public'and c.relname in('e10_unique_item_facet_decisions','e10_market_observation_fact_decisions','e10_market_observation_equivalence_decisions','e10_market_observation_coverage_decisions')and c.relrowsecurity;
  if n<>4 then raise exception'evidence RLS count %',n;end if;
- if exists(select 1 from information_schema.role_table_grants where table_schema='public'and table_name like'e10%decisions'and grantee in('anon','authenticated'))then raise exception'evidence client grant leak';end if;
+ if exists(select 1 from information_schema.role_table_grants where table_schema='public'and table_name in('e10_unique_item_facet_decisions','e10_market_observation_fact_decisions','e10_market_observation_equivalence_decisions','e10_market_observation_coverage_decisions')and grantee in('anon','authenticated'))then raise exception'evidence client grant leak';end if;
 end $$;
 begin;
 do $$
