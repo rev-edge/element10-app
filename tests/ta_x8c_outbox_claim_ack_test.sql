@@ -120,7 +120,9 @@ end $$;
 
 set local role service_role;
 do $$ begin
-  if not has_table_privilege('service_role','public.e10_outbox_consumers','select,insert,update')
+  if not has_table_privilege('service_role','public.e10_outbox_consumers','select')
+     or not has_table_privilege('service_role','public.e10_outbox_consumers','insert')
+     or not has_table_privilege('service_role','public.e10_outbox_consumers','update')
      or has_table_privilege('service_role','public.e10_outbox_consumers','delete,truncate') then raise exception 'consumer service ACL mismatch'; end if;
   if not has_table_privilege('service_role','public.e10_outbox_claim_commands','select')
      or has_table_privilege('service_role','public.e10_outbox_claim_commands','insert,update,delete,truncate') then raise exception 'claim receipt service ACL mismatch'; end if;
