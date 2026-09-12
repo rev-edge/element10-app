@@ -1,7 +1,8 @@
 \set ON_ERROR_STOP on
 begin;
+\ir ta_x8_business_state_helper.sql
 do $$
-declare o uuid:=gen_random_uuid();o2 uuid:=gen_random_uuid();actor uuid:=gen_random_uuid();ordinary uuid:=gen_random_uuid();admin_user uuid:=gen_random_uuid();suspended uuid:=gen_random_uuid();no_member uuid:=gen_random_uuid();multi uuid:=gen_random_uuid();foreign_user uuid:=gen_random_uuid();
+declare o uuid:=gen_random_uuid();o2 uuid:=gen_random_uuid();actor uuid:=gen_random_uuid();ordinary uuid:=gen_random_uuid();admin_user uuid:=gen_random_uuid();suspended uuid:=gen_random_uuid();no_member uuid:=gen_random_uuid();multi uuid:=gen_random_uuid();foreign_user uuid:=gen_random_uuid();bs jsonb;
  role_fin uuid:=gen_random_uuid();role_plain uuid:=gen_random_uuid();role_admin uuid:=gen_random_uuid();role_foreign uuid:=gen_random_uuid();supplier uuid:=gen_random_uuid();supplier2 uuid:=gen_random_uuid();supplier_unknown uuid:=gen_random_uuid();supplier_full uuid:=gen_random_uuid();supplier_other uuid:=gen_random_uuid();supplier_states uuid:=gen_random_uuid();loc uuid:=gen_random_uuid();
  product uuid:=gen_random_uuid();config uuid:=gen_random_uuid();version_id uuid:=gen_random_uuid();version2 uuid:=gen_random_uuid();po uuid:=gen_random_uuid();pol uuid:=gen_random_uuid();pol_unknown uuid:=gen_random_uuid();receipt uuid:=gen_random_uuid();rl uuid:=gen_random_uuid();
  po_u uuid:=gen_random_uuid();pol_u uuid:=gen_random_uuid();po_f uuid:=gen_random_uuid();pol_f uuid:=gen_random_uuid();receipt_f uuid:=gen_random_uuid();rl_f uuid:=gen_random_uuid();
@@ -84,8 +85,8 @@ begin
 
  perform set_config('request.jwt.claims',jsonb_build_object('sub',actor,'role','authenticated')::text,true);set local role authenticated;
  x8ctx:=(public.e10_org_create_query_context(o,'workspace',600,'x8-x3f')->>'context_id')::uuid;
- j:=public.e10_org_typed_query(o,x8ctx,'supplier.workspace',jsonb_build_object('supplier_id',supplier,'limit',100));if j->>'grain'<>'supplier_document'or jsonb_array_length(j#>'{result,items}')<>5 then raise exception'X8 supplier workspace dispatch %',j;end if;
- j:=public.e10_org_typed_query(o,x8ctx,'supplier.actual_cost_history',jsonb_build_object('supplier_id',supplier,'configuration_version_id',version_id,'currency','CAD','as_of','2026-02-01T00:00:00Z','limit',10));if j->>'grain'<>'accepted_receipt_cost_evidence'or jsonb_array_length(j#>'{result,items}')<1 then raise exception'X8 supplier cost dispatch %',j;end if;
+ bs:=pg_temp.x8_business_state();j:=public.e10_org_typed_query(o,x8ctx,'supplier.workspace',jsonb_build_object('supplier_id',supplier,'limit',100));if pg_temp.x8_business_state()is distinct from bs then raise exception'X8 supplier workspace changed business data';end if;perform pg_temp.x8_assert_envelope(j,'supplier.workspace','supplier_document');if jsonb_array_length(j#>'{result,items}')<>5 then raise exception'X8 supplier workspace dispatch %',j;end if;
+ bs:=pg_temp.x8_business_state();j:=public.e10_org_typed_query(o,x8ctx,'supplier.actual_cost_history',jsonb_build_object('supplier_id',supplier,'configuration_version_id',version_id,'currency','CAD','as_of','2026-02-01T00:00:00Z','limit',10));if pg_temp.x8_business_state()is distinct from bs then raise exception'X8 supplier cost changed business data';end if;perform pg_temp.x8_assert_envelope(j,'supplier.actual_cost_history','accepted_receipt_cost_evidence');if jsonb_array_length(j#>'{result,items}')<1 then raise exception'X8 supplier cost dispatch %',j;end if;
  j:=public.e10_org_supplier_workspace(o,supplier,100,null);summary_full:=j->'financial_summary';select value into s from jsonb_array_elements(summary_full)where value->>'currency'='CAD';select value into s_usd from jsonb_array_elements(summary_full)where value->>'currency'='USD';select value into po_body from jsonb_array_elements(j->'items')where value->>'kind'='purchase_order';
  if j->>'financial_access'is distinct from'authorized'or jsonb_array_length(j->'items')is distinct from 5 or s is null or s_usd is null
   or s->>'open_commitment_status'is distinct from'incomplete'or(s->>'open_commitment_known_subtotal')::numeric is distinct from 30

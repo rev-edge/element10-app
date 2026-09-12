@@ -1,7 +1,8 @@
 \set ON_ERROR_STOP on
 begin;
+\ir ta_x8_business_state_helper.sql
 do $$
-declare o uuid:=gen_random_uuid();o2 uuid:=gen_random_uuid();u uuid:=gen_random_uuid();role_id uuid:=gen_random_uuid();role2 uuid:=gen_random_uuid();cid uuid;j jsonb;before_state jsonb;after_state jsonb;
+declare o uuid:=gen_random_uuid();o2 uuid:=gen_random_uuid();u uuid:=gen_random_uuid();role_id uuid:=gen_random_uuid();role2 uuid:=gen_random_uuid();cid uuid;j jsonb;bs jsonb;before_state jsonb;after_state jsonb;
 begin
  insert into auth.users(id,instance_id,aud,role,email,created_at,updated_at)values(u,'00000000-0000-0000-0000-000000000000','authenticated','authenticated','x8ad-'||u||'@x.invalid',now(),now());
  insert into public.e10_organizations(id,slug,name)values(o,'x8ad-'||substr(o::text,1,8),'X8a dispatcher'),(o2,'x8ad-'||substr(o2::text,1,8),'X8a foreign');
@@ -13,11 +14,13 @@ begin
  cid:=(public.e10_org_create_query_context(o,'workspace',600,'x8ad-context')->>'context_id')::uuid;reset role;
  select jsonb_build_object('items',(select count(*)from public.e10_inventory_items where organization_id=o),'moves',(select count(*)from public.e10_inventory_movements where organization_id=o),'commands',(select count(*)from public.e10_mutation_receipts where organization_id=o),'events',(select count(*)from public.e10_commercial_events where organization_id=o),'contexts',(select count(*)from public.e10_query_contexts where organization_id=o),'context_commands',(select count(*)from public.e10_query_context_commands where organization_id=o))into before_state;
  set local role authenticated;
- j:=public.e10_org_typed_query(o,cid,'inventory.page','{"limit":10,"filters":{}}');
+ bs:=pg_temp.x8_business_state();j:=public.e10_org_typed_query(o,cid,'inventory.page','{"limit":10,"filters":{}}');if pg_temp.x8_business_state()is distinct from bs then raise exception'X8 inventory page changed business data';end if;
+ perform pg_temp.x8_assert_envelope(j,'inventory.page','inventory_item');
  if j->>'version'<>'x8-query-v1'or j->>'operation'<>'inventory.page'or j->>'organization_id'<>o::text or j->>'context_id'<>cid::text or j->>'grain'<>'inventory_item'or j#>>'{result,items,0,id}'<>'x8ad-item'then raise exception'inventory page envelope invalid %',j;end if;
  if not(j->'unknowns'@>'["as_of","cutoff","coverage","metric_definition"]'::jsonb)then raise exception'envelope unknown metadata incomplete %',j->'unknowns';end if;
  if j#>'{result,items,0}'?'cost'or j#>'{result,items,0}'?'value'or j#>'{result,items,0}'?'secret'or j#>'{result,items,0}'?'email'then raise exception'inventory private field leaked %',j;end if;
- j:=public.e10_org_typed_query(o,cid,'inventory.history','{"limit":10}');
+ bs:=pg_temp.x8_business_state();j:=public.e10_org_typed_query(o,cid,'inventory.history','{"limit":10}');if pg_temp.x8_business_state()is distinct from bs then raise exception'X8 inventory history changed business data';end if;
+ perform pg_temp.x8_assert_envelope(j,'inventory.history','inventory_movement');
  if j->>'grain'<>'inventory_movement'or j#>>'{result,movements,0,item_id}'is distinct from'x8ad-item'then raise exception'inventory history envelope invalid %',j;end if;
  if j#>'{result,movements,0}'?'note'or j#>'{result,movements,0}'?'meta'then raise exception'movement private field leaked %',j;end if;
  begin perform public.e10_org_typed_query(o,cid,'inventory.page','{"limit":10,"sql":"select 1"}');raise exception'unknown argument accepted';exception when invalid_parameter_value then null;end;
