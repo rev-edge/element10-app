@@ -53,6 +53,12 @@ declare
   v_result jsonb;v_diagnostics jsonb;v_cursor jsonb;v_cursor_id uuid;v_cursor_num numeric;
   v_cursor_norm text;v_cursor_name text;v_engagement boolean;v_sale_only boolean;
 begin
+  if p_cursor='null'::jsonb then p_cursor:=null;end if;
+  if p_cursor is not null and(jsonb_typeof(p_cursor)<>'object'
+     or exists(select 1 from jsonb_object_keys(p_cursor)k where k<>all(array['sort','fingerprint','effective_customer_id','known_official_subtotal','normalized_display_name','display_name']))
+     or jsonb_typeof(p_cursor->'sort')<>'string' or jsonb_typeof(p_cursor->'fingerprint')<>'string'
+     or jsonb_typeof(p_cursor->'effective_customer_id')<>'string')then
+    raise exception using errcode='22023',message='customer_spend_grid_cursor_invalid';end if;
   if not e10.can_view_any_customer_financials(p_org) then
     raise exception using errcode='42501',message='customer_spend_denied';
   end if;
@@ -98,13 +104,8 @@ begin
     if p_cursor is not null then
       v_cursor_id:=(p_cursor->>'effective_customer_id')::uuid;
       v_cursor_num:=(p_cursor->>'known_official_subtotal')::numeric;
-      v_cursor_norm:=p_cursor->>'normalized_display_name';v_cursor_name:=p_cursor->>'display_name';
       if v_cursor_id is null then raise exception using errcode='22023';end if;
-      if p_sort='display_name_asc'and v_cursor_name is null then
-        select lower(c.display_name)collate"C",c.display_name into v_cursor_norm,v_cursor_name
-        from public.e10_customers c where(c.organization_id,c.id)=(p_org,v_cursor_id);
-        if not found then raise exception using errcode='22023';end if;
-      end if;
+      if p_customer is not null and v_cursor_id is distinct from p_customer then raise exception using errcode='22023';end if;
     end if;
   exception when others then raise exception using errcode='22023',message='customer_spend_grid_cursor_invalid';end;
   if p_window_mode='known_history' then
@@ -123,6 +124,12 @@ begin
        or(p_sort in('known_official_subtotal_asc','known_official_subtotal_desc')
           and v_cursor_num is distinct from v_anchor_num) then
       raise exception using errcode='22023',message='customer_spend_grid_cursor_invalid';
+    end if;
+    v_cursor_num:=v_anchor_num;
+    if p_sort='display_name_asc'then
+      select lower(c.display_name)collate"C",c.display_name into v_cursor_norm,v_cursor_name
+      from public.e10_customers c where(c.organization_id,c.id)=(p_org,v_cursor_id);
+      if not found then raise exception using errcode='22023',message='customer_spend_grid_cursor_invalid';end if;
     end if;
   end if;
   with raw as materialized(
@@ -188,7 +195,7 @@ begin
   ), page as(select * from ordered where rn<=p_limit+1),
   kept as(select * from page where rn<=p_limit),
   last_row as(select * from kept order by rn desc limit 1)
-  select jsonb_build_object('items',coalesce((select jsonb_agg(jsonb_build_object('effective_customer_id',effective_customer_id,'display_name',display_name,'line_count',line_count,'order_count',order_count,'merchandise_gross',merchandise_gross,'known_merchandise_discount',known_merchandise_discount,'unknown_discount_count',unknown_discount_count,'known_pre_adjustment_net',known_pre_adjustment_net,'signed_merchandise_adjustment_delta',signed_merchandise_adjustment_delta,'known_official_subtotal',known_official_subtotal,'complete_official_total',complete_official_total,'unknown_merchandise_count',unknown_merchandise_count,'known_shipping_subtotal',known_shipping_subtotal,'unknown_shipping_count',unknown_shipping_count,'known_tax_subtotal',known_tax_subtotal,'unknown_tax_count',unknown_tax_count,'known_break_subtotal',known_break_total,'unknown_break_count',unknown_break_count,'missing_break_session_count',missing_break_session_count,'purchasing_breaks',purchasing_breaks,'spend_per_purchasing_break',case when unknown_break_count=0 and missing_break_session_count=0 and purchasing_breaks>0 then known_break_total/purchasing_breaks end,'attended_breaks',case when p_window_mode='bounded'and v_engagement and not v_sale_only then attended_sessions end,'spend_per_attended_break',case when p_window_mode='bounded'and v_engagement and not v_sale_only and unknown_break_count=0 and missing_break_session_count=0 and not purchase_session_not_observed and coverage_complete and attended_sessions>0 then known_break_total/attended_sessions end,'attended_ratio_status',case when p_window_mode='known_history'then'unsupported_known_history_window'when not v_engagement then'engagement_not_authorized'when v_sale_only then'unsupported_cohort'when unknown_break_count>0 then'unknown_merchandise'when missing_break_session_count>0 then'missing_session'when purchase_session_not_observed then'purchase_session_not_observed'when not coverage_complete then'attendance_coverage_incomplete'when attended_sessions=0 then'zero_denominator'else'complete'end) order by rn)from kept),'[]'::jsonb),'full_cohort_totals',coalesce((select jsonb_build_object('customer_count',coalesce(max(full_customer_count),0),'line_count',coalesce(max(full_line_count),0),'known_official_subtotal',coalesce(max(full_known_official_subtotal),0))from scoped),'{"customer_count":0,"line_count":0,"known_official_subtotal":0}'::jsonb),'has_more',(select count(*)>p_limit from page),'next_cursor',case when(select count(*)>p_limit from page)then(select jsonb_build_object('sort',p_sort,'fingerprint',v_fp,'effective_customer_id',effective_customer_id,'known_official_subtotal',known_official_subtotal,'normalized_display_name',normalized_display_name,'display_name',display_name)from last_row)end,'metric_id','official_customer_spend_grid','metric_version','official-spend-grid-v2','currency',p_currency,'window_mode',p_window_mode,'observation_cutoff',p_observation_cutoff,'dataset_revision',v_revision,'query_fingerprint',v_fp,'authorization_scope',v_scope,'coverage',jsonb_build_object('requested_from',p_from,'requested_to',p_to,'effective_start',(select min(earliest_contribution)from filtered),'effective_end',least(p_to,p_observation_cutoff),'limitation','known_recorded_posted_history_only','source_history_completeness','unknown')) into v_result;
+  select jsonb_build_object('items',coalesce((select jsonb_agg(jsonb_build_object('effective_customer_id',effective_customer_id,'display_name',display_name,'line_count',line_count,'order_count',order_count,'merchandise_gross',merchandise_gross,'known_merchandise_discount',known_merchandise_discount,'unknown_discount_count',unknown_discount_count,'known_pre_adjustment_net',known_pre_adjustment_net,'signed_merchandise_adjustment_delta',signed_merchandise_adjustment_delta,'known_official_subtotal',known_official_subtotal,'complete_official_total',complete_official_total,'unknown_merchandise_count',unknown_merchandise_count,'known_shipping_subtotal',known_shipping_subtotal,'unknown_shipping_count',unknown_shipping_count,'known_tax_subtotal',known_tax_subtotal,'unknown_tax_count',unknown_tax_count,'known_break_subtotal',known_break_total,'unknown_break_count',unknown_break_count,'missing_break_session_count',missing_break_session_count,'purchasing_breaks',purchasing_breaks,'spend_per_purchasing_break',case when unknown_break_count=0 and missing_break_session_count=0 and purchasing_breaks>0 then known_break_total/purchasing_breaks end,'purchasing_ratio_status',case when unknown_break_count>0 then'unknown_merchandise'when missing_break_session_count>0 then'missing_session'when purchasing_breaks=0 then'zero_denominator'else'complete'end,'attended_breaks',case when p_window_mode='bounded'and v_engagement and not v_sale_only then attended_sessions end,'spend_per_attended_break',case when p_window_mode='bounded'and v_engagement and not v_sale_only and unknown_break_count=0 and missing_break_session_count=0 and not purchase_session_not_observed and coverage_complete and attended_sessions>0 then known_break_total/attended_sessions end,'attended_ratio_status',case when p_window_mode='known_history'then'unsupported_known_history_window'when not v_engagement then'engagement_not_authorized'when v_sale_only then'unsupported_cohort'when unknown_break_count>0 then'unknown_merchandise'when missing_break_session_count>0 then'missing_session'when purchase_session_not_observed then'purchase_session_not_observed'when not coverage_complete then'attendance_coverage_incomplete'when attended_sessions=0 then'zero_denominator'else'complete'end) order by rn)from kept),'[]'::jsonb),'full_cohort_totals',coalesce((select jsonb_build_object('customer_count',coalesce(max(full_customer_count),0),'line_count',coalesce(max(full_line_count),0),'known_official_subtotal',coalesce(max(full_known_official_subtotal),0))from scoped),'{"customer_count":0,"line_count":0,"known_official_subtotal":0}'::jsonb),'has_more',(select count(*)>p_limit from page),'next_cursor',case when(select count(*)>p_limit from page)then(select jsonb_build_object('sort',p_sort,'fingerprint',v_fp,'effective_customer_id',effective_customer_id,'known_official_subtotal',known_official_subtotal,'normalized_display_name',normalized_display_name,'display_name',display_name)from last_row)end,'metric_id','official_customer_spend_grid','metric_version','official-spend-grid-v2','currency',p_currency,'window_mode',p_window_mode,'observation_cutoff',p_observation_cutoff,'dataset_revision',v_revision,'query_fingerprint',v_fp,'authorization_scope',v_scope,'coverage',jsonb_build_object('requested_from',p_from,'requested_to',p_to,'effective_start',(select min(earliest_contribution)from filtered),'effective_end',least(p_to,p_observation_cutoff),'limitation','known_recorded_posted_history_only','source_history_completeness','unknown')) into v_result;
   select jsonb_build_object(
     'unknown_occurrence_line_count',count(*)filter(where
       (t.occurred_at_precision='unknown' or t.occurred_at is null)
@@ -239,11 +246,11 @@ begin
     return public.e10_org_typed_query_v1(p_org,p_context_id,p_operation,p_args);
   end if;
   actor:=e10.x8_query_context_actor(p_org,p_context_id,false);
-  perform e10.x8_assert_args(p_args,array[
+  perform e10.x8_assert_args(p_args-'cursor',array[
     'window_mode','from','to','observation_cutoff','currency','timezone','week_start',
     'customer','purchase_kind','location','channel','product','configuration','copy',
     'session','capture_source','min_known_official_subtotal','max_known_official_subtotal',
-    'sort','limit','cursor','expected_dataset_revision','expected_query_fingerprint']);
+    'sort','limit','expected_dataset_revision','expected_query_fingerprint']);
   if p_args?'after_customer_id' or not coalesce((p_args->>'limit')::integer between 1 and 100,false)
      or not coalesce((p_args->>'week_start')::integer between 1 and 7,false) then
     raise exception using errcode='22023',message='x8_query_args_invalid';end if;
@@ -256,7 +263,7 @@ begin
     (p_args->>'copy')::uuid,(p_args->>'session')::uuid,p_args->>'capture_source',
     (p_args->>'min_known_official_subtotal')::numeric,
     (p_args->>'max_known_official_subtotal')::numeric,coalesce(p_args->>'sort','customer_id_asc'),
-    (p_args->>'limit')::integer,p_args->'cursor',
+    (p_args->>'limit')::integer,nullif(p_args->'cursor','null'::jsonb),
     (p_args->>'expected_dataset_revision')::bigint,p_args->>'expected_query_fingerprint');
   select coalesce(jsonb_agg(value-'display_name'),'[]'::jsonb)into safe_items
   from jsonb_array_elements(coalesce(res->'items','[]'::jsonb));
