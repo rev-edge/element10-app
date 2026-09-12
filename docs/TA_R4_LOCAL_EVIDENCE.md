@@ -17,11 +17,19 @@ corrections:
   has actual-cost authority. Invoice and credit headers remain absent for that
   caller as before.
 
+The stock-receipt comment writer preserves its existing purchasing-prepare
+requirement and additionally requires create-receiving. The corrective
+`20260912200500_e10_ta_r4_post_lock_authority.sql` rechecks the complete
+document-specific authority after the delegated writer returns from all command,
+document and supersession locks. A failed final check rolls back the entire
+delegate call, including its comment, event, command receipt and replay path.
+
 The X2 purchase-destination entry point now explicitly rejects suspended
 organizations. X3 financial and comment paths use active-status checks directly
-or through the fail-closed capability predicate. Existing X7 public reporting
-entry points already carry explicit active-organization checks; their regression
-suites remain part of the consolidated gate.
+or through the fail-closed capability predicate. X7 paths must be classified by
+their direct status check or their dependency on the amended capability helper;
+the exact inventory and direct suspension cases remain required before R4 is
+accepted.
 
 Local proof after clean replay:
 
