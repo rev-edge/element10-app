@@ -751,7 +751,7 @@ classification, not an external entity and should remain a checked value.
 
 ### C1: canonical checklist promotion
 
-Status: implemented and locally verified 2026-09-12. Awaiting review before C2.
+Status: completed and locally verified 2026-09-12.
 
 Migration `20260912171106_e10_schema_review_c1_checklist_promotion.sql` adds a
 platform-admin-only, idempotent transaction that promotes one legacy checklist
@@ -773,7 +773,7 @@ older functions and no finding in this checkpoint's objects.
 
 ### C2: governed typed custom fields
 
-Status: implemented and locally verified 2026-09-12. Awaiting review before C3.
+Status: completed and locally verified 2026-09-12.
 
 Migration `20260912171646_e10_schema_review_c2_governed_custom_fields.sql`
 adds organization-owned definitions, controlled terms and exactly-one-type
@@ -796,7 +796,7 @@ an explicit definition, type and reconciliation proof.
 
 ### C3: governed capability catalog
 
-Status: implemented and locally verified 2026-09-12. Awaiting review before C4.
+Status: completed and locally verified 2026-09-12.
 
 Migration `20260912172059_e10_schema_review_c3_capability_catalog.sql` adds a
 stable capability registry and validates every persisted role grant against its
@@ -819,7 +819,7 @@ read visibility and client mutation denial.
 
 ### C4: platform identity and live presentation bridge
 
-Status: implemented and locally verified 2026-09-12. Awaiting review before C5.
+Status: completed and locally verified 2026-09-12.
 
 Migration `20260912172412_e10_schema_review_c4_platform_buyer_presentation_bridge.sql`
 adds a shared stable platform registry, append-only reviewed name history and
@@ -844,7 +844,7 @@ presentation enqueue, release enqueue and zero observed-table side effects.
 
 ### C5: checklist count consistency
 
-Status: implemented and locally verified 2026-09-12. Awaiting review before C6.
+Status: completed and locally verified 2026-09-12.
 
 Migration `20260912172924_e10_schema_review_c5_checklist_count_consistency.sql`
 reconciles the legacy cache once, validates it as nonnegative and installs
@@ -860,7 +860,7 @@ catalog authorization gates.
 
 ### C6: organization suspension lifecycle
 
-Status: implemented and locally verified 2026-09-12. Awaiting review before C7.
+Status: completed and locally verified 2026-09-12.
 
 Migration `20260912173214_e10_schema_review_c6_organization_status_history.sql`
 adds `updated_at`, `suspended_at` and an explicit
@@ -880,7 +880,7 @@ with existing race tests that suspend organizations while writers are blocked.
 
 ### C7: central mutable-data audit index
 
-Status: implemented and locally verified 2026-09-12. Awaiting review before C8.
+Status: completed and locally verified 2026-09-12.
 
 Migration `20260912173502_e10_schema_review_c7_central_audit_index.sql`
 adds append-only audit batches and field-level records for mutable organization,
@@ -902,7 +902,7 @@ authorized/unauthorized reads and exclusion of authoritative domain histories.
 
 ### C8: measured catalog term query index
 
-Status: implemented and locally verified 2026-09-12. Awaiting review before C9.
+Status: completed and locally verified 2026-09-12.
 
 Migration `20260912173830_e10_schema_review_c8_catalog_term_index.sql` adds one
 generic, term-led partial index over asserted catalog facet decisions. A
@@ -949,6 +949,21 @@ state transactionally. No remaining table has evidence strong enough to add a
 generic timestamp or surrogate identifier without an owner lifecycle or
 retirement ruling. Therefore C9 deliberately adds no blanket DDL and preserves
 all natural/composite identities.
+
+### Completion audit
+
+Status: all nine approved checkpoints completed locally on 2026-09-12.
+
+A clean migration replay through C8 succeeded. The focused C1 through C9 suites
+all passed from that replay, including the C5 concurrency test and the
+default-function-privilege born-locked probe. Catalog projection and promotion
+regressions also passed. Database lint found no issue in the checkpoint work;
+its two errors remain the pre-existing temporary-table references in
+`e10_slot_partition` and `e10_service_run_provider_presence_normalization`.
+
+No staging or production database was contacted. Environment rollout remains a
+separate, explicitly authorized operation and is not implied by completion of
+this local architecture correction plan.
 
 ## Appendix: exact base-table JSON inventory
 
