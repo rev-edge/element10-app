@@ -1,27 +1,587 @@
-const{Client}=require('pg');const{randomUUID}=require('crypto');
-const db=process.env.E10_DB_URL||'postgresql://postgres:postgres@127.0.0.1:54322/postgres',org='e1000000-0000-4000-8000-0000000000a6';
-const x={run:randomUUID(),user:randomUUID(),role:randomUUID(),product:randomUUID()};const jwt=JSON.stringify({sub:x.user,role:'authenticated'});const batches=[],observations=[];
-async function main(){const s=new Client({connectionString:db}),a=new Client({connectionString:db}),b=new Client({connectionString:db});await Promise.all([s.connect(),a.connect(),b.connect()]);let error;
- try{
-  await s.query("select set_config('e10.audit_request_id',$1,false)",[x.run]);
-  await s.query("insert into auth.users(id,instance_id,aud,role,email,created_at,updated_at)values($1,'00000000-0000-0000-0000-000000000000','authenticated','authenticated',$2,now(),now())",[x.user,`${x.run}@x.invalid`]);
-  await s.query("insert into public.e10_organization_roles(id,organization_id,key,name,is_system)values($1,$2,$3,'R3',false)",[x.role,org,x.run]);await s.query("insert into public.e10_organization_role_permissions values($1,$2,'act.manage_intake',true)",[org,x.role]);await s.query("insert into public.e10_organization_memberships(organization_id,user_id,role_id,status)values($1,$2,$3,'active')",[org,x.user,x.role]);await s.query("insert into public.e10_product_masters(id,organization_id,name)values($1,$2,'R3')",[x.product,org]);
-  for(const c of[s,a,b]){await c.query('select set_config($1,$2,false)',['request.jwt.claims',jwt]);await c.query('set role authenticated');}
-  for(const role of['authenticated','anon']){await s.query('reset role');await s.query(`set role ${role}`);for(const q of[{sql:'select * from public.e10_intake_commit_authorizations',args:[]},{sql:'insert into public.e10_intake_commit_authorizations values(1,1,$1,$2,1,$3)',args:[org,randomUUID(),randomUUID()]}]){let denied=false;try{await s.query(q.sql,q.args);}catch(e){denied=e.code==='42501';}if(!denied)throw Error(`${role} reached trusted commit authorization storage`);}}await s.query('reset role');await s.query('set role authenticated');
-  const rows=(amount,event)=>JSON.stringify([{raw_payload:{source_event_id:` ${event} `},observation_kind:'asking_price',occurred_at:'2026-01-01T00:00:00Z',currency:'CAD',amount}]);
-  const stage=async(client,suffix,connection,reference,amount,event,corrects)=>{const fn=corrects?'e10_org_stage_corrected_intake':'e10_org_stage_intake';const args=corrects?[org,corrects,'csv',connection,reference,`storage://${suffix}`,`sha-${suffix}`,rows(amount,event),`${x.run}-stage-${suffix}`]:[org,'csv',connection,reference,`storage://${suffix}`,`sha-${suffix}`,rows(amount,event),`${x.run}-stage-${suffix}`];const placeholders=args.map((_,i)=>`$${i+1}`).join(',');const r=(await client.query(`select public.${fn}(${placeholders}) r`,args)).rows[0].r;batches.push(r.batch_id);return r;};
-  const prep=async(client,batch,suffix)=>{await client.query('reset role');const row=(await client.query('select id from public.e10_intake_rows where batch_id=$1',[batch])).rows[0].id;await client.query('set role authenticated');await client.query("select public.e10_org_resolve_intake_row($1,$2,'match_product',$3,'reviewed',null,$4)",[org,row,x.product,`${x.run}-resolve-${suffix}`]);const rev=Number((await client.query('select public.e10_org_intake_review_state($1,$2) r',[org,batch])).rows[0].r.review_revision);return{row,rev};};
-  for(const kind of['native','system']){let denied=false;try{await s.query("select public.e10_org_stage_intake($1,$2,null,null,null,'x','[]',$3)",[org,kind,`${x.run}-${kind}`]);}catch(e){denied=e.code==='42501'&&e.message==='intake_source_provenance_invalid';}if(!denied)throw Error(`${kind} provenance accepted`);}
-  await s.query('reset role');await s.query('set role service_role');const native=(await s.query("select public.e10_org_stage_intake($1,'native','native-provider','native-file',$2,$3,$4,$5) r",[org,'storage://native',`sha-${x.run}-native`,rows(9,'native-event'),`${x.run}-stage-native`])).rows[0].r;batches.push(native.batch_id);await s.query('reset role');await s.query('set role authenticated');const pn=await prep(s,native.batch_id,'native');let nativeDenied=false;try{await s.query('select public.e10_org_commit_intake($1,$2,$3,$4)',[org,native.batch_id,pn.rev,`${x.run}-commit-native`]);}catch(e){nativeDenied=e.code==='42501'&&e.message==='intake_source_provenance_invalid';}if(!nativeDenied)throw Error('authenticated commit accepted pre-staged native provenance');
-  const one=await stage(s,'one','  provider-a  ','  file-a  ',10,'event-a'),p1=await prep(s,one.batch_id,'one');const c1=(await s.query('select public.e10_org_commit_intake($1,$2,$3,$4) r',[org,one.batch_id,p1.rev,`${x.run}-commit-one`])).rows[0].r;await s.query('reset role');const old=(await s.query('select id,source_connection_id,source_reference,raw_payload_snapshot->>\'source_event_id\' event from public.e10_market_observations where intake_row_id=$1',[p1.row])).rows[0];observations.push(old.id);if(old.source_connection_id!=='provider-a'||old.source_reference!=='file-a'||old.event!=='event-a')throw Error('durable identity not normalized');
-  await s.query('set role authenticated');let reserved=false;try{await s.query('select public.e10_org_commit_intake($1,$2,$3,$4)',[org,one.batch_id,p1.rev,`corrected:${x.run}`]);}catch(e){reserved=e.code==='22023'&&e.message==='intake_idempotency_namespace_reserved';}if(!reserved)throw Error('ordinary commit entered corrected namespace');await s.query('reset role');
-  for(const sql of["update public.e10_intake_batches set status='validated' where id=$1","delete from public.e10_intake_batches where id=$1"]){let denied=false;try{await s.query(sql,[one.batch_id]);}catch(e){denied=e.code==='55000'&&e.message==='committed_intake_batch_is_immutable';}if(!denied)throw Error('committed batch lifecycle reopened');}await s.query('set role authenticated');
-  const duplicate=await stage(s,'duplicate','provider-a','different-file',11,'event-a'),pd=await prep(s,duplicate.batch_id,'duplicate');await s.query('begin');const forged=JSON.stringify([{source_row_number:1,classification:'replacement',superseded_observation_id:old.id}]);await s.query("select set_config('e10.corrected_intake_classifications',$1,true)",[forged]);if((await s.query("select current_setting('e10.corrected_intake_classifications',true) v")).rows[0].v!==forged)throw Error('hostile context was not live');await s.query('savepoint hostile');let denied=false;try{await s.query('select public.e10_org_commit_intake($1,$2,$3,$4)',[org,duplicate.batch_id,pd.rev,`${x.run}-commit-duplicate`]);}catch(e){denied=e.code==='23505'&&e.message==='stable_source_event_duplicate';await s.query('rollback to savepoint hostile');}if(!denied)throw Error('forged corrected GUC authorized ordinary duplicate');await s.query('commit');
-  const replacement=await stage(s,'replacement',' provider-a ',' file-a ',12,'event-a',one.batch_id),pr=await prep(s,replacement.batch_id,'replacement');await s.query('begin');await s.query('select public.e10_org_commit_corrected_intake($1,$2,$3,$4,$5)',[org,replacement.batch_id,pr.rev,JSON.stringify([{source_row_number:1,classification:'replacement',superseded_observation_id:old.id,reason:'provider correction'}]),`${x.run}-corrected-one`]);await s.query('reset role');if(Number((await s.query('select count(*)::int n from public.e10_intake_commit_authorizations where transaction_id=txid_current() and backend_pid=pg_backend_pid()')).rows[0].n)!==0)throw Error('trusted corrected context survived success');await s.query('set role authenticated');await s.query('savepoint after_corrected');let staleDenied=false;try{await s.query('select public.e10_org_commit_intake($1,$2,$3,$4)',[org,duplicate.batch_id,pd.rev,`${x.run}-after-corrected`]);}catch(e){staleDenied=e.code==='23505'&&e.message==='stable_source_event_duplicate';await s.query('rollback to savepoint after_corrected');}if(!staleDenied)throw Error('ordinary call inherited corrected authority');await s.query('reset role');if(Number((await s.query('select count(*)::int n from public.e10_intake_commit_authorizations where transaction_id=txid_current() and backend_pid=pg_backend_pid()')).rows[0].n)!==0)throw Error('trusted context survived ordinary failure');await s.query('set role authenticated');await s.query('commit');
-  await s.query('reset role');const current=(await s.query('select id from public.e10_current_market_observations where organization_id=$1 and product_master_id=$2',[org,x.product])).rows;if(current.length!==1||current[0].id===old.id)throw Error('corrected stable source event did not replace atomically');observations.push(current[0].id);await s.query('set role authenticated');
-  const base=await stage(s,'race-base','provider-b','file-b',20,'event-b'),pb=await prep(s,base.batch_id,'race-base');await s.query('select public.e10_org_commit_intake($1,$2,$3,$4)',[org,base.batch_id,pb.rev,`${x.run}-commit-race-base`]);await s.query('reset role');const raceOld=(await s.query('select id from public.e10_market_observations where intake_row_id=$1',[pb.row])).rows[0].id;observations.push(raceOld);await s.query('set role authenticated');const reimport=await stage(s,'race-reimport','provider-b','file-b',21,'event-b',base.batch_id),pi=await prep(s,reimport.batch_id,'race-reimport');
-  await s.query('reset role');await s.query('begin');await s.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[`${org}|observation-lineage-graph`]);const holder=Number((await s.query('select pg_backend_pid() p')).rows[0].p),ap=Number((await a.query('select pg_backend_pid() p')).rows[0].p),bp=Number((await b.query('select pg_backend_pid() p')).rows[0].p);
-  const corrected=a.query('select public.e10_org_commit_corrected_intake($1,$2,$3,$4,$5)',[org,reimport.batch_id,pi.rev,JSON.stringify([{source_row_number:1,classification:'replacement',superseded_observation_id:raceOld,reason:'reviewed reimport'}]),`${x.run}-race-corrected`]);const manual=b.query("select public.e10_org_correct_market_observation($1,$2,'asking_price','product',$3,now(),'CAD',22,1,'manual','{}','manual correction',$4)",[org,raceOld,x.product,`${x.run}-race-manual`]);let overlap=false;for(let i=0;i<100&&!overlap;i++){const q=await s.query('select $2::int=any(pg_blocking_pids($1::int)) a,$2::int=any(pg_blocking_pids($3::int)) b',[ap,holder,bp]);overlap=q.rows[0].a&&q.rows[0].b;if(!overlap)await new Promise(r=>setTimeout(r,30));}if(!overlap)throw Error('exact writers did not overlap on exact lineage holder');await s.query('commit');const race=await Promise.allSettled([corrected,manual]);const losers=race.filter(r=>r.status==='rejected');if(race.filter(r=>r.status==='fulfilled').length!==1||losers.length!==1||losers[0].reason.code!=='55000'||!['superseded_observation_not_current','market_observation_already_superseded'].includes(losers[0].reason.message))throw Error('correction race lacked exact stale-predecessor loser');const lineage=(await s.query('select count(*)::int n,count(distinct replacement_observation_id)::int successors from public.e10_market_observation_supersessions where organization_id=$1 and superseded_observation_id=$2',[org,raceOld])).rows[0];const currentRace=Number((await s.query('select count(*)::int n from public.e10_current_market_observations where organization_id=$1 and product_master_id=$2 and amount in(21,22)',[org,x.product])).rows[0].n);if(lineage.n!==1||lineage.successors!==1||currentRace!==1)throw Error('correction race left duplicate successor or losing residue');
-  console.log('TA-R3 intake provenance/identity: PASS (trusted source, normalized stable event, committed lifecycle, correction race)');
- }catch(e){error=e;}finally{const errors=[];for(const c of[a,b,s])await c.query('reset role').catch(e=>errors.push(e.message));await s.query('set session_replication_role=replica').catch(e=>errors.push(e.message));const clean=async(q,p=[])=>{try{await s.query(q,p);}catch(e){errors.push(`${q}: ${e.message}`);}};await clean("delete from public.e10_market_observation_supersessions where idempotency_key like $1",[`${x.run}%`]);await clean('delete from public.e10_market_observations where organization_id=$1 and product_master_id=$2',[org,x.product]);await clean("delete from public.e10_corrected_intake_commits where idempotency_key like $1",[`${x.run}%`]);await clean("delete from public.e10_intake_commits where idempotency_key like $1",[`%${x.run}%`]);await clean("delete from public.e10_intake_resolver_decisions where idempotency_key like $1",[`${x.run}%`]);await clean('delete from public.e10_intake_commit_authorizations where organization_id=$1',[org]);await clean('delete from public.e10_intake_rows where batch_id=any($1::uuid[])',[batches]);await clean("delete from public.e10_intake_stage_replays where idempotency_key like $1",[`${x.run}%`]);await clean('delete from public.e10_intake_batches where id=any($1::uuid[])',[batches]);await clean('delete from public.e10_product_masters where id=$1',[x.product]);await clean('delete from public.e10_audit_change_records where batch_id in(select id from public.e10_audit_change_batches where request_id=$1 or actor_user_id=$2)',[x.run,x.user]);await clean('delete from public.e10_audit_change_batches where request_id=$1 or actor_user_id=$2',[x.run,x.user]);await clean('delete from public.e10_organization_memberships where user_id=$1',[x.user]);await clean('delete from public.e10_organization_role_permissions where role_id=$1',[x.role]);await clean('delete from public.e10_organization_roles where id=$1',[x.role]);await clean('delete from auth.users where id=$1',[x.user]);const residue=Number((await s.query("select (select count(*) from auth.users where id=$1)+(select count(*) from public.e10_organization_roles where id=$2)+(select count(*) from public.e10_intake_batches where id=any($3::uuid[]))+(select count(*) from public.e10_market_observations where organization_id=$4 and product_master_id=$5)+(select count(*) from public.e10_audit_change_batches where request_id=$6 or actor_user_id=$1)+(select count(*) from public.e10_audit_change_records where batch_id in(select id from public.e10_audit_change_batches where request_id=$6 or actor_user_id=$1)) n",[x.user,x.role,batches,org,x.product,x.run])).rows[0].n);await clean('set session_replication_role=origin');await Promise.all([s.end(),a.end(),b.end()]);if((errors.length||residue)&&!error)error=Error(`cleanup failed ${JSON.stringify({errors,residue})}`);}if(error)throw error;}
-main().catch(e=>{console.error(e.stack||e);process.exit(1)});
+const { Client } = require("pg");
+const { randomUUID } = require("crypto");
+const db =
+    process.env.E10_DB_URL ||
+    "postgresql://postgres:postgres@127.0.0.1:54322/postgres",
+  org = "e1000000-0000-4000-8000-0000000000a6";
+const x = {
+  run: randomUUID(),
+  user: randomUUID(),
+  role: randomUUID(),
+  product: randomUUID(),
+};
+const jwt = JSON.stringify({ sub: x.user, role: "authenticated" });
+const batches = [],
+  observations = [];
+async function main() {
+  const s = new Client({ connectionString: db }),
+    a = new Client({ connectionString: db }),
+    b = new Client({ connectionString: db });
+  await Promise.all([s.connect(), a.connect(), b.connect()]);
+  let error;
+  try {
+    await s.query("select set_config('e10.audit_request_id',$1,false)", [
+      x.run,
+    ]);
+    await s.query(
+      "insert into auth.users(id,instance_id,aud,role,email,created_at,updated_at)values($1,'00000000-0000-0000-0000-000000000000','authenticated','authenticated',$2,now(),now())",
+      [x.user, `${x.run}@x.invalid`],
+    );
+    await s.query(
+      "insert into public.e10_organization_roles(id,organization_id,key,name,is_system)values($1,$2,$3,'R3',false)",
+      [x.role, org, x.run],
+    );
+    await s.query(
+      "insert into public.e10_organization_role_permissions values($1,$2,'act.manage_intake',true)",
+      [org, x.role],
+    );
+    await s.query(
+      "insert into public.e10_organization_memberships(organization_id,user_id,role_id,status)values($1,$2,$3,'active')",
+      [org, x.user, x.role],
+    );
+    await s.query(
+      "insert into public.e10_product_masters(id,organization_id,name)values($1,$2,'R3')",
+      [x.product, org],
+    );
+    for (const c of [s, a, b]) {
+      await c.query("select set_config($1,$2,false)", [
+        "request.jwt.claims",
+        jwt,
+      ]);
+      await c.query("set role authenticated");
+    }
+    for (const role of ["authenticated", "anon"]) {
+      await s.query("reset role");
+      await s.query(`set role ${role}`);
+      for (const q of [
+        {
+          sql: "select * from public.e10_intake_commit_authorizations",
+          args: [],
+        },
+        {
+          sql: "insert into public.e10_intake_commit_authorizations values(1,1,$1,$2,1,$3)",
+          args: [org, randomUUID(), randomUUID()],
+        },
+      ]) {
+        let denied = false;
+        try {
+          await s.query(q.sql, q.args);
+        } catch (e) {
+          denied = e.code === "42501";
+        }
+        if (!denied)
+          throw Error(`${role} reached trusted commit authorization storage`);
+      }
+    }
+    await s.query("reset role");
+    await s.query("set role authenticated");
+    const rows = (amount, event) =>
+      JSON.stringify([
+        {
+          raw_payload: { source_event_id: ` ${event} ` },
+          observation_kind: "asking_price",
+          occurred_at: "2026-01-01T00:00:00Z",
+          currency: "CAD",
+          amount,
+        },
+      ]);
+    const stage = async (
+      client,
+      suffix,
+      connection,
+      reference,
+      amount,
+      event,
+      corrects,
+    ) => {
+      const fn = corrects
+        ? "e10_org_stage_corrected_intake"
+        : "e10_org_stage_intake";
+      const args = corrects
+        ? [
+            org,
+            corrects,
+            "csv",
+            connection,
+            reference,
+            `storage://${suffix}`,
+            `sha-${suffix}`,
+            rows(amount, event),
+            `${x.run}-stage-${suffix}`,
+          ]
+        : [
+            org,
+            "csv",
+            connection,
+            reference,
+            `storage://${suffix}`,
+            `sha-${suffix}`,
+            rows(amount, event),
+            `${x.run}-stage-${suffix}`,
+          ];
+      const placeholders = args.map((_, i) => `$${i + 1}`).join(",");
+      const r = (
+        await client.query(`select public.${fn}(${placeholders}) r`, args)
+      ).rows[0].r;
+      batches.push(r.batch_id);
+      return r;
+    };
+    const prep = async (client, batch, suffix) => {
+      await client.query("reset role");
+      const row = (
+        await client.query(
+          "select id from public.e10_intake_rows where batch_id=$1",
+          [batch],
+        )
+      ).rows[0].id;
+      await client.query("set role authenticated");
+      await client.query(
+        "select public.e10_org_resolve_intake_row($1,$2,'match_product',$3,'reviewed',null,$4)",
+        [org, row, x.product, `${x.run}-resolve-${suffix}`],
+      );
+      const rev = Number(
+        (
+          await client.query(
+            "select public.e10_org_intake_review_state($1,$2) r",
+            [org, batch],
+          )
+        ).rows[0].r.review_revision,
+      );
+      return { row, rev };
+    };
+    for (const kind of ["native", "system"]) {
+      let denied = false;
+      try {
+        await s.query(
+          "select public.e10_org_stage_intake($1,$2,null,null,null,'x','[]',$3)",
+          [org, kind, `${x.run}-${kind}`],
+        );
+      } catch (e) {
+        denied =
+          e.code === "42501" &&
+          e.message === "intake_source_provenance_invalid";
+      }
+      if (!denied) throw Error(`${kind} provenance accepted`);
+    }
+    await s.query("reset role");
+    await s.query("set role service_role");
+    const native = (
+      await s.query(
+        "select public.e10_org_stage_intake($1,'native','native-provider','native-file',$2,$3,$4,$5) r",
+        [
+          org,
+          "storage://native",
+          `sha-${x.run}-native`,
+          rows(9, "native-event"),
+          `${x.run}-stage-native`,
+        ],
+      )
+    ).rows[0].r;
+    batches.push(native.batch_id);
+    await s.query("reset role");
+    await s.query("set role authenticated");
+    const pn = await prep(s, native.batch_id, "native");
+    let nativeDenied = false;
+    try {
+      await s.query("select public.e10_org_commit_intake($1,$2,$3,$4)", [
+        org,
+        native.batch_id,
+        pn.rev,
+        `${x.run}-commit-native`,
+      ]);
+    } catch (e) {
+      nativeDenied =
+        e.code === "42501" && e.message === "intake_source_provenance_invalid";
+    }
+    if (!nativeDenied)
+      throw Error("authenticated commit accepted pre-staged native provenance");
+    const one = await stage(
+        s,
+        "one",
+        "  provider-a  ",
+        "  file-a  ",
+        10,
+        "event-a",
+      ),
+      p1 = await prep(s, one.batch_id, "one");
+    const c1 = (
+      await s.query("select public.e10_org_commit_intake($1,$2,$3,$4) r", [
+        org,
+        one.batch_id,
+        p1.rev,
+        `${x.run}-commit-one`,
+      ])
+    ).rows[0].r;
+    await s.query("reset role");
+    const old = (
+      await s.query(
+        "select id,source_connection_id,source_reference,raw_payload_snapshot->>'source_event_id' event from public.e10_market_observations where intake_row_id=$1",
+        [p1.row],
+      )
+    ).rows[0];
+    observations.push(old.id);
+    if (
+      old.source_connection_id !== "provider-a" ||
+      old.source_reference !== "file-a" ||
+      old.event !== "event-a"
+    )
+      throw Error("durable identity not normalized");
+    await s.query("set role authenticated");
+    let reserved = false;
+    try {
+      await s.query("select public.e10_org_commit_intake($1,$2,$3,$4)", [
+        org,
+        one.batch_id,
+        p1.rev,
+        `corrected:${x.run}`,
+      ]);
+    } catch (e) {
+      reserved =
+        e.code === "22023" &&
+        e.message === "intake_idempotency_namespace_reserved";
+    }
+    if (!reserved) throw Error("ordinary commit entered corrected namespace");
+    await s.query("reset role");
+    for (const sql of [
+      "update public.e10_intake_batches set status='validated' where id=$1",
+      "delete from public.e10_intake_batches where id=$1",
+    ]) {
+      let denied = false;
+      try {
+        await s.query(sql, [one.batch_id]);
+      } catch (e) {
+        denied =
+          e.code === "55000" &&
+          e.message === "committed_intake_batch_is_immutable";
+      }
+      if (!denied) throw Error("committed batch lifecycle reopened");
+    }
+    await s.query("set role authenticated");
+    const duplicate = await stage(
+        s,
+        "duplicate",
+        "provider-a",
+        "different-file",
+        11,
+        "event-a",
+      ),
+      pd = await prep(s, duplicate.batch_id, "duplicate");
+    await s.query("begin");
+    const forged = JSON.stringify([
+      {
+        source_row_number: 1,
+        classification: "replacement",
+        superseded_observation_id: old.id,
+      },
+    ]);
+    await s.query(
+      "select set_config('e10.corrected_intake_classifications',$1,true)",
+      [forged],
+    );
+    if (
+      (
+        await s.query(
+          "select current_setting('e10.corrected_intake_classifications',true) v",
+        )
+      ).rows[0].v !== forged
+    )
+      throw Error("hostile context was not live");
+    await s.query("savepoint hostile");
+    let denied = false;
+    try {
+      await s.query("select public.e10_org_commit_intake($1,$2,$3,$4)", [
+        org,
+        duplicate.batch_id,
+        pd.rev,
+        `${x.run}-commit-duplicate`,
+      ]);
+    } catch (e) {
+      denied =
+        e.code === "23505" && e.message === "stable_source_event_duplicate";
+      await s.query("rollback to savepoint hostile");
+    }
+    if (!denied)
+      throw Error("forged corrected GUC authorized ordinary duplicate");
+    await s.query("commit");
+    const replacement = await stage(
+        s,
+        "replacement",
+        " provider-a ",
+        " file-a ",
+        12,
+        "event-a",
+        one.batch_id,
+      ),
+      pr = await prep(s, replacement.batch_id, "replacement");
+    await s.query("begin");
+    await s.query(
+      "select public.e10_org_commit_corrected_intake($1,$2,$3,$4,$5)",
+      [
+        org,
+        replacement.batch_id,
+        pr.rev,
+        JSON.stringify([
+          {
+            source_row_number: 1,
+            classification: "replacement",
+            superseded_observation_id: old.id,
+            reason: "provider correction",
+          },
+        ]),
+        `${x.run}-corrected-one`,
+      ],
+    );
+    await s.query("reset role");
+    if (
+      Number(
+        (
+          await s.query(
+            "select count(*)::int n from public.e10_intake_commit_authorizations where transaction_id=txid_current() and backend_pid=pg_backend_pid()",
+          )
+        ).rows[0].n,
+      ) !== 0
+    )
+      throw Error("trusted corrected context survived success");
+    await s.query("set role authenticated");
+    await s.query("savepoint after_corrected");
+    let staleDenied = false;
+    try {
+      await s.query("select public.e10_org_commit_intake($1,$2,$3,$4)", [
+        org,
+        duplicate.batch_id,
+        pd.rev,
+        `${x.run}-after-corrected`,
+      ]);
+    } catch (e) {
+      staleDenied =
+        e.code === "23505" && e.message === "stable_source_event_duplicate";
+      await s.query("rollback to savepoint after_corrected");
+    }
+    if (!staleDenied)
+      throw Error("ordinary call inherited corrected authority");
+    await s.query("reset role");
+    if (
+      Number(
+        (
+          await s.query(
+            "select count(*)::int n from public.e10_intake_commit_authorizations where transaction_id=txid_current() and backend_pid=pg_backend_pid()",
+          )
+        ).rows[0].n,
+      ) !== 0
+    )
+      throw Error("trusted context survived ordinary failure");
+    await s.query("set role authenticated");
+    await s.query("commit");
+    await s.query("reset role");
+    const current = (
+      await s.query(
+        "select id from public.e10_current_market_observations where organization_id=$1 and product_master_id=$2",
+        [org, x.product],
+      )
+    ).rows;
+    if (current.length !== 1 || current[0].id === old.id)
+      throw Error("corrected stable source event did not replace atomically");
+    observations.push(current[0].id);
+    await s.query("set role authenticated");
+    const base = await stage(
+        s,
+        "race-base",
+        "provider-b",
+        "file-b",
+        20,
+        "event-b",
+      ),
+      pb = await prep(s, base.batch_id, "race-base");
+    await s.query("select public.e10_org_commit_intake($1,$2,$3,$4)", [
+      org,
+      base.batch_id,
+      pb.rev,
+      `${x.run}-commit-race-base`,
+    ]);
+    await s.query("reset role");
+    const raceOld = (
+      await s.query(
+        "select id from public.e10_market_observations where intake_row_id=$1",
+        [pb.row],
+      )
+    ).rows[0].id;
+    observations.push(raceOld);
+    await s.query("set role authenticated");
+    const reimport = await stage(
+        s,
+        "race-reimport",
+        "provider-b",
+        "file-b",
+        21,
+        "event-b",
+        base.batch_id,
+      ),
+      pi = await prep(s, reimport.batch_id, "race-reimport");
+    await s.query("reset role");
+    await s.query("begin");
+    await s.query("select pg_advisory_xact_lock(hashtextextended($1,0))", [
+      `${org}|observation-lineage-graph`,
+    ]);
+    const holder = Number(
+        (await s.query("select pg_backend_pid() p")).rows[0].p,
+      ),
+      ap = Number((await a.query("select pg_backend_pid() p")).rows[0].p),
+      bp = Number((await b.query("select pg_backend_pid() p")).rows[0].p);
+    const corrected = a.query(
+      "select public.e10_org_commit_corrected_intake($1,$2,$3,$4,$5)",
+      [
+        org,
+        reimport.batch_id,
+        pi.rev,
+        JSON.stringify([
+          {
+            source_row_number: 1,
+            classification: "replacement",
+            superseded_observation_id: raceOld,
+            reason: "reviewed reimport",
+          },
+        ]),
+        `${x.run}-race-corrected`,
+      ],
+    );
+    const manual = b.query(
+      "select public.e10_org_correct_market_observation($1,$2,'asking_price','product',$3,now(),'CAD',22,1,'manual','{}','manual correction',$4)",
+      [org, raceOld, x.product, `${x.run}-race-manual`],
+    );
+    let overlap = false;
+    for (let i = 0; i < 100 && !overlap; i++) {
+      const q = await s.query(
+        "select $2::int=any(pg_blocking_pids($1::int)) a,$2::int=any(pg_blocking_pids($3::int)) b",
+        [ap, holder, bp],
+      );
+      overlap = q.rows[0].a && q.rows[0].b;
+      if (!overlap) await new Promise((r) => setTimeout(r, 30));
+    }
+    if (!overlap)
+      throw Error("exact writers did not overlap on exact lineage holder");
+    await s.query("commit");
+    const race = await Promise.allSettled([corrected, manual]);
+    const losers = race.filter((r) => r.status === "rejected");
+    if (
+      race.filter((r) => r.status === "fulfilled").length !== 1 ||
+      losers.length !== 1 ||
+      losers[0].reason.code !== "55000" ||
+      ![
+        "superseded_observation_not_current",
+        "market_observation_already_superseded",
+      ].includes(losers[0].reason.message)
+    )
+      throw Error("correction race lacked exact stale-predecessor loser");
+    const lineage = (
+      await s.query(
+        "select count(*)::int n,count(distinct replacement_observation_id)::int successors from public.e10_market_observation_supersessions where organization_id=$1 and superseded_observation_id=$2",
+        [org, raceOld],
+      )
+    ).rows[0];
+    const currentRace = Number(
+      (
+        await s.query(
+          "select count(*)::int n from public.e10_current_market_observations where organization_id=$1 and product_master_id=$2 and amount in(21,22)",
+          [org, x.product],
+        )
+      ).rows[0].n,
+    );
+    if (lineage.n !== 1 || lineage.successors !== 1 || currentRace !== 1)
+      throw Error("correction race left duplicate successor or losing residue");
+    console.log(
+      "TA-R3 intake provenance/identity: PASS (trusted source, normalized stable event, committed lifecycle, correction race)",
+    );
+  } catch (e) {
+    error = e;
+  } finally {
+    const errors = [];
+    for (const c of [a, b, s])
+      await c.query("reset role").catch((e) => errors.push(e.message));
+    await s
+      .query("set session_replication_role=replica")
+      .catch((e) => errors.push(e.message));
+    const clean = async (q, p = []) => {
+      try {
+        await s.query(q, p);
+      } catch (e) {
+        errors.push(`${q}: ${e.message}`);
+      }
+    };
+    await clean(
+      "delete from public.e10_market_observation_supersessions where idempotency_key like $1",
+      [`${x.run}%`],
+    );
+    await clean(
+      "delete from public.e10_market_observations where organization_id=$1 and product_master_id=$2",
+      [org, x.product],
+    );
+    await clean(
+      "delete from public.e10_corrected_intake_commits where idempotency_key like $1",
+      [`${x.run}%`],
+    );
+    await clean(
+      "delete from public.e10_intake_commits where idempotency_key like $1",
+      [`%${x.run}%`],
+    );
+    await clean(
+      "delete from public.e10_intake_resolver_decisions where idempotency_key like $1",
+      [`${x.run}%`],
+    );
+    await clean(
+      "delete from public.e10_intake_commit_authorizations where organization_id=$1 and intake_batch_id=any($2::uuid[])",
+      [org, batches],
+    );
+    await clean(
+      "delete from public.e10_intake_rows where batch_id=any($1::uuid[])",
+      [batches],
+    );
+    await clean(
+      "delete from public.e10_intake_stage_replays where idempotency_key like $1",
+      [`${x.run}%`],
+    );
+    await clean(
+      "delete from public.e10_intake_batches where id=any($1::uuid[])",
+      [batches],
+    );
+    await clean("delete from public.e10_product_masters where id=$1", [
+      x.product,
+    ]);
+    await clean(
+      "delete from public.e10_audit_change_records where batch_id in(select id from public.e10_audit_change_batches where request_id=$1 or actor_user_id=$2)",
+      [x.run, x.user],
+    );
+    await clean(
+      "delete from public.e10_audit_change_batches where request_id=$1 or actor_user_id=$2",
+      [x.run, x.user],
+    );
+    await clean(
+      "delete from public.e10_organization_memberships where user_id=$1",
+      [x.user],
+    );
+    await clean(
+      "delete from public.e10_organization_role_permissions where role_id=$1",
+      [x.role],
+    );
+    await clean("delete from public.e10_organization_roles where id=$1", [
+      x.role,
+    ]);
+    await clean("delete from auth.users where id=$1", [x.user]);
+    const residue = Number(
+      (
+        await s.query(
+          "select (select count(*) from auth.users where id=$1)+(select count(*) from public.e10_organization_roles where id=$2)+(select count(*) from public.e10_intake_batches where id=any($3::uuid[]))+(select count(*) from public.e10_intake_commit_authorizations where organization_id=$4 and intake_batch_id=any($3::uuid[]))+(select count(*) from public.e10_market_observations where organization_id=$4 and product_master_id=$5)+(select count(*) from public.e10_audit_change_batches where request_id=$6 or actor_user_id=$1)+(select count(*) from public.e10_audit_change_records where batch_id in(select id from public.e10_audit_change_batches where request_id=$6 or actor_user_id=$1)) n",
+          [x.user, x.role, batches, org, x.product, x.run],
+        )
+      ).rows[0].n,
+    );
+    await clean("set session_replication_role=origin");
+    await Promise.all([s.end(), a.end(), b.end()]);
+    if ((errors.length || residue) && !error)
+      error = Error(`cleanup failed ${JSON.stringify({ errors, residue })}`);
+  }
+  if (error) throw error;
+}
+main().catch((e) => {
+  console.error(e.stack || e);
+  process.exit(1);
+});
