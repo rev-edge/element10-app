@@ -794,6 +794,29 @@ extension bags, so this checkpoint performs no speculative backfill. A future
 environment-authorized census may nominate keys, but promotion still requires
 an explicit definition, type and reconciliation proof.
 
+### C3: governed capability catalog
+
+Status: implemented and locally verified 2026-09-12. Awaiting review before C4.
+
+Migration `20260912172059_e10_schema_review_c3_capability_catalog.sql` adds a
+stable capability registry and validates every persisted role grant against its
+key. The existing `(organization_id, role_id, capability)` permission identity
+and all client-facing capability checks remain compatible. False rows remain a
+disabled administrative state; missing and false both deny, and neither is
+treated as cross-role deny precedence.
+
+Every currently persisted or backend-enforced capability is cataloged. Reserved
+operations remain ungranted. The catalog now distinguishes organization and
+platform authority and introduces separate `catalog.propose`, `catalog.review`
+and `catalog.publish` operations. Tenant roles can never receive the platform
+review or publication operations. Numeric read/write/admin levels are rejected
+because they cannot preserve maker-checker and sensitive-read boundaries.
+
+The custom-field capability hooks from C2 now reference the same registry.
+Local tests prove validated foreign keys, no uncataloged grants, fail-closed
+reserved defaults, false-row denial, platform-operation isolation, registry
+read visibility and client mutation denial.
+
 ## Appendix: exact base-table JSON inventory
 
 ```text

@@ -21,9 +21,9 @@ begin
     (org,admin_user,admin_role,'active'),(org,member_user,member_role,'active');
   insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed) values
     (org,admin_role,'act.permissions_config',true),
-    (org,admin_role,'custom.catalog.read',true),
-    (org,admin_role,'custom.catalog.write',true),
-    (org,member_role,'custom.catalog.read',true);
+    (org,admin_role,'custom_fields.read',true),
+    (org,admin_role,'custom_fields.write',true),
+    (org,member_role,'custom_fields.read',true);
   insert into public.e10_product_masters(id,organization_id,name) values
     ('c2000000-0000-4000-8000-000000000010',org,'C2 product'),
     ('c2000000-0000-4000-8000-000000000011',other_org,'C2 foreign product');
@@ -38,7 +38,7 @@ declare
   numeric_def uuid;term_def uuid;multi_def uuid;gold uuid;value_id uuid;
 begin
   perform set_config('request.jwt.claims',jsonb_build_object('sub',admin_user,'role','authenticated')::text,true);
-  numeric_def:=public.e10_org_define_custom_field(org,'product_master','market_weight','Market weight','numeric','g','single','range','custom.catalog.read','custom.catalog.write');
+  numeric_def:=public.e10_org_define_custom_field(org,'product_master','market_weight','Market weight','numeric','g','single','range','custom_fields.read','custom_fields.write');
   term_def:=public.e10_org_define_custom_field(org,'product_master','foil_treatment','Foil treatment','term',null,'single','exact',null,null);
   multi_def:=public.e10_org_define_custom_field(org,'product_master','search_tag','Search tag','text',null,'multiple','exact',null,null);
   gold:=public.e10_org_add_custom_field_term(org,term_def,'gold_shimmer','Gold shimmer');
@@ -71,7 +71,7 @@ begin
     if sqlerrm<>'custom_field_value_write_denied' then raise;end if;
   end;
   insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed)
-  values(org,member_role,'custom.catalog.write',true);
+  values(org,member_role,'custom_fields.write',true);
   perform public.e10_org_set_custom_field_value(org,numeric_def,'c2000000-0000-4000-8000-000000000010',1,'14'::jsonb);
   if (select value_numeric from public.e10_custom_field_values where id=value_id)<>14 then raise exception 'capability write failed';end if;
 end $$;
@@ -96,7 +96,7 @@ reset role;
 delete from public.e10_organization_role_permissions
 where organization_id='c2000000-0000-4000-8000-000000000001'
   and role_id='c2000000-0000-4000-8000-000000000006'
-  and capability='custom.catalog.read';
+  and capability='custom_fields.read';
 set local role authenticated;
 do $$
 begin
