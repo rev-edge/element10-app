@@ -2,8 +2,8 @@
 
 Date: 2026-09-12
 
-Status: implementation and staging evidence complete through final findings
-F1 through F4; final F5 requirements reconciliation under independent review.
+Status: ACCEPTED through staging. F1 through F5 are closed by independent
+review at `4fd7a88c21861921774647cdc4812ec18d9a2c9f`.
 
 This is the authoritative completion audit for the owner-approved Track A
 backend expansion. It supersedes only stale progress labels in planning and
@@ -83,7 +83,7 @@ as implemented functionality.
 | Bounded reads | PASS through explicit limits, stable scope-bound cursors, full-dataset filtering before pagination/aggregation, source/grain/unit/coverage metadata, and unavailable rather than fabricated values. |
 | Explicit staging target | PASS. Remote writes used the staging session pooler for project `csmbjfmoxkexcyssntbg`; no bare production-linked push was used. |
 | Staging cleanup | PASS. Batch evidence records rollback or cleanup, foreign-key/object census, and zero batch fixture residue. X8c ends with zero consumers, commands, acknowledgements and active claims. |
-| Current CI | PASS. Run `34684368998` completed successfully at implementation/test head `bf992300`. |
+| Current CI | PASS. Run `34685754343` completed successfully at final reviewed head `4fd7a88c21861921774647cdc4812ec18d9a2c9f`; schema-gate and deploy were correctly skipped. |
 | Production untouched | PASS. Latest read-only proof reports no `e10` schema, 12 migrations through `20260716110000`, inventory `35/41/9`, and no X8c objects. |
 
 ## Explicit non-claims and retained decision boundaries
@@ -130,8 +130,8 @@ their framework constraints when a later slice is designed.
 ## Audit conclusion
 
 The repository, CI, staging ledger, executable tests, evidence packets and
-read-only production sentinels support completion of the approved TA-X1 through
-TA-X8 backend foundation through staging. Final closure requires an independent
-review of this matrix against the cited authorities. Any unsupported scoped
-requirement found by that review remains a real implementation gap and must be
-closed before the overall goal is marked complete.
+read-only production sentinels prove completion of the approved TA-X1 through
+TA-X8 backend foundation through staging. Independent final review accepted the
+complete scope at `4fd7a88c21861921774647cdc4812ec18d9a2c9f` after closing F5's
+schema-manifest and exact integration-handoff requirements. The exclusions and
+future compatibility seams above remain explicit non-claims.
