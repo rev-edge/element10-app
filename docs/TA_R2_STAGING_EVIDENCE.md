@@ -91,9 +91,8 @@ Executable proof now covers:
   by the exact advisory-lock holder, mid-wait capability revocation, `42501`
   after release and zero mutation residue;
 - native-first unreviewed import denial and import-first native-post denial;
-- a reviewed same-slot `new_transaction` resale, with three official
-  transactions, three official lines and exact CAD gross 65 across one managed
-  native contribution and two import contributions;
+- reviewed same-slot `new_transaction` resales in both source orders, with four
+  official transactions and lines across two native and two import contributions;
 - altered activity scope denied and omitted activity scope derived from the
   locked native observation;
 - released-after-approval denial, successful-post replay after later release,
@@ -115,11 +114,20 @@ runtime behavior.
 The earlier twelve-writer suite is retained as supplemental first-lock coverage.
 The acceptance proof is now
 `tests/ta_r2_last_lock_customer_writer_authority_races_test.js`: each writer is
-first exercised successfully against valid state, then blocked at its final
+first exercised successfully with the exact race payload inside a rolled-back
+control transaction, then blocked at its final
 mutation-relevant row or advisory lock. The exact capability is revoked while
 the exact backend PID is waiting. After release, every writer returns its exact
-`42501` denial and its command-specific domain/event/receipt residue remains
-zero.
+`42501` denial. A before/after snapshot proves no customer revision, activity,
+commercial event, draft state/revision, decision, official transaction/line,
+adjustment, finalization, receipt, source claim, or C7 audit delta.
+
+Posting now pre-locks every existing source-claim row before its final authority
+check. The posting race uses a reviewed `new_transaction` claim and blocks the
+exact writer backend on that claim row, covering the delegate's AFTER INSERT
+claim path. Cleanup is fail-closed and ends with an explicit zero-residue census
+covering the temporary identity, role, source claims, receipts, activities and
+C7 audit rows.
 
 Distinct-sale review is symmetric. Native-first then import and import-first
 then native both deny by default. Either chronological direction proceeds only
