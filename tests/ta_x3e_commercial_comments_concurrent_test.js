@@ -9,7 +9,7 @@ const cleanupTables=['e10_commercial_events','e10_commercial_comment_commands','
 const admin=new Client({connectionString}),a=new Client({connectionString}),b=new Client({connectionString});
 async function claims(c){await c.query('set local role authenticated');await c.query("select set_config('request.jwt.claims',$1,true)",[JSON.stringify({sub:x.actor,role:'authenticated'})]);}
 async function bounded(p){let t;try{return await Promise.race([p,new Promise((_,reject)=>{t=setTimeout(()=>reject(Error('bounded X3e timeout')),timeoutMs)})]);}finally{clearTimeout(t)}}
-async function waitBlocked(pid){const end=Date.now()+timeoutMs;while(Date.now()<end){const q=await admin.query("select count(*)::int n from pg_locks where pid=$1 and locktype='advisory' and not granted",[pid]);if(q.rows[0].n>0)return;await new Promise(r=>setTimeout(r,25));}throw Error(`backend ${pid} did not establish exact advisory wait`)}
+async function waitBlocked(pid,holderPid){const end=Date.now()+timeoutMs;while(Date.now()<end){const q=await admin.query("select exists(select 1 from pg_locks where pid=$1 and locktype='advisory' and not granted) and $2=any(pg_blocking_pids($1)) waiting",[pid,holderPid]);if(q.rows[0].waiting)return;await new Promise(r=>setTimeout(r,25));}throw Error(`backend ${pid} did not establish advisory wait on holder ${holderPid}`)}
 async function setup(){
  await admin.query("insert into auth.users(id,instance_id,aud,role,email,created_at,updated_at) values($1,'00000000-0000-0000-0000-000000000000','authenticated','authenticated',$2,now(),now())",[x.actor,`x3e-${run}@example.invalid`]);
  await admin.query('insert into public.e10_organizations(id,name,slug) values($1,$2,$3)',[x.org,'X3e race',`x3e-race-${run}`]);
@@ -26,6 +26,7 @@ async function add(c,body,supersedes,key){return c.query('select public.e10_org_
 async function addInvoice(c,body,key){return c.query('select public.e10_org_add_commercial_comment($1,$2,$3,$4,$5,null,$6) r',[x.org,'supplier_invoice',x.invoice,'internal',body,key]);}
 async function main(){
  await Promise.all([admin.connect(),a.connect(),b.connect()]);await setup();
+ const aPid=Number((await a.query('select pg_backend_pid() pid')).rows[0].pid);
  await admin.query('begin');await admin.query("set local role authenticated");await admin.query("select set_config('request.jwt.claims',$1,true)",[JSON.stringify({sub:x.actor,role:'authenticated'})]);
  const root=(await add(admin,'Original vendor instruction',null,`root-${run}`)).rows[0].r;await admin.query('commit');
  await admin.query('begin');await admin.query('set local role authenticated');await admin.query("select set_config('request.jwt.claims',$1,true)",[JSON.stringify({sub:x.actor,role:'authenticated'})]);
@@ -35,7 +36,7 @@ async function main(){
  const equivalentKey=`equivalent-${run}`;
  await a.query('begin');await a.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[`${x.org}|commercial-comment-command|${equivalentKey}`]);
  await b.query('begin');await claims(b);const equivalentPid=(await b.query('select pg_backend_pid() pid')).rows[0].pid;
- const equivalentPending=add(b,'Equivalent key comment',null,` ${equivalentKey} `);await waitBlocked(equivalentPid);
+ const equivalentPending=add(b,'Equivalent key comment',null,` ${equivalentKey} `);await waitBlocked(equivalentPid,aPid);
  await claims(a);const equivalentWinner=await add(a,'Equivalent key comment',null,equivalentKey);await a.query('commit');
  const equivalentReplay=await bounded(equivalentPending);await b.query('commit');
  if(equivalentWinner.rows[0].r.comment_id!==equivalentReplay.rows[0].r.comment_id||!equivalentReplay.rows[0].r.replay)throw Error('concurrent canonical keys did not converge');
@@ -47,7 +48,7 @@ async function main(){
  await a.query('begin');await a.query('select e10.lock_purchase_order($1,$2)',[x.org,x.po]);
  await b.query('begin');await claims(b);const bPid=(await b.query('select pg_backend_pid() pid')).rows[0].pid;
  const pending=add(b,'Competing amendment B',root.comment_id,`branch-b-${run}`);
- await waitBlocked(bPid);
+ await waitBlocked(bPid,aPid);
  await claims(a);const winner=await add(a,'Winning amendment A',root.comment_id,`branch-a-${run}`);await a.query('commit');
  let loser;try{await bounded(pending)}catch(e){loser=e}await b.query('rollback');
  if(!loser||loser.code!=='40001')throw Error(`stale successor was not serialization-denied: ${loser&&loser.code}`);
@@ -59,7 +60,7 @@ async function main(){
 
  await a.query('begin');await a.query('select e10.lock_purchase_order($1,$2)',[x.org,x.po]);
  await b.query('begin');await claims(b);const revokePid=(await b.query('select pg_backend_pid() pid')).rows[0].pid;
- const revoked=add(b,'Must not persist',winner.rows[0].r.comment_id,`revoked-${run}`);await waitBlocked(revokePid);
+ const revoked=add(b,'Must not persist',winner.rows[0].r.comment_id,`revoked-${run}`);await waitBlocked(revokePid,aPid);
  await admin.query("delete from public.e10_organization_role_permissions where organization_id=$1 and role_id=$2 and capability='act.purchasing_prepare'",[x.org,x.role]);
  await a.query('commit');let denied;try{await bounded(revoked)}catch(e){denied=e}await b.query('rollback');
  if(!denied||denied.code!=='42501')throw Error(`post-lock authority revoke failed: ${denied&&denied.code}`);
@@ -70,7 +71,7 @@ async function main(){
  await admin.query("insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed) values($1,$2,'act.purchasing_prepare',true)",[x.org,x.role]);
  await a.query('begin');await a.query("select e10.lock_financial_document($1,'supplier_invoice',$2)",[x.org,x.invoice]);
  await b.query('begin');await claims(b);const financialPid=(await b.query('select pg_backend_pid() pid')).rows[0].pid;
- const financialPending=addInvoice(b,'Must not persist financially',`financial-revoked-${run}`);await waitBlocked(financialPid);
+ const financialPending=addInvoice(b,'Must not persist financially',`financial-revoked-${run}`);await waitBlocked(financialPid,aPid);
  await admin.query("delete from public.e10_organization_role_permissions where organization_id=$1 and role_id=$2 and capability='financial.actual_cost.read'",[x.org,x.role]);
  await a.query('commit');let financialDenied;try{await bounded(financialPending)}catch(e){financialDenied=e}await b.query('rollback');
  if(!financialDenied||financialDenied.code!=='42501')throw Error(`post-lock financial authority revoke failed: ${financialDenied&&financialDenied.code}`);
@@ -80,7 +81,7 @@ async function main(){
 
  await a.query('begin');await a.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[`${x.org}|commercial-comment-command|root-${run}`]);
  await b.query('begin');await claims(b);const pausedPid=(await b.query('select pg_backend_pid() pid')).rows[0].pid;
- const pausedReplay=add(b,'Original vendor instruction',null,` root-${run} `);await waitBlocked(pausedPid);
+ const pausedReplay=add(b,'Original vendor instruction',null,` root-${run} `);await waitBlocked(pausedPid,aPid);
  await admin.query("update public.e10_organizations set status='suspended' where id=$1",[x.org]);await a.query('commit');
  let pausedDenied;try{await bounded(pausedReplay)}catch(e){pausedDenied=e}await b.query('rollback');
  if(!pausedDenied||pausedDenied.code!=='42501')throw Error(`paused organization replay succeeded: ${pausedDenied&&pausedDenied.code}`);
