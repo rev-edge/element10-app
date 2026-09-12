@@ -21,11 +21,17 @@ begin
  j:=public.e10_org_create_action_draft(o,'purchase_order.create',po_values,'{"supplier_id":{"source":"operator"}}','[]','po-propose');d:=(j->>'draft_id')::uuid;
  if jsonb_array_length(j->'missing_fields')<>0 then raise exception'valid PO reported missing %',j;end if;
  perform public.e10_org_approve_action_draft(o,d,1,'po-approve');
- j:=public.e10_org_commit_action_draft(o,d,1,'po-commit');po:=(j#>>'{ordinary_result,purchase_order_id}')::uuid;
+ j:=public.e10_org_amend_action_draft(o,d,1,po_values,'{"supplier_id":{"source":"operator"}}','[]','po-amend-after-approval');if j->>'status'<>'draft'or(j->>'revision')::int<>2 then raise exception'amend did not invalidate approval %',j;end if;
+ begin perform public.e10_org_commit_action_draft(o,d,1,'po-old-commit');raise exception'old approval committed';exception when serialization_failure then null;end;
+ perform public.e10_org_approve_action_draft(o,d,2,'po-approve-2');
+ reset role;delete from public.e10_organization_role_permissions where organization_id=o and capability='act.purchasing_prepare';set local role authenticated;
+ begin perform public.e10_org_commit_action_draft(o,d,2,'po-denied-commit');raise exception'revoked prepare capability committed';exception when insufficient_privilege then null;end;
+ reset role;insert into public.e10_organization_role_permissions values(o,role_id,'act.purchasing_prepare',true);set local role authenticated;
+ j:=public.e10_org_commit_action_draft(o,d,2,'po-commit');po:=(j#>>'{ordinary_result,purchase_order_id}')::uuid;
  reset role;
  if j->>'status'<>'committed'or po is null or not exists(select 1 from public.e10_purchase_orders where organization_id=o and id=po and status='draft'and revision=1)then raise exception'PO delegation failed %',j;end if;
  set local role authenticated;
- j2:=public.e10_org_commit_action_draft(o,d,1,'po-commit');if not(j2->>'replay')::boolean or j2#>>'{ordinary_result,purchase_order_id}'<>po::text then raise exception'PO commit replay failed %',j2;end if;
+ j2:=public.e10_org_commit_action_draft(o,d,2,'po-commit');if not(j2->>'replay')::boolean or j2#>>'{ordinary_result,purchase_order_id}'<>po::text then raise exception'PO commit replay failed %',j2;end if;
  reset role;
  if exists(select 1 from public.e10_stock_receipts where organization_id=o)then raise exception'PO proposal received stock';end if;
 
