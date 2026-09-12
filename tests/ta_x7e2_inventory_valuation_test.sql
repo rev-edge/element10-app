@@ -60,6 +60,7 @@ begin
  if(j#>>'{summary,closing_holding_count}')::int<>205 or(j#>>'{summary,closing_value}')::numeric<>456 or jsonb_array_length(j->'items')<>200 or j->>'next_cursor'is null then raise exception'full totals were paginated %',j;end if;
  cursor_value:=j->>'next_cursor';j2:=public.e10_org_inventory_valuation_coverage(o,'local-index','1','USD','2026-01-07',null,365,200,cursor_value);
  if(j2#>>'{summary,closing_holding_count}')::int<>205 or(j2#>>'{summary,closing_value}')::numeric<>456 or jsonb_array_length(j2->'items')<>5 then raise exception'second page totals inconsistent %',j2;end if;
+ begin perform public.e10_org_inventory_valuation_coverage(o,'local-index','1','USD','2026-01-07',null,365,199,cursor_value);raise exception'valuation cursor limit substitution accepted';exception when sqlstate'40001'then null;end;
  reset role;
 end $$;
 rollback;

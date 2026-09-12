@@ -18,7 +18,10 @@ begin
  sanitized:=e10.sanitize_scoped_line_ids(o1,jsonb_build_array(jsonb_build_object('id',line_id)), 'public.e10_purchase_order_lines'::regclass);
  if sanitized#>>'{0,id}'=line_id::text then raise exception'foreign line identity was not remapped';end if;
  sanitized:=e10.sanitize_scoped_line_ids(o1,jsonb_build_array(jsonb_build_object('id',random_id)), 'public.e10_purchase_order_lines'::regclass);
- if sanitized#>>'{0,id}'<>random_id::text then raise exception'available line identity was changed';end if;
+ if sanitized#>>'{0,id}'=random_id::text then raise exception'unused line identity was not scoped';end if;
+ if sanitized#>>'{0,id}'<>md5(o1::text||'|e10_purchase_order_lines|'||random_id::text)::uuid::text then raise exception'unused line identity was not deterministic';end if;
+ if e10.sanitize_scoped_line_ids(o1,jsonb_build_array(jsonb_build_object('id',line_id),jsonb_build_object('id',line_id)),'public.e10_purchase_order_lines'::regclass)#>>'{0,id}'
+   <>e10.sanitize_scoped_line_ids(o1,jsonb_build_array(jsonb_build_object('id',line_id),jsonb_build_object('id',line_id)),'public.e10_purchase_order_lines'::regclass)#>>'{1,id}'then raise exception'duplicate client identity did not converge';end if;
  if position('sanitize_scoped_line_ids' in pg_get_functiondef('public.e10_org_create_purchase_order(uuid,uuid,uuid,text,text,timestamptz,jsonb,text)'::regprocedure))=0
    or position('sanitize_scoped_line_ids' in pg_get_functiondef('public._e10_org_amend_financial_document_x3d1b(uuid,text,uuid,integer,text,date,numeric,jsonb,text,text)'::regprocedure))=0 then raise exception'writer sanitizer wiring missing';end if;
 end $$;
