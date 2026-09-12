@@ -50,6 +50,44 @@ revoke all on function e10.receipt_line_effective_quantities(uuid,uuid)
   from public,anon,authenticated;
 grant execute on function e10.receipt_line_effective_quantities(uuid,uuid) to service_role;
 
+create function e10.receipt_invoice_po_required_quantity(p_org uuid,p_invoice_line uuid,p_po_line uuid)
+returns numeric language sql stable security definer set search_path=public as $$
+ select coalesce(sum(least(ri.allocated_quantity,rp.allocated_quantity)),0)
+ from public.e10_receipt_invoice_allocations ri
+ join public.e10_receipt_po_allocations rp
+   on rp.organization_id=ri.organization_id and rp.receipt_line_id=ri.receipt_line_id
+ join public.e10_stock_receipt_lines rl
+   on rl.organization_id=ri.organization_id and rl.id=ri.receipt_line_id
+ join public.e10_stock_receipts sr
+   on sr.organization_id=rl.organization_id and sr.id=rl.stock_receipt_id
+ where ri.organization_id=p_org and ri.invoice_line_id=p_invoice_line
+   and rp.purchase_order_line_id=p_po_line and sr.status in('posted','corrected')
+   and not exists(select 1 from public.e10_stock_receipt_reversals rv
+     where rv.organization_id=rl.organization_id and rv.stock_receipt_line_id=rl.id)
+$$;
+revoke all on function e10.receipt_invoice_po_required_quantity(uuid,uuid,uuid)
+  from public,anon,authenticated;
+grant execute on function e10.receipt_invoice_po_required_quantity(uuid,uuid,uuid) to service_role;
+
+create function e10.guard_invoice_po_below_physical_receipts() returns trigger
+language plpgsql security definer set search_path=public as $$
+declare required_quantity numeric;remaining_quantity numeric;
+begin
+  required_quantity:=e10.receipt_invoice_po_required_quantity(
+    coalesce(new.organization_id,old.organization_id),coalesce(new.invoice_line_id,old.invoice_line_id),
+    coalesce(new.purchase_order_line_id,old.purchase_order_line_id));
+  remaining_quantity:=case when tg_op='DELETE' then 0 else new.allocated_quantity end;
+  if remaining_quantity<required_quantity then
+    raise exception using errcode='55000',message='financial_allocation_below_physical_receipts';
+  end if;
+  return case when tg_op='DELETE' then old else new end;
+end $$;
+revoke all on function e10.guard_invoice_po_below_physical_receipts() from public,anon,authenticated;
+grant execute on function e10.guard_invoice_po_below_physical_receipts() to service_role;
+create trigger e10_invoice_po_physical_floor_trg
+  before insert or update or delete on public.e10_invoice_po_allocations
+  for each row execute function e10.guard_invoice_po_below_physical_receipts();
+
 create function public.e10_org_receive_batch(
   p_org uuid,p_supplier_id uuid,p_destination_location_id uuid,p_received_at timestamptz,
   p_lines jsonb,p_idempotency_key text
@@ -287,12 +325,11 @@ begin
         where organization_id=p_org and id=item_id;
       perform set_config('e10.emit','on',true);
       insert into public.e10_inventory_movements(workspace_id,item_id,movement_type,on_hand_delta,reserved_delta,
-        source_entity_type,source_entity_id,source_action,actor_uid,reason_code,note,idempotency_key,meta,organization_id,created_at)
+        source_entity_type,source_entity_id,source_action,actor_uid,reason_code,note,idempotency_key,meta,organization_id)
       values('shared',item_id,'intake',accepted,0,'stock_receipt_line',line_id::text,'receive',actor,'intake',
         'accepted receipt quantity',p_org::text||':receive-batch:'||p_idempotency_key||':'||line_no,
         jsonb_build_object('receipt_id',receipt_id,'receipt_line_id',line_id,'lot_id',lot_id,
-          'purchase_order_line_id',po_line_id,'invoice_line_id',invoice_line_id,'command',p_idempotency_key),p_org,
-        coalesce(p_received_at,now()))
+          'purchase_order_line_id',po_line_id,'invoice_line_id',invoice_line_id,'command',p_idempotency_key),p_org)
       returning id into movement_id;
       update public.e10_stock_receipt_lines set inventory_movement_id=movement_id
         where organization_id=p_org and id=line_id;
@@ -334,7 +371,7 @@ create or replace function e10.normalize_commercial_event_envelope() returns tri
 language plpgsql security definer set search_path=public as $$
 begin
   if new.source_kind='native' then
-    if new.inventory_movement_id is null and not(
+    if new.inventory_movement_id is null and new.customer_activity_observation_id is null and not(
       current_setting('e10.receipt_evidence',true)='on' and new.event_type='receipt'
       and new.source_connection_id='receipt-ledger' and nullif(btrim(new.source_event_id),'') is not null
       and new.subject_type='inventory_item') then
@@ -342,10 +379,12 @@ begin
     end if;
     new.evidence_quality:='native_system';
     new.source_connection_id:=coalesce(nullif(btrim(new.source_connection_id),''),
-      case when new.inventory_movement_id is not null then 'inventory-ledger' else 'receipt-ledger' end);
-    new.source_event_id:=coalesce(nullif(btrim(new.source_event_id),''),new.inventory_movement_id::text);
+      case when new.inventory_movement_id is not null then 'inventory-ledger'
+        when new.customer_activity_observation_id is not null then 'live-break-slot' else 'receipt-ledger' end);
+    new.source_event_id:=coalesce(nullif(btrim(new.source_event_id),''),new.inventory_movement_id::text,
+      new.customer_activity_observation_id::text);
     new.correlation_id:=coalesce(nullif(btrim(new.correlation_id),''),nullif(btrim(new.source_reference),''),
-      new.inventory_movement_id::text);
+      new.inventory_movement_id::text,new.customer_activity_observation_id::text);
   elsif new.source_kind='system' then
     raise exception using errcode='42501',message='system_evidence_requires_trusted_writer';
   elsif new.source_kind='import' and new.evidence_quality='operator_asserted' then
@@ -363,7 +402,9 @@ grant execute on function e10.normalize_commercial_event_envelope() to service_r
 -- The unique movement index keeps this at one event for each accepted line.
 create or replace function e10.capture_native_inventory_event() returns trigger
 language plpgsql security definer set search_path=public as $$
-declare v_event_type text; v_corrects uuid; v_fp text; v_payload jsonb; receipt_source record;
+declare
+  v_event_type text;v_corrects uuid;v_fp text;v_payload jsonb;v_receipt_line_id uuid;
+  v_occurred_at timestamptz:=new.created_at;v_receipt_id uuid;v_original record;receipt_source record;
 begin
   v_event_type:=case
     when new.movement_type='intake' then 'receipt'
@@ -375,41 +416,68 @@ begin
     when new.movement_type='correction' and new.source_action='reverse' then 'correction'
     else null end;
   if v_event_type is null then return new; end if;
+  if v_event_type='receipt' and new.source_entity_type='stock_receipt_line' then
+    select sr.received_at,rl.id receipt_line_id,rl.stock_receipt_id,rl.inventory_lot_id,
+      po.purchase_order_line_id,inv.invoice_line_id
+    into receipt_source
+    from public.e10_stock_receipt_lines rl
+    join public.e10_stock_receipts sr on sr.organization_id=rl.organization_id and sr.id=rl.stock_receipt_id
+    left join public.e10_receipt_po_allocations po on po.organization_id=rl.organization_id and po.receipt_line_id=rl.id
+    left join public.e10_receipt_invoice_allocations inv on inv.organization_id=rl.organization_id and inv.receipt_line_id=rl.id
+    where rl.organization_id=new.organization_id and rl.id=nullif(new.source_entity_id,'')::uuid;
+    if found then v_receipt_line_id:=receipt_source.receipt_line_id;v_occurred_at:=coalesce(receipt_source.received_at,new.created_at); end if;
+  end if;
   if v_event_type='correction' then
+    v_receipt_id:=nullif(new.meta->>'receipt_id','')::uuid;
     select ce.id into v_corrects
       from public.e10_stock_receipt_lines rl
       join public.e10_commercial_events ce on ce.organization_id=rl.organization_id
         and ce.inventory_movement_id=rl.inventory_movement_id
       where rl.organization_id=new.organization_id
-        and rl.stock_receipt_id=nullif(new.meta->>'receipt_id','')::uuid
+        and rl.stock_receipt_id=v_receipt_id
       order by ce.created_at,ce.id limit 1;
-    if not found then return new; end if;
+    if not found then
+      select m.*,sr.received_at source_occurred_at into v_original
+      from public.e10_stock_receipt_lines rl
+      join public.e10_stock_receipts sr on sr.organization_id=rl.organization_id and sr.id=rl.stock_receipt_id
+      join public.e10_inventory_movements m on m.organization_id=rl.organization_id and m.id=rl.inventory_movement_id
+      where rl.organization_id=new.organization_id and rl.stock_receipt_id=v_receipt_id
+      order by rl.line_no,rl.id limit 1;
+      if not found then return new;end if;
+      v_fp:=md5(v_original.id::text||'|receipt|'||v_original.item_id);
+      insert into public.e10_commercial_events(organization_id,event_type,subject_type,subject_id,occurred_at,
+        idempotency_key,source_kind,source_reference,payload,created_by,request_fingerprint,inventory_movement_id)
+      values(v_original.organization_id,'receipt','inventory_item',v_original.item_id,
+        coalesce(v_original.source_occurred_at,v_original.created_at),
+        v_original.organization_id::text||':native-movement:'||v_original.id::text,'native',
+        v_original.source_entity_type||':'||coalesce(v_original.source_entity_id,''),
+        jsonb_build_object('movement_id',v_original.id,'movement_type',v_original.movement_type,
+          'on_hand_delta',v_original.on_hand_delta,'reserved_delta',v_original.reserved_delta,
+          'source_action',v_original.source_action,'reason_code',v_original.reason_code,
+          'captured_retroactively',true,'source_receipt_id',v_receipt_id),
+        v_original.actor_uid,v_fp,v_original.id)
+      on conflict(organization_id,inventory_movement_id) where inventory_movement_id is not null do nothing
+      returning id into v_corrects;
+      if v_corrects is null then select id into v_corrects from public.e10_commercial_events
+        where organization_id=v_original.organization_id and inventory_movement_id=v_original.id;end if;
+    end if;
+    if v_corrects is null then return new;end if;
   end if;
   v_payload:=jsonb_build_object('movement_id',new.id,'movement_type',new.movement_type,
     'on_hand_delta',new.on_hand_delta,'reserved_delta',new.reserved_delta,
-    'source_action',new.source_action,'reason_code',new.reason_code);
-  if v_event_type='receipt' and new.source_entity_type='stock_receipt_line' then
-    select rl.id receipt_line_id,rl.stock_receipt_id,rl.inventory_lot_id,
-      po.purchase_order_line_id,inv.invoice_line_id
-    into receipt_source
-    from public.e10_stock_receipt_lines rl
-    left join public.e10_receipt_po_allocations po
-      on po.organization_id=rl.organization_id and po.receipt_line_id=rl.id
-    left join public.e10_receipt_invoice_allocations inv
-      on inv.organization_id=rl.organization_id and inv.receipt_line_id=rl.id
-    where rl.organization_id=new.organization_id and rl.id=new.source_entity_id::uuid;
-    if found then
-      v_payload:=v_payload||jsonb_build_object('receipt_id',receipt_source.stock_receipt_id::text,
-        'receipt_line_id',receipt_source.receipt_line_id,'lot_id',receipt_source.inventory_lot_id,
-        'purchase_order_line_id',receipt_source.purchase_order_line_id,
-        'invoice_line_id',receipt_source.invoice_line_id,'command',new.meta->>'command');
-    end if;
+      'source_action',new.source_action,'reason_code',new.reason_code,
+      'operational_evidence_only',v_event_type in('sale_committed','fulfillment'));
+  if v_event_type='receipt' and v_receipt_line_id is not null then
+    v_payload:=v_payload||jsonb_build_object('receipt_id',receipt_source.stock_receipt_id::text,
+      'receipt_line_id',receipt_source.receipt_line_id,'lot_id',receipt_source.inventory_lot_id,
+      'purchase_order_line_id',receipt_source.purchase_order_line_id,
+      'invoice_line_id',receipt_source.invoice_line_id,'command',new.meta->>'command');
   end if;
   v_fp:=md5(new.id::text||'|'||v_event_type||'|'||new.item_id);
   insert into public.e10_commercial_events(organization_id,event_type,subject_type,subject_id,occurred_at,
     idempotency_key,source_kind,source_reference,payload,corrects_event_id,created_by,
     request_fingerprint,inventory_movement_id)
-  values(new.organization_id,v_event_type,'inventory_item',new.item_id,new.created_at,
+  values(new.organization_id,v_event_type,'inventory_item',new.item_id,v_occurred_at,
     new.organization_id::text||':native-movement:'||new.id::text,'native',
     new.source_entity_type||':'||coalesce(new.source_entity_id,''),v_payload,v_corrects,
     new.actor_uid,v_fp,new.id)
@@ -418,6 +486,8 @@ begin
 end $$;
 revoke all on function e10.capture_native_inventory_event() from public,anon,authenticated;
 grant execute on function e10.capture_native_inventory_event() to service_role;
+comment on function e10.capture_native_inventory_event() is
+  'Same-transaction native inventory lifecycle evidence with source occurrence time and exact receipt correlation. Sale and fulfillment events are operational evidence, not official customer spend.';
 
 -- Route existing purchasing reads through the single effective-quantity contract.
 create or replace function e10.supplier_open_commitment_summary(p_org uuid,p_supplier uuid,p_currency text)

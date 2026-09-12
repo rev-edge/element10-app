@@ -7,7 +7,8 @@ declare
   foreign_org uuid:=gen_random_uuid(); actor uuid:=gen_random_uuid(); role_id uuid:=gen_random_uuid();
   supplier uuid:=gen_random_uuid(); location_id uuid:=gen_random_uuid(); product_id uuid:=gen_random_uuid();
   config_id uuid:=gen_random_uuid(); po_id uuid:=gen_random_uuid(); po_line_id uuid:=gen_random_uuid(); po_line_2 uuid:=gen_random_uuid();
-  invoice_id uuid:=gen_random_uuid(); invoice_line_id uuid:=gen_random_uuid(); invoice_line_null uuid:=gen_random_uuid(); result jsonb; replay jsonb;
+  invoice_id uuid:=gen_random_uuid(); invoice_line_id uuid:=gen_random_uuid(); invoice_line_null uuid:=gen_random_uuid();
+  direct_invoice uuid:=gen_random_uuid(); direct_invoice_line uuid:=gen_random_uuid(); result jsonb; replay jsonb;
   receipt_id uuid; direct_receipt uuid; draft_receipt uuid:=gen_random_uuid(); draft_line uuid:=gen_random_uuid();
   reversal_id uuid:=gen_random_uuid(); line_ids uuid[]; n bigint; quantity numeric; invoice_status text; effective record; summary jsonb;
 begin
@@ -17,7 +18,7 @@ begin
   insert into public.e10_organization_roles(id,organization_id,key,name,is_system)
   values(role_id,o,'x4e-'||substr(role_id::text,1,8),'X4e receiver',false);
   insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed)
-  values(o,role_id,'act.create_receiving',true);
+  values(o,role_id,'act.create_receiving',true),(o,role_id,'act.purchasing_prepare',true);
   insert into public.e10_organization_memberships(organization_id,user_id,role_id,status)
   values(o,actor,role_id,'active');
   insert into public.e10_suppliers(id,organization_id,code,name,status)
@@ -45,6 +46,11 @@ begin
     line_no,invoiced_quantity,line_amount,state)
   values(invoice_line_id,o,invoice_id,config_id,1,12,120,'active'),
     (invoice_line_null,o,invoice_id,null,2,1,10,'active');
+  insert into public.e10_supplier_invoices(id,organization_id,supplier_id,supplier_document_number,status,currency,created_by)
+  values(direct_invoice,o,supplier,'X4E-DIRECT-INVOICE','draft','CAD',actor);
+  insert into public.e10_supplier_invoice_lines(id,organization_id,supplier_invoice_id,configuration_version_id,
+    line_no,invoiced_quantity,line_amount,state)
+  values(direct_invoice_line,o,direct_invoice,config_id,1,12,120,'active');
 
   perform set_config('request.jwt.claims',jsonb_build_object('sub',actor,'role','authenticated')::text,true);
   set local role authenticated;
@@ -168,8 +174,8 @@ begin
   set local role authenticated;
   result:=public.e10_org_receive_batch(o,supplier,location_id,'2026-09-12T01:00:00Z',jsonb_build_array(
     jsonb_build_object('line_no',1,'configuration_version_id',config_id,'inventory_item_id','x4e-item-c',
-      'accepted_quantity',4,'damaged_quantity',0,'quarantined_quantity',0,'actual_unit_cost',11,'currency','CAD',
-      'invoice_line_id',invoice_line_id,'expected_allocations',jsonb_build_array())
+      'accepted_quantity',10,'damaged_quantity',0,'quarantined_quantity',0,'actual_unit_cost',11,'currency','CAD',
+      'invoice_line_id',direct_invoice_line,'expected_allocations',jsonb_build_array())
   ),'x4e-invoice-only');
   reset role;
   direct_receipt:=(result->>'receipt_id')::uuid;
@@ -178,11 +184,24 @@ begin
       where l.organization_id=o and l.stock_receipt_id=direct_receipt) then
     raise exception 'invoice-only receipt fabricated PO allocation';
   end if;
-  select status into invoice_status from public.e10_supplier_invoices where organization_id=o and id=invoice_id;
+  select status into invoice_status from public.e10_supplier_invoices where organization_id=o and id=direct_invoice;
   if invoice_status<>'draft' then raise exception 'physical receipt changed invoice status: %',invoice_status; end if;
   select sum(a.allocated_quantity) into quantity from public.e10_receipt_invoice_allocations a
-    where a.organization_id=o and a.invoice_line_id=invoice_line_id;
+    where a.organization_id=o and a.invoice_line_id=direct_invoice_line;
   if quantity<>10 or 12-quantity<>2 then raise exception 'invoice-only 12/10/discrepancy2 proof failed: %',quantity; end if;
+
+  set local role authenticated;
+  perform public.e10_org_allocate_invoice_to_po(o,invoice_line_id,po_line_id,1,1,6,
+    'match physical receipt','x4e-invoice-po-match');
+  begin
+    perform public.e10_org_release_invoice_from_po(o,invoice_line_id,po_line_id,2,1,1,
+      'must not fall below physical receipt','x4e-invoice-po-release');
+    raise exception 'invoice/PO allocation released below linked physical receipt';
+  exception when sqlstate '55000' then null; end;
+  reset role;
+  select a.allocated_quantity into quantity from public.e10_invoice_po_allocations a
+    where a.organization_id=o and a.invoice_line_id=invoice_line_id and a.purchase_order_line_id=po_line_id;
+  if quantity<>6 then raise exception 'physical allocation floor changed: %',quantity; end if;
 
   -- Historical non-posted evidence and reversal rows must not reduce open commitment
   -- or create false ambiguity for legacy split-linked receipt lines.
