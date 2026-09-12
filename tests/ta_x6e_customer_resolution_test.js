@@ -25,11 +25,11 @@ async function main() {
     await s.query("insert into public.e10_organization_memberships(organization_id,user_id,role_id,status) values($1,$2,$3,'active')", [x.otherOrg, x.otherUser, x.otherRole]);
     await s.query("insert into public.e10_customers(id,organization_id,display_name) values($1,$9,'Customer A'),($2,$9,'Customer B'),($3,$9,'Separate customer'),($4,$9,'Walk-in A'),($5,$9,'Walk-in B'),($6,$9,'Verified A'),($7,$9,'Verified B'),($8,$9,'Verified C')", [x.c1, x.c2, x.c3, x.wc1, x.wc2, x.vc1, x.vc2, x.vc3, org]);
     await s.query("insert into public.e10_customers(id,organization_id,display_name) values($1,$2,'Foreign customer')", [x.foreignCustomer, x.otherOrg]);
-    await s.query("insert into public.e10_customer_identity_decisions(id,organization_id,customer_id,identity_kind,channel,external_account_id,identity_action,verification_basis,reason,evidence,idempotency_key,request_fingerprint,created_by) values($1,$2,$3,'channel_account','market',$4,'attach','operator_review','foreign fixture','{}',$5,$5,$6)", [x.foreignIdentity, x.otherOrg, x.foreignCustomer, `${x.run}-foreign-account`, `${x.run}-foreign-identity`, x.otherUser]);
+    await s.query("insert into public.e10_customer_identity_decisions(id,organization_id,customer_id,identity_kind,channel,external_account_id,identity_action,verification_basis,reason,evidence,idempotency_key,request_fingerprint,created_by) values($1,$2,$3,'channel_account','whatnot',$4,'attach','operator_review','foreign fixture','{}',$5,$5,$6)", [x.foreignIdentity, x.otherOrg, x.foreignCustomer, `${x.run}-foreign-account`, `${x.run}-foreign-identity`, x.otherUser]);
     for (const c of [a, b]) { await c.query('select set_config($1,$2,false)', ['request.jwt.claims', JSON.stringify({ sub: x.user, role: 'authenticated' })]); await c.query('set role authenticated'); }
 
     for (const [customer, account, suffix] of [[x.c1, `${x.run}-a`, 'a'], [x.c2, `${x.run}-b`, 'b'], [x.c3, `${x.run}-c`, 'c']]) {
-      const r = (await a.query("select public.e10_org_decide_customer_identity($1,$2,'channel_account','market',$3,null,'attach',null,'reviewed channel','{}',$4) r", [org, customer, account, `${x.run}-identity-${suffix}`])).rows[0].r;
+      const r = (await a.query("select public.e10_org_decide_customer_identity($1,$2,'channel_account','whatnot',$3,null,'attach',null,'reviewed channel','{}',$4) r", [org, customer, account, `${x.run}-identity-${suffix}`])).rows[0].r;
       identityIds.push(r.decision_id);
     }
     const aliasDecision = (await a.query("select public.e10_org_decide_customer_identity($1,$2,'alias',null,null,'name only', 'attach',null,'alias only','{}',$3) r", [org, x.c3, `${x.run}-alias`])).rows[0].r.decision_id;
@@ -76,15 +76,15 @@ async function main() {
     if (restored.rows[0].effective_customer_id !== x.c1) throw new Error('split did not restore source customer');
     await a.query(decide, [org, x.c1, x.c2, 0, 0, 2, 'merge', 'channel_identity', identityIds.slice(0, 2), 'reviewed channel evidence', JSON.stringify({ reviewed: true }), `${x.run}-merge-2`]);
     denied = false;
-    try { await a.query("select public.e10_org_decide_customer_identity($1,$2,'channel_account','market',$3,null,'attach',null,'attach to merged source','{}',$4)", [org, x.c1, `${x.run}-late`, `${x.run}-late-attach`]); } catch (e) { denied = e.code === '42501' && e.message === 'identity_customer_not_active_terminal'; }
+    try { await a.query("select public.e10_org_decide_customer_identity($1,$2,'channel_account','whatnot',$3,null,'attach',null,'attach to merged source','{}',$4)", [org, x.c1, `${x.run}-late`, `${x.run}-late-attach`]); } catch (e) { denied = e.code === '42501' && e.message === 'identity_customer_not_active_terminal'; }
     if (!denied) throw new Error('new identity attached to nonterminal customer');
-    await a.query("select public.e10_org_decide_customer_identity($1,$2,'channel_account','market',$3,null,'detach',null,'correct source identity after merge','{}',$4)", [org, x.c1, `${x.run}-a`, `${x.run}-detach-after-merge`]);
+    await a.query("select public.e10_org_decide_customer_identity($1,$2,'channel_account','whatnot',$3,null,'detach',null,'correct source identity after merge','{}',$4)", [org, x.c1, `${x.run}-a`, `${x.run}-detach-after-merge`]);
     const history = await a.query('select * from public.e10_org_list_customer_resolution_history($1,$2,10,null)', [org, x.c1]);
     if (history.rows.length !== 3 || history.rows.map(r => r.revision).join(',') !== '3,2,1') throw new Error(`history pagination ${JSON.stringify(history.rows)}`);
     denied = false;
     try { await a.query(decide, [org, x.c3, x.c2, 0, 0, 0, 'merge', 'channel_identity', [aliasDecision, identityIds[1]], 'alias/name is insufficient', '{}', `${x.run}-alias-citation`]); } catch (e) { denied = e.code === '22023'; }
     if (!denied) throw new Error('alias evidence authorized merge');
-    await a.query("select public.e10_org_decide_customer_identity($1,$2,'channel_account','market',$3,null,'detach',null,'detach before citation','{}',$4)", [org, x.c3, `${x.run}-c`, `${x.run}-detach-citation`]);
+    await a.query("select public.e10_org_decide_customer_identity($1,$2,'channel_account','whatnot',$3,null,'detach',null,'detach before citation','{}',$4)", [org, x.c3, `${x.run}-c`, `${x.run}-detach-citation`]);
     denied = false;
     try { await a.query(decide, [org, x.c3, x.c2, 0, 0, 0, 'merge', 'channel_identity', [identityIds[2], identityIds[1]], 'stale citation', '{}', `${x.run}-stale-citation`]); } catch (e) { denied = e.code === '22023'; }
     if (!denied) throw new Error('detached identity evidence authorized merge');
@@ -112,13 +112,13 @@ async function main() {
     await a.query(decide, [org, x.vc1, null, 1, null, 1, 'split', 'operator_review', [], 'restore verified records', '{}', `${x.run}-verified-split`]);
 
     await a.query(decide, [org, x.c1, null, 0, null, 3, 'split', 'operator_review', [], 'prepare concurrency proof', '{}', `${x.run}-split-2`]);
-    const reattached = (await a.query("select public.e10_org_decide_customer_identity($1,$2,'channel_account','market',$3,null,'attach',null,'reattach for topology race','{}',$4) r", [org, x.c1, `${x.run}-a`, `${x.run}-reattach-race`])).rows[0].r.decision_id;
+    const reattached = (await a.query("select public.e10_org_decide_customer_identity($1,$2,'channel_account','whatnot',$3,null,'attach',null,'reattach for topology race','{}',$4) r", [org, x.c1, `${x.run}-a`, `${x.run}-reattach-race`])).rows[0].r.decision_id;
     const identityMergeRace = await bounded(Promise.allSettled([
       a.query(decide, [org, x.c1, x.c2, 0, 0, 4, 'merge', 'channel_identity', [reattached, identityIds[1]], 'merge against detach', '{}', `${x.run}-identity-merge-race`]),
-      b.query("select public.e10_org_decide_customer_identity($1,$2,'channel_account','market',$3,null,'detach',null,'detach against merge','{}',$4)", [org, x.c1, `${x.run}-a`, `${x.run}-identity-detach-race`]),
+      b.query("select public.e10_org_decide_customer_identity($1,$2,'channel_account','whatnot',$3,null,'detach',null,'detach against merge','{}',$4)", [org, x.c1, `${x.run}-a`, `${x.run}-identity-detach-race`]),
     ]));
     if (identityMergeRace[1].status !== 'fulfilled' || !((identityMergeRace[0].status === 'fulfilled') || (identityMergeRace[0].status === 'rejected' && identityMergeRace[0].reason.code === '22023'))) throw new Error(`identity-vs-merge serialization ${JSON.stringify(identityMergeRace)}`);
-    const identityAfterRace = (await s.query("select identity_action from public.e10_current_customer_identities where organization_id=$1 and identity_stream_key='channel|market|'||$2", [org, `${x.run}-a`])).rows[0];
+    const identityAfterRace = (await s.query("select identity_action from public.e10_current_customer_identities where organization_id=$1 and identity_stream_key='channel|whatnot|'||$2", [org, `${x.run}-a`])).rows[0];
     if (!identityAfterRace || identityAfterRace.identity_action !== 'detach') throw new Error('identity-vs-merge race lost detach correction');
     let currentResolution = 4;
     if (identityMergeRace[0].status === 'fulfilled') {
@@ -148,7 +148,7 @@ async function main() {
     await s.query("select pg_advisory_xact_lock(hashtextextended($1||'|customer-resolution-topology',0))", [x.otherOrg]);
     const prelockDenials = await Promise.allSettled([
       bounded(a.query("select public.e10_org_update_customer($1,$2,0,'foreign','active',$3)", [x.otherOrg, x.c1, `${x.run}-foreign-update`]), 500),
-      bounded(a.query("select public.e10_org_decide_customer_identity($1,$2,'channel_account','market','foreign',null,'attach',null,'foreign','{}',$3)", [x.otherOrg, x.c1, `${x.run}-foreign-identity`]), 500),
+      bounded(a.query("select public.e10_org_decide_customer_identity($1,$2,'channel_account','whatnot','foreign',null,'attach',null,'foreign','{}',$3)", [x.otherOrg, x.c1, `${x.run}-foreign-identity`]), 500),
     ]);
     await s.query('rollback');
     if (prelockDenials.some(v => v.status !== 'rejected' || v.reason.code !== '42501')) throw new Error(`unauthorized wrapper waited on foreign topology lock ${JSON.stringify(prelockDenials)}`);
