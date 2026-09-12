@@ -30,12 +30,14 @@ Audited against:
 - `docs/TA_X8_REVIEW_CHECKLIST.md`
 - `docs/TA_X8_IMPLEMENTATION_CONTRACT.md`
 
-The implementation consists of 145 additive `202609*` migrations and 137
+The implementation consists of 147 additive `202609*` migrations and 137
 top-level `tests/ta_*` files. Current implementation/test head is
-`481ea1ab452a1e196d59b19526ea4ecfdc19309f`; exact-head CI run `34717509375`
-is in progress. Staging project `csmbjfmoxkexcyssntbg` contains all 145 local
-migration names and matches the local schema manifest except two historical
-comment-only definitions.
+`6e4beb5a424f562e871726cfedf52ff7c393959e`. Staging project
+`csmbjfmoxkexcyssntbg` contains all 147 local migration names. The original
+145-name schema manifest matches except two historical comment-only
+definitions; the two post-packet additive deltas are the supplier-credit line
+response map and historical receipt-replay origin repair, both applied and
+introspected on staging.
 
 ## Batch reconciliation
 

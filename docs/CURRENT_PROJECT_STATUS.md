@@ -1,13 +1,13 @@
 # Current project status
 
-Reconciled September 12, 2026 against canonical `foundation-a6` at
-`481ea1ab452a1e196d59b19526ea4ecfdc19309f`, committed migrations/tests,
+Reconciled September 12, 2026 against canonical `foundation-a6` implementation at
+`6e4beb5a424f562e871726cfedf52ff7c393959e`, committed migrations/tests,
 explicit staging verification and the evidence documents below.
 
 This is the current progress index. BOARD.md remains acceptance authority.
 Older dated plans, gap descriptions and completion messages are historical
-unless reaffirmed here. This reconciliation changes documentation only. It
-does not rerun database tests, independently accept new code, or deploy anything.
+unless reaffirmed here. The reconciliation document itself changes no runtime
+state and does not self-accept the implementation.
 
 ## Two different corrective series
 
@@ -29,7 +29,7 @@ of the R-series or of the whole application.
 | R6 validation/error/replay contracts | Implemented, including explicit pre-R6 stored-fingerprint receipt/reservation/event replay | Await final independent verdict |
 | R7 scope dispositions | Implemented with legacy-truncate closure and retained compatibility boundaries | Await final independent verdict |
 | R8 final verification | Runtime and staging evidence complete; exact-head CI and renewed independent review in progress | Do not self-accept |
-| C1-C9 schema expert corrections | All nine completed; current live verification confirms their migration names are included in staging's 145/145 ledger parity | Preserve in combined regression and final review |
+| C1-C9 schema expert corrections | All nine completed; current live verification confirms their migration names are included in staging's 147/147 ledger parity | Preserve in combined regression and final review |
 | Multilingual backend | Requirements queued; no implementation evidence found | Preferences, translated labels/aliases, locale/fallback and stable message contracts after external corrections |
 | Track B | Existing prototype work plus receiving preflight; latest accessible review still requires contract reconciliation | Refresh receiving design against current engine before implementation; owner retains UI acceptance |
 | Production | No rollout authorized by this reconciliation | Separate explicit production go/no-go |
@@ -91,6 +91,8 @@ proposed `TA_C5_RECEIVING_RECONCILIATION.md` name during this audit.
 
 The older `ce463d6` C-series packet reported local replay and did not itself
 contact staging or production. The current R2-R8 closure subsequently contacted
-staging explicitly and verified all 145 migration names, including C1-C9, plus
-schema parity. Production was not contacted. Historical environment claims are
-not extended beyond their recorded observations.
+staging explicitly and verified all 147 migration names, including C1-C9 and
+the two R6 closure deltas. The original 145-name schema manifest retains its
+recorded parity result; both later function deltas were applied and separately
+introspected on staging. Production was not contacted. Historical environment
+claims are not extended beyond their recorded observations.

@@ -21,13 +21,15 @@ self-accept.
 
 ## Ledger and schema parity
 
-- Local repository contains 145 additive `202609*.sql` migrations.
-- Independent review queried staging and confirmed all 145 local September
-  migration names are present.
+- Local repository contains 147 additive `202609*.sql` migrations.
+- Staging contains all 147 local September migration names. The two additions
+  after the original evidence packet are `e10_ta_r6_credit_line_response_map`
+  and `e10_ta_r6_receipt_replay_origin_repair`.
 - Independent review compared current local and staging schema manifests. They
   match except the same two previously documented comment-only function
   definition differences. There is no runtime schema drift.
-- No applied migration was edited during final evidence closure.
+- No applied migration was edited during final evidence closure. Both later
+  corrections are new additive migrations.
 
 ## Staging execution
 
@@ -122,8 +124,14 @@ order by version,name;
 
 ```text
 database_name=postgres,current_schema=public,e10_present=true
-local_names=145,staging_names=145,missing_on_staging=0,extra_on_staging=0
+local_names=147,staging_names=147,missing_on_staging=0,extra_on_staging=0
 ```
+
+The original manifest below covers the first 145 names. The two post-packet
+function deltas were verified separately on staging: both supplier-credit
+wrappers return `line_id_map`; the public receipt writer repairs historical
+replay origin evidence while its renamed delegate is service-role-only. The
+staging ledger query returned `september_migrations=147,closure_additions=2`.
 
 The committed manifest generator and local capture command:
 
