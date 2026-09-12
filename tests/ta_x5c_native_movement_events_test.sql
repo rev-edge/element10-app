@@ -42,6 +42,7 @@ end $$;
 rollback;
 
 begin;
+alter table public.e10_commercial_events disable trigger e10_commercial_events_append_only_trg;
 do $$
 declare
   o uuid:='e1000000-0000-4000-8000-0000000000a6'; u uuid:=gen_random_uuid(); role_id uuid:=gen_random_uuid();
@@ -79,23 +80,23 @@ begin
     raise exception 'source/ingestion time separation failed occurred=% created=%',event_time,ingested_at;
   end if;
 
-  -- Even if the movement trigger is unavailable, the receiving compatibility
-  -- wrapper now writes complete receipt-origin evidence before returning.
+  -- Build a genuinely pre-R1 originless receipt by removing its origin under
+  -- replica mode, then prove compatibility reversal repairs it append-only.
   alter table public.e10_inventory_movements disable trigger e10_capture_native_inventory_event_trg;
   reversal:=public.e10_org_receive_po_line(o,pol,'x5c1-item',1,0,0,'pre-x5c',backdated-'1 day'::interval,'[]','x5c1-legacy');
   alter table public.e10_inventory_movements enable trigger e10_capture_native_inventory_event_trg;
   receipt:=(reversal->>'receipt_id')::uuid;
   original_movement:=(reversal->>'movement_id')::uuid;
-  if not exists(select 1 from public.e10_commercial_events where organization_id=o and inventory_movement_id=original_movement) then
-    raise exception 'receipt wrapper failed to preserve origin evidence';
-  end if;
+  delete from public.e10_commercial_events where organization_id=o and inventory_movement_id=original_movement;
+  if exists(select 1 from public.e10_commercial_events where organization_id=o and inventory_movement_id=original_movement) then
+    raise exception 'historical originless fixture construction failed';end if;
   reversal:=public.e10_org_reverse_receipt(o,receipt,'legacy receipt correction','x5c1-legacy-reverse');
   select id,occurred_at,(payload->>'captured_retroactively')::boolean into original_event,event_time,retroactive
     from public.e10_commercial_events where organization_id=o and inventory_movement_id=original_movement;
   select id,corrects_event_id into correction_event,linked_original_event
     from public.e10_commercial_events where organization_id=o and inventory_movement_id=(reversal->>'movement_id')::uuid;
   if original_event is null or correction_event is null or linked_original_event<>original_event
-     or coalesce(retroactive,false) or event_time<>backdated-'1 day'::interval then
+     or not coalesce(retroactive,false) or event_time<>backdated-'1 day'::interval then
     raise exception 'receipt reversal lineage incomplete original=% linked_original=% correction=% retro=% occurred=%',
       original_event,linked_original_event,correction_event,retroactive,event_time;
   end if;

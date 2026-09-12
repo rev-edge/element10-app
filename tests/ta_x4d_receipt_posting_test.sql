@@ -4,7 +4,7 @@ do $$
 declare
   o uuid:='e1000000-0000-4000-8000-0000000000a6'; u uuid:=gen_random_uuid(); v_role uuid:=gen_random_uuid();
   supplier uuid:=gen_random_uuid(); location uuid:=gen_random_uuid(); product uuid:=gen_random_uuid(); config uuid:=gen_random_uuid(); config2 uuid:=gen_random_uuid();
-  po uuid:=gen_random_uuid(); pol uuid:=gen_random_uuid(); pol2 uuid:=gen_random_uuid(); expected uuid:=gen_random_uuid(); expected2 uuid:=gen_random_uuid(); r1 jsonb; r2 jsonb; rr jsonb;
+  po uuid:=gen_random_uuid(); pol uuid:=gen_random_uuid(); pol2 uuid:=gen_random_uuid(); pol3 uuid:=gen_random_uuid(); pol4 uuid:=gen_random_uuid(); expected uuid:=gen_random_uuid(); expected2 uuid:=gen_random_uuid(); r1 jsonb; r2 jsonb; rr jsonb; zero_r jsonb; zero_line uuid;
   receipt2 uuid; lot2 uuid; session uuid:=gen_random_uuid(); lr uuid; c bigint; q numeric; st text;
 begin
   insert into auth.users(id,instance_id,aud,role,email,created_at,updated_at)
@@ -25,13 +25,16 @@ begin
   insert into public.e10_product_configurations(id,organization_id,product_master_id,name) values(config2,o,product,'Case');
   insert into public.e10_product_configuration_versions(id,organization_id,configuration_id,version_no,state,packaging_kind,base_unit,base_units_per_package)
     values(config2,o,config2,1,'active','case','each',10);
-  insert into public.e10_inventory_items(id,name,qty,organization_id) values('x4d-item','X4d Item',0,o);
+  insert into public.e10_inventory_items(id,name,qty,organization_id) values
+    ('x4d-item','X4d Item',0,o),('x4d-zero-damage','X4d Zero Damage',0,o),('x4d-zero-accept','X4d Zero Accept',0,o);
   insert into public.e10_purchase_orders(id,organization_id,supplier_id,destination_location_id,status,currency,created_by)
     values(po,o,supplier,location,'approved','CAD',u);
   insert into public.e10_purchase_order_lines(id,organization_id,purchase_order_id,configuration_version_id,line_no,ordered_quantity)
     values(pol,o,po,config,1,10);
   insert into public.e10_purchase_order_lines(id,organization_id,purchase_order_id,configuration_version_id,line_no,ordered_quantity)
     values(pol2,o,po,config2,2,10);
+  insert into public.e10_purchase_order_lines(id,organization_id,purchase_order_id,configuration_version_id,line_no,ordered_quantity)
+    values(pol3,o,po,config,3,2),(pol4,o,po,config,4,2);
   insert into public.e10_expected_inventory_allocations(id,organization_id,purchase_order_line_id,destination_location_id,expected_quantity,planning_reference)
     values(expected,o,pol,location,5,'x4d-demand-1'),(expected2,o,pol,location,5,'x4d-demand-2');
   insert into public.e10_break_sessions(id,name,streamer_uid,organization_id,source_show_ref)
@@ -95,6 +98,34 @@ begin
   exception when sqlstate '55000' then null; end;
   begin perform public.e10_org_receive_po_line('e4000000-0000-4000-8000-00000000e4ff',pol,'x4d-item',1,0,0,null,now(),'[]','x4d-cross'); raise exception 'cross-org receipt accepted';
   exception when insufficient_privilege then null; end;
+
+  -- IMPL-13: an actual X4d PO-line receipt with zero accepted quantity still
+  -- gets one origin fact. Damage disposition and batch reversal preserve it.
+  zero_r:=public.e10_org_receive_po_line(o,pol3,'x4d-zero-damage',0,0,2,'zero-damage',now(),'[]','x4d-zero-damage');
+  zero_line:=(zero_r->>'receipt_line_id')::uuid;
+  perform public.e10_org_review_receipt_disposition(o,zero_line,'damage',1,null,0,'damage observed','x4d-zero-damage-disposition');
+  rr:=public.e10_org_reverse_receipt_batch(o,(zero_r->>'receipt_id')::uuid,'reverse damaged quarantine','x4d-zero-damage-reverse');
+  if not (rr->>'ok')::boolean or (rr->>'replay')::boolean then raise exception 'zero-damage reversal failed: %',rr;end if;
+  rr:=public.e10_org_reverse_receipt_batch(o,(zero_r->>'receipt_id')::uuid,'reverse damaged quarantine','x4d-zero-damage-reverse');
+  if not (rr->>'replay')::boolean then raise exception 'zero-damage reversal replay missing';end if;
+  select count(*) into c from public.e10_commercial_events where organization_id=o and event_type='receipt'
+    and payload->>'receipt_line_id'=zero_line::text and coalesce((payload->>'captured_retroactively')::boolean,false)=false;
+  if c<>1 then raise exception 'new zero-accepted receipt origin count/provenance wrong: %',c;end if;
+
+  -- Accepting quarantined quantity then using the legacy single name removes
+  -- exactly effective accepted stock through the batch implementation.
+  zero_r:=public.e10_org_receive_po_line(o,pol4,'x4d-zero-accept',0,0,2,'zero-accept',now(),'[]','x4d-zero-accept');
+  zero_line:=(zero_r->>'receipt_line_id')::uuid;
+  perform public.e10_org_review_receipt_disposition(o,zero_line,'accept',2,null,0,'accept observed','x4d-zero-accept-disposition');
+  rr:=public.e10_org_reverse_receipt(o,(zero_r->>'receipt_id')::uuid,'legacy compatibility reversal','x4d-zero-accept-reverse');
+  if not (rr->>'ok')::boolean or (rr->>'replay')::boolean then raise exception 'zero-accept single reversal failed: %',rr;end if;
+  rr:=public.e10_org_reverse_receipt(o,(zero_r->>'receipt_id')::uuid,'legacy compatibility reversal','x4d-zero-accept-reverse');
+  if not (rr->>'replay')::boolean then raise exception 'zero-accept single reversal replay missing';end if;
+  select qty into q from public.e10_inventory_items where organization_id=o and id='x4d-zero-accept';
+  if q<>0 then raise exception 'zero-accept reversal left phantom stock: %',q;end if;
+  select count(*) into c from public.e10_receipt_po_allocations where organization_id=o
+    and purchase_order_line_id in(pol3,pol4) and allocated_quantity=2;
+  if c<>2 then raise exception 'zero-accepted PO allocation conservation wrong: %',c;end if;
   raise notice 'TA-X4d receipt posting: PASS (partial, accepted/quarantine split, strict over-receipt, reversal, expected-supply reconciliation)';
 end $$;
 rollback;

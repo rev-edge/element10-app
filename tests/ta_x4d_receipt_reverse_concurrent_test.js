@@ -60,7 +60,7 @@ async function main() {
     await setup.query('commit');
     await A.query('begin'); await A.query('select set_config($1,$2,true)',['request.jwt.claims',jwt]);
     await A.query('select id from public.e10_inventory_items where organization_id=$1 and id=$2 for update',[org,x.item]);
-    await B.query('begin'); await B.query('select set_config($1,$2,true)',['request.jwt.claims',jwt]);
+    await B.query('begin'); await B.query('select set_config($1,$2,true)',['request.jwt.claims',jwt]); await B.query('set local role authenticated');
     const bpid=(await B.query('select pg_backend_pid() pid')).rows[0].pid;
     let reverseError; const reverseCall=B.query('select public.e10_org_reverse_receipt($1,$2,$3,$4)',[org,receipt.receipt_id,'race',`x4d-reverse-${x.run}`]).catch((e)=>{reverseError=e;});
     let waiting=false; for(let i=0;i<400;i++){const q=await setup.query("select wait_event_type='Lock' waiting from pg_stat_activity where pid=$1",[bpid]);if(q.rows[0]?.waiting){waiting=true;break;}await sleep(10);}
@@ -77,7 +77,7 @@ async function main() {
     // receipt, lot, allocation, movement and commercial-event effects.
     await A.query('begin');
     await A.query('select id from public.e10_inventory_items where organization_id=$1 and id=$2 for update',[org,x.item]);
-    await B.query('begin'); await B.query('select set_config($1,$2,true)',['request.jwt.claims',jwt]);
+    await B.query('begin'); await B.query('select set_config($1,$2,true)',['request.jwt.claims',jwt]); await B.query('set local role authenticated');
     const receivePid=(await B.query('select pg_backend_pid() pid')).rows[0].pid; let receiveError;
     const secondKey=`x4d-receive-revoked-${x.run}`;
     const receiveCall=B.query("select public.e10_org_receive_po_line($1,$2,$3,1,0,0,null,now(),'[]'::jsonb,$4)",[org,x.pol,x.item,secondKey]).catch((e)=>{receiveError=e;});

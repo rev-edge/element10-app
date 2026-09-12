@@ -4,8 +4,9 @@ Captured: 2026-09-12
 
 Baseline commit: `f93aaa7150cd11b7c20d1bef4b61e556a9a46907`
 
-The files in this directory preserve the exact local inputs supplied to the
-external reviewer and the review report returned from that pass. They are
+The files in this directory preserve the exact local inputs cited by the
+review brief and available in the working tree when remediation began, plus
+the review report returned from that pass. They are
 evidence snapshots, not replacements for the canonical documents.
 
 ## Provenance
