@@ -84,6 +84,7 @@ begin
  j:=public.e10_org_inventory_lifecycle(o,'2026-01-10 00:00Z',item1,100,null);if(j#>>'{items,0,censored}')::boolean is not true then raise exception'superseded disposition source still closed ownership %',j;end if;
  j:=public.e10_org_inventory_lifecycle(o,'2026-01-10 00:00Z',null,1,null);cursor_value:=j->>'next_cursor';if(j->>'total_count')::int<>6 or(j#>>'{exclusions,missing_occurrence_count}')::int<>1 or(j#>>'{exclusions,ambiguous_identity_count}')::int<>1 or(j#>>'{exclusions,ambiguous_episode_correlation_count}')::int<>2 or jsonb_array_length(j->'items')<>1 or cursor_value is null then raise exception'bounded page one invalid %',j;end if;
  j2:=public.e10_org_inventory_lifecycle(o,'2026-01-10 00:00Z',null,1,cursor_value);if(j2->>'total_count')::int<>6 or jsonb_array_length(j2->'items')<>1 then raise exception'bounded page two invalid %',j2;end if;
+ begin perform public.e10_org_inventory_lifecycle(o,'2026-01-10 00:00Z',null,2,cursor_value);raise exception'cursor limit substitution accepted';exception when sqlstate'40001'then null;end;
  begin perform public.e10_org_inventory_lifecycle(o,'2026-01-10',null,1,cursor_value||'x');raise exception'tampered cursor accepted';exception when invalid_parameter_value then null;end;
  reset role;
 end $$;
