@@ -13,6 +13,8 @@ declare
   player_b uuid := 'a7000000-0000-4000-8000-00000000e102';
   release_a uuid := 'a7000000-0000-4000-8000-00000000e103';
   variant_a uuid := 'a7000000-0000-4000-8000-00000000e104';
+  release_b uuid := 'a7000000-0000-4000-8000-00000000e107';
+  variant_b uuid := 'a7000000-0000-4000-8000-00000000e108';
   product_a uuid := 'a7000000-0000-4000-8000-00000000e105';
   config_a uuid := 'a7000000-0000-4000-8000-00000000e106';
 begin
@@ -33,10 +35,15 @@ begin
   insert into public.e10_players(id,name) values
     (player_a,'TA-X1 Subject A'),(player_b,'TA-X1 Subject B');
   insert into public.e10_catalog_releases(id,release_name,release_year,season,sport,language,edition)
-    values (release_a,'TA-X1 Release',2026,'2026','soccer','en','base');
+    values
+      (release_a,'TA-X1 Release',2026,'2026','soccer','en','base'),
+      (release_b,'TA-X1 Release',2026,'2026','soccer','es','international');
   insert into public.e10_catalog_variants(
     id,release_id,card_number,exact_parallel,color_family,rookie_designation,print_run_denominator
   ) values (variant_a,release_a,'10','Gold Refractor','gold',true,50);
+  insert into public.e10_catalog_variants(
+    id,release_id,card_number,exact_parallel,color_family,rookie_designation,print_run_denominator
+  ) values (variant_b,release_b,'10','Gold Refractor','gold',true,50);
   insert into public.e10_catalog_variant_subjects(variant_id,player_id,position) values
     (variant_a,player_a,1),(variant_a,player_b,2);
 
@@ -101,6 +108,12 @@ begin
   select count(*) into c from public.e10_catalog_identity_mappings
     where provider='ta-x1' and entity_kind='variant' and external_id='external-1';
   if c=2 then ok:=ok+1; else bad:=bad||' mapping_history='||c; end if;
+  select count(*) into c from public.e10_catalog_variants v
+    join public.e10_catalog_releases r on r.id=v.release_id
+    where v.card_number='10' and v.exact_parallel='Gold Refractor'
+      and r.release_name='TA-X1 Release'
+      and (r.language,r.edition) in (('en','base'),('es','international'));
+  if c=2 then ok:=ok+1; else bad:=bad||' language_edition_identity='||c; end if;
 
   perform set_config('request.jwt.claims',json_build_object('sub',user_b::text,'role','authenticated')::text,true);
   select count(*) into c from public.e10_product_masters where organization_id=org_a;
@@ -120,10 +133,10 @@ begin
   exception when insufficient_privilege then ok:=ok+1;
   when others then bad:=bad||' authenticated_write_wrong='||sqlstate; end;
 
-  if ok=13 then
-    raise notice 'TA-X1 identity foundation: PASS (13/13)';
+  if ok=14 then
+    raise notice 'TA-X1 identity foundation: PASS (14/14)';
   else
-    raise exception 'TA-X1 identity foundation: FAIL passed=%/13 failures=[%]',ok,bad;
+    raise exception 'TA-X1 identity foundation: FAIL passed=%/14 failures=[%]',ok,bad;
   end if;
 end $$;
 reset role;
