@@ -137,6 +137,9 @@ async function main() {
   pending=[ca,cb];await blocked(ap,lp,"changed-key A");await blocked(bp,lp,"changed-key B");await locker.query("commit");
   const cr=await bounded(Promise.all([ca,cb]));pending=[];
   if(cr.filter(z=>z.ok).length!==1||cr.filter(z=>!z.ok).length!==1||cr.find(z=>!z.ok).error.code!=="22023")throw Error("same-key changed payload was not refused");
+  await locker.query('begin');
+  await locker.query('select pg_advisory_xact_lock(hashtextextended($1,0)),pg_advisory_xact_lock(hashtextextended($2,0))',[
+    x.org+'|x1-configuration-version|version-a-'+run,x.org+'|x1-configuration-version|version-b-'+run]);
   const v1 = settled(
       a.query(
         "select e10_org_create_configuration_version($1,$2,0,'draft','box','each',1,null,'{}',$3)r",
@@ -149,7 +152,8 @@ async function main() {
         [x.org, x.config, "version-b-" + run],
       ),
     );
-  const vr = await bounded(Promise.all([v1, v2]));
+  pending=[v1,v2];await blocked(ap,lp,'configuration version A');await blocked(bp,lp,'configuration version B');await locker.query('commit');
+  const vr = await bounded(Promise.all([v1, v2]));pending=[];
   if (
     vr.filter((z) => z.ok).length !== 1 ||
     vr.filter((z) => !z.ok).length !== 1 ||
@@ -196,6 +200,11 @@ async function main() {
   pending=[ma,mb];await blocked(ap,lp,"mapping revision A");await blocked(bp,lp,"mapping revision B");await locker.query("commit");
   const maps=await bounded(Promise.all([ma,mb]));pending=[];
   if(maps.some(z=>!z.ok)||maps.map(z=>Number(z.v.rows[0].r.mapping_revision)).sort().join(',')!=="1,2")throw Error("competing mapping revisions did not serialize");
+  const storedRace=(await admin.query("select mapping_revision,match_status,is_current,release_id,source_payload,reviewed_by from public.e10_catalog_identity_mappings where provider=$1 and entity_kind='release' and external_id='external' order by mapping_revision",[raceProvider])).rows;
+  if(storedRace.length!==2||storedRace[0].mapping_revision!==1||storedRace[0].is_current||storedRace[1].mapping_revision!==2||!storedRace[1].is_current
+    ||storedRace.some(r=>r.release_id!==x.release||JSON.stringify(r.source_payload)!=='{}')
+    ||storedRace.some(r=>r.match_status==='verified'&&r.reviewed_by!==x.user)||storedRace.some(r=>r.match_status!=='verified'&&r.reviewed_by!==null))
+    throw Error(`serialized mapping history/current-head/provenance invalid ${JSON.stringify(storedRace)}`);
   const mapKey = "map-" + run,
     provider = "r5-" + run;
   await locker.query("begin");
