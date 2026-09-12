@@ -68,7 +68,8 @@ begin
   or exists(select 1 from jsonb_array_elements(j->'items')x where x->>'kind'in('supplier_invoice','supplier_credit'))
   or exists(select 1 from jsonb_array_elements(j->'items')x where x->>'ordered_estimate_total'is not null or x->>'ordered_estimate_known_subtotal'is not null
    or x->>'open_commitment_estimate'is not null or x->>'open_commitment_known_subtotal'is not null
-   or x->>'open_commitment_unknown_line_count'is not null or x->>'open_commitment_unknown_quantity'is not null or x->>'accepted_quantity'is not null)
+   or x->>'open_commitment_unknown_line_count'is not null or x->>'open_commitment_unknown_quantity'is not null or x->>'accepted_quantity'is not null
+   or (x->>'kind'='stock_receipt' and x ? 'line_ids'))
   then raise exception'ordinary member financial leak %',j;end if;
  begin perform public.e10_org_supplier_actual_cost_history(o,supplier,version_id,'CAD','2026-02-01',10,null);raise exception'ordinary actual cost allowed';exception when insufficient_privilege then null;end;
  reset role;

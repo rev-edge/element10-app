@@ -24,7 +24,7 @@ begin
   insert into public.e10_organization_memberships(organization_id,user_id,role_id,status) values
     (o,actor,role_id,'active'),(o,low_actor,low_role,'active'),(foreign_org,actor,foreign_role,'active');
   insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed)
-    values(o,role_id,'act.purchasing_prepare',true),(o,role_id,'act.record_commercial_events',true),
+    values(o,role_id,'act.purchasing_prepare',true),(o,role_id,'act.create_receiving',true),(o,role_id,'financial.actual_cost.read',true),(o,role_id,'act.record_commercial_events',true),
       (foreign_org,foreign_role,'act.purchasing_prepare',true);
   insert into public.e10_suppliers(id,organization_id,name,status) values
     (supplier,o,'X3e supplier','active'),('d3300000-0000-4000-8000-000000000011',foreign_org,'X3e foreign supplier','active');

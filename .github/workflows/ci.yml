@@ -138,6 +138,12 @@ jobs:
           node tests/ta_x5f_atomic_correction_import_concurrent_test.js
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x5g_explicit_correction_source_test.sql
           node tests/ta_x5g_explicit_correction_source_concurrent_test.js
+      - name: TA-R4 visibility and suspended organization proof
+        run: |
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_r4_visibility_suspension_test.sql
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3e_commercial_comments_test.sql
+          node tests/ta_x3e_commercial_comments_concurrent_test.js
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3f_supplier_workspace_test.sql
       - name: TA-X6h source-grained attendance evidence gate
         run: |
           node tests/ta_x6h_attendance_foundation_test.js
