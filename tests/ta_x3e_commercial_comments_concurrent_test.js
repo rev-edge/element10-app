@@ -5,7 +5,7 @@ const run=Date.now().toString();
 const id=n=>`d3310000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const x={org:id(1),actor:id(2),role:id(3),supplier:id(4),location:id(5),po:id(6),invoice:id(7)};
 const timeoutMs=8000;
-const cleanupTables=['e10_commercial_events','e10_commercial_comment_commands','e10_commercial_comments','e10_supplier_invoices','e10_purchase_orders','e10_locations','e10_suppliers','e10_organization_role_permissions','e10_organization_memberships','e10_organization_roles'];
+const cleanupTables=['e10_commercial_events','e10_commercial_comment_commands','e10_commercial_comments','e10_supplier_invoices','e10_purchase_orders','e10_locations','e10_suppliers','e10_organization_role_permissions','e10_organization_memberships','e10_organization_roles','e10_organization_status_transitions'];
 const admin=new Client({connectionString}),a=new Client({connectionString}),b=new Client({connectionString});
 async function claims(c){await c.query('set local role authenticated');await c.query("select set_config('request.jwt.claims',$1,true)",[JSON.stringify({sub:x.actor,role:'authenticated'})]);}
 async function bounded(p){let t;try{return await Promise.race([p,new Promise((_,reject)=>{t=setTimeout(()=>reject(Error('bounded X3e timeout')),timeoutMs)})]);}finally{clearTimeout(t)}}
