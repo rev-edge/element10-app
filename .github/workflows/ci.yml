@@ -131,6 +131,13 @@ jobs:
           node tests/ta_r2_all_customer_writer_authority_races_test.js
           node tests/ta_r2_last_lock_customer_writer_authority_races_test.js
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_r2_trusted_nonmanaged_native_activity_test.sql
+      - name: TA-R3 intake provenance and stable identity proof
+        run: |
+          node tests/ta_r3_intake_provenance_identity_test.js
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x5f_atomic_correction_import_test.sql
+          node tests/ta_x5f_atomic_correction_import_concurrent_test.js
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x5g_explicit_correction_source_test.sql
+          node tests/ta_x5g_explicit_correction_source_concurrent_test.js
       - name: TA-X6h source-grained attendance evidence gate
         run: |
           node tests/ta_x6h_attendance_foundation_test.js
