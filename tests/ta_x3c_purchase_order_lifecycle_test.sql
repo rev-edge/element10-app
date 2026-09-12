@@ -294,7 +294,8 @@ do $$ begin
     raise exception 'inactive configuration allowed submit'; exception when sqlstate '55000' then null; end;
 end $$;
 reset role;
-update public.e10_product_configuration_versions set state='active' where id='a7000000-0000-4000-8000-00000000e305';
+-- Configuration versions are immutable-history rows after R5. Keep the
+-- fixture retired; recovery cancellation must not require reactivation.
 set local role authenticated;
 do $$ declare r jsonb; begin
   perform set_config('request.jwt.claims',jsonb_build_object('sub','a7000000-0000-4000-8000-00000000e312','role','authenticated')::text,true);

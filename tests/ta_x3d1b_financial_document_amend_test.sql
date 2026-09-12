@@ -254,8 +254,10 @@ begin
   exception when insufficient_privilege then null; end;
 end $$;
 reset role;
+set local session_replication_role=replica;
 update public.e10_product_configuration_versions set state='active'
   where id='d31b0000-0000-4000-8000-000000000011';
+set local session_replication_role=origin;
 
 -- Create then amend in one transaction, forcing all deferred links while both
 -- immutable events coexist and the mutable header is at revision 2.
