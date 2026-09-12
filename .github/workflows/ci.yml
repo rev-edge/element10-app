@@ -143,6 +143,10 @@ jobs:
           node tests/ta_x7b_spend_reporting_test.js
           node tests/ta_x7b_spend_reporting_concurrent_test.js
           node tests/ta_x7b_spend_lifecycle_test.js
+      - name: TA-X7f full-dataset customer spend grid gate
+        # Aggregate filters and stable cursors cover the full authorized cohort;
+        # known-history remains bounded, privacy scoped, and explicit about coverage.
+        run: node tests/ta_x7f_customer_spend_grid_test.js
       - name: TA-X7c provider normalization policy control gate
         # Policy decisions are immutable/CAS-bound, born locked, and seed no provider enablement or role grant.
         run: |
