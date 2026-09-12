@@ -19,7 +19,7 @@ begin
   insert into public.e10_players(id,name) values(player,'C1 Player');
   insert into public.e10_sets(id,name) values('c1000000-0000-4000-8000-000000000014','C1 Set');
   insert into public.e10_checklists(id,name,set_id,card_count) values
-    (checklist,'C1 Checklist','c1000000-0000-4000-8000-000000000014',999);
+    (checklist,'C1 Checklist','c1000000-0000-4000-8000-000000000014',0);
   insert into public.e10_cards(id,checklist_id,player_id,num,name,parallel,color) values
     ('c1000000-0000-4000-8000-000000000101',checklist,player,'1','Resolved','Gold Shimmer','Gold'),
     ('c1000000-0000-4000-8000-000000000102',checklist,player,'2','Unknown','Mystery Foil',null),

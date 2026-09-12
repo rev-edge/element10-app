@@ -35,7 +35,7 @@ begin
   insert into public.e10_platform_admins(user_id) values (v_padmin) on conflict do nothing;
   insert into public.e10_viewers(user_id,whatnot_handle) values (v_mem0,'@mem0'),(v_admin0,'@adm0') on conflict (user_id) do nothing;
   -- a catalog card (via a checklist) so SELECT visibility is observable
-  insert into public.e10_checklists(id,name,card_count,attrs) values ('a6c40000-0000-4000-8000-0000000000c1','CL',1,'{}'::jsonb) on conflict (id) do nothing;
+  insert into public.e10_checklists(id,name,card_count,attrs) values ('a6c40000-0000-4000-8000-0000000000c1','CL',0,'{}'::jsonb) on conflict (id) do nothing;
   insert into public.e10_cards(id,checklist_id,chase,attrs) values ('a6c40000-0000-4000-8000-000000000ca1','a6c40000-0000-4000-8000-0000000000c1',false,'{}'::jsonb) on conflict (id) do nothing;
   -- a legacy role-permissions row so rp_sel has something to read
   insert into public.e10_role_permissions(role,capability,allowed) values (v_adminrole0,'act.inventory_edit',true) on conflict do nothing;

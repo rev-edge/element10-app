@@ -67,7 +67,7 @@ begin
   insert into public.e10_obs_config(key,organization_id,txt_value) values ('__a7_obsA',v_orgA,'x') on conflict do nothing;
 
   -- F6 catalog (global)
-  insert into public.e10_checklists(id,name,card_count,attrs) values ('a7000000-0000-4000-8000-0000000000c1','CL',1,'{}'::jsonb) on conflict (id) do nothing;
+  insert into public.e10_checklists(id,name,card_count,attrs) values ('a7000000-0000-4000-8000-0000000000c1','CL',0,'{}'::jsonb) on conflict (id) do nothing;
   insert into public.e10_cards(id,checklist_id,chase,attrs) values ('a7000000-0000-4000-8000-000000000ca1','a7000000-0000-4000-8000-0000000000c1',false,'{}'::jsonb) on conflict (id) do nothing;
   -- F7 identity: a legacy role_permissions row
   insert into public.e10_role_permissions(role,capability,allowed) values (v_admrole_A,'act.inventory_edit',true) on conflict do nothing;

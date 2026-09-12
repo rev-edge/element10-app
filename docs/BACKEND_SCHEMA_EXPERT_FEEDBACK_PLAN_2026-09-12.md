@@ -842,6 +842,22 @@ platform-admin-only naming, append-only name revisions, optimistic concurrency,
 known/unknown platform stamping, live customer lookup, buyer platform stamping,
 presentation enqueue, release enqueue and zero observed-table side effects.
 
+### C5: checklist count consistency
+
+Status: implemented and locally verified 2026-09-12. Awaiting review before C6.
+
+Migration `20260912172924_e10_schema_review_c5_checklist_count_consistency.sql`
+reconciles the legacy cache once, validates it as nonnegative and installs
+statement-level transition-table triggers for card insertion, deletion and
+checklist reassignment. The triggers apply deltas while locking the checklist
+row, so concurrent card batches cannot overwrite each other's count.
+
+Direct attempts to assign a count that differs from the current card rows fail;
+the platform promotion command remains compatible because it writes the exact
+derived count. Tests prove batch insert, unrelated card update, reassignment,
+deletion, direct-drift denial, two-connection concurrency and the existing
+catalog authorization gates.
+
 ## Appendix: exact base-table JSON inventory
 
 ```text
