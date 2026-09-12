@@ -163,7 +163,7 @@ create function public.e10_org_reverse_receipt_batch(
 language plpgsql security definer set search_path=public as $$
 #variable_conflict use_variable
 declare
-  actor uuid:=auth.uid();fp text;existing record;receipt_status text;line_count integer;
+  actor uuid:=auth.uid();fp text;existing record;receipt_status text;line_count integer;topology_count integer;processed_count integer:=0;
   line record;q record;allocation record;effective_accepted numeric;active_reserved numeric;
   reversal_id uuid;movement_id uuid;event_id uuid;original_event uuid;
   lines jsonb:='[]'::jsonb;result jsonb;
@@ -215,6 +215,15 @@ begin
   select count(*) into line_count from public.e10_stock_receipt_lines rl
     where rl.organization_id=p_org and rl.stock_receipt_id=p_receipt_id;
   if line_count not between 1 and 100 then raise exception using errcode='55000',message='receipt_line_count_out_of_bounds';end if;
+  select count(*) into topology_count
+  from public.e10_stock_receipt_lines rl
+  join public.e10_inventory_lots l on(l.organization_id,l.id)=(rl.organization_id,rl.inventory_lot_id)
+    and l.stock_receipt_line_id=rl.id and l.inventory_item_id is not null
+  join public.e10_inventory_items i on(i.organization_id,i.id)=(l.organization_id,l.inventory_item_id)
+  where rl.organization_id=p_org and rl.stock_receipt_id=p_receipt_id;
+  if topology_count<>line_count then
+    raise exception using errcode='55000',message='receipt_line_topology_invalid';
+  end if;
 
   perform 1 from public.e10_stock_receipt_lines rl where rl.organization_id=p_org and rl.stock_receipt_id=p_receipt_id order by rl.id for update;
   perform 1 from public.e10_receipt_po_allocations a where a.organization_id=p_org and a.receipt_line_id in(
@@ -266,6 +275,13 @@ begin
         and (lr.status='active' or lr.consumed_quantity>0)) then
     raise exception using errcode='55000',message='receipt_lot_has_committed_quantity';
   end if;
+  if exists(
+    select 1 from public.e10_stock_receipt_lines rl
+    join public.e10_inventory_lots l on(l.organization_id,l.id)=(rl.organization_id,rl.inventory_lot_id)
+    cross join lateral e10.receipt_line_effective_quantities(rl.organization_id,rl.id) eq
+    where rl.organization_id=p_org and rl.stock_receipt_id=p_receipt_id
+      and l.accepted_quantity<eq.effective_accepted
+  ) then raise exception using errcode='55000',message='accepted_quantity_no_longer_reversible';end if;
 
   -- A shared legacy item can receive more than one line, so validate the item
   -- reservation floor against the aggregate removal before applying any line.
@@ -293,9 +309,6 @@ begin
   loop
     select * into q from e10.receipt_line_effective_quantities(p_org,line.line_id);
     effective_accepted:=q.effective_accepted;
-    if line.accepted_quantity<effective_accepted then
-      raise exception using errcode='55000',message='accepted_quantity_no_longer_reversible';
-    end if;
     reversal_id:=gen_random_uuid();movement_id:=null;
     if effective_accepted>0 then
       update public.e10_inventory_items set qty=qty-effective_accepted,updated_by=actor,updated_at=now()
@@ -347,7 +360,11 @@ begin
     lines:=lines||jsonb_build_array(jsonb_build_object('line_no',line.line_no,'receipt_line_id',line.line_id,
       'lot_id',line.inventory_lot_id,'reversal_id',reversal_id,'movement_id',movement_id,
       'effective_accepted_removed',effective_accepted));
+    processed_count:=processed_count+1;
   end loop;
+  if processed_count<>line_count then
+    raise exception using errcode='55000',message='receipt_line_topology_invalid';
+  end if;
   update public.e10_stock_receipts set status='reversed',updated_at=now()
     where organization_id=p_org and id=p_receipt_id;
   result:=jsonb_build_object('ok',true,'replay',false,'receipt_id',p_receipt_id,'status','reversed','lines',lines);
