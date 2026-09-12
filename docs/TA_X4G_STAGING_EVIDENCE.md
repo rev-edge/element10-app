@@ -1,6 +1,7 @@
 # TA-X4g staging evidence
 
-Status: pending independent staging acceptance
+Status: independently accepted at implementation `670115076f2919197500ce357ed73c3ffbd3eeef`
+and evidence commit `fa06944`.
 
 ## Immutable inputs
 
