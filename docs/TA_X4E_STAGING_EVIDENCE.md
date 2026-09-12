@@ -113,10 +113,11 @@ WARN=144
 INFO=105
 ```
 
-The warnings are the existing authenticated security-definer and leaked-password
-classes. X4e introduced no new warning or error. Its service-only command table
-is intentionally represented by an RLS-enabled-without-policy informational
-finding.
+The warnings are the accepted authenticated security-definer and
+leaked-password classes. The authenticated security-definer count increased
+from 143 to 144 for the new reviewed public RPC. X4e introduced no error or
+unexpected executable exposure. Its service-only command table is intentionally
+represented by an RLS-enabled-without-policy informational finding.
 
 Staging performance advisors reported:
 
@@ -153,5 +154,7 @@ The transaction was rolled back. No production write occurred.
 - Existing native inventory-event and customer-activity semantics remain intact.
 - The held-closed owner decisions remain untouched.
 
-X4e is complete through staging and is frozen pending independent staging
-acceptance. X4f must not begin before that acceptance.
+The independent reviewer accepted the X4e staging gate against evidence commit
+`499429a3e5d70a2a2d8a96d9f54f78a892ca30ef` and implementation commit
+`6c462d7b0c292cba986f6afbc2890597978d68cb`. X4e is complete through staging
+and frozen. X4f may proceed under the approved remainder plan.
