@@ -16,8 +16,16 @@ declare k text;v jsonb;entry jsonb;allowed text[];begin
  for k,v in select key,value from jsonb_each(p_provenance)loop
   if k='lines'and jsonb_typeof(v)='array'then
    if jsonb_array_length(v)>coalesce(jsonb_array_length(p_values->'lines'),0)then raise exception using errcode='22023',message='action_provenance_lines_invalid';end if;
-   for entry in select value from jsonb_array_elements(v)loop if jsonb_typeof(entry)<>'object'or exists(select 1 from jsonb_object_keys(entry)as supplied(key)where not(supplied.key=any(array['source','source_reference','confidence','text'])))then raise exception using errcode='22023',message='action_provenance_entry_invalid';end if;end loop;
-  elsif jsonb_typeof(v)<>'object'or exists(select 1 from jsonb_object_keys(v)as supplied(key)where not(supplied.key=any(array['source','source_reference','confidence','text'])))then raise exception using errcode='22023',message='action_provenance_entry_invalid';end if;
+   for entry in select value from jsonb_array_elements(v)loop
+    if jsonb_typeof(entry)<>'object'or exists(select 1 from jsonb_object_keys(entry)as supplied(key)where not(supplied.key=any(array['source','source_reference','confidence','text'])))
+     or exists(select 1 from jsonb_each(entry)where key in('source','source_reference','text')and jsonb_typeof(value)not in('string','null'))
+     or entry?'confidence'and(jsonb_typeof(entry->'confidence')not in('number','null')or coalesce((entry->>'confidence')::numeric not between 0 and 1,false))
+    then raise exception using errcode='22023',message='action_provenance_entry_invalid';end if;
+   end loop;
+  elsif jsonb_typeof(v)<>'object'or exists(select 1 from jsonb_object_keys(v)as supplied(key)where not(supplied.key=any(array['source','source_reference','confidence','text'])))
+   or exists(select 1 from jsonb_each(v)where key in('source','source_reference','text')and jsonb_typeof(value)not in('string','null'))
+   or v?'confidence'and(jsonb_typeof(v->'confidence')not in('number','null')or coalesce((v->>'confidence')::numeric not between 0 and 1,false))
+  then raise exception using errcode='22023',message='action_provenance_entry_invalid';end if;
  end loop;
  for entry in select value from jsonb_array_elements(p_sources)loop
   if jsonb_typeof(entry)<>'object'or exists(select 1 from jsonb_object_keys(entry)as supplied(key)where not(supplied.key=any(array['kind','source_connection_id','source_reference','source_event_id','source_component_id','text','payload'])))or jsonb_typeof(entry->'kind')is distinct from'string'or coalesce(btrim(entry->>'kind'),'')=''then raise exception using errcode='22023',message='action_source_reference_invalid';end if;
@@ -47,8 +55,8 @@ begin
   select jsonb_build_object('relation','e10_suppliers','id',s.id,'status',s.status,'updated_at',s.updated_at)into state from public.e10_suppliers s where s.organization_id=p_org and s.id=u;
   if state is null or state->>'status'<>'active'then missing:=array_append(missing,'supplier_id');else refs:=refs||jsonb_build_array(state);end if;
   begin u:=nullif(p_values->>'destination_location_id','')::uuid;exception when invalid_text_representation then raise exception using errcode='22023',message='action_proposal_destination_invalid';end;
-  select jsonb_build_object('relation','e10_locations','id',l.id,'status',l.status,'updated_at',l.updated_at,'receivable',e10.can_receive_at(p_org,l.id))into state from public.e10_locations l where l.organization_id=p_org and l.id=u;
-  if state is null or state->>'status'<>'active'or not coalesce((state->>'receivable')::boolean,false)then missing:=array_append(missing,'destination_location_id');else refs:=refs||jsonb_build_array(state);end if;
+  select jsonb_build_object('relation','e10_locations','id',l.id,'status',l.status,'updated_at',l.updated_at)into state from public.e10_locations l where l.organization_id=p_org and l.id=u;
+  if state is null or state->>'status'<>'active'then missing:=array_append(missing,'destination_location_id');else refs:=refs||jsonb_build_array(state);end if;
   if jsonb_typeof(p_values->'lines')is distinct from'array'or jsonb_array_length(p_values->'lines')not between 1 and 200 then missing:=array_append(missing,'lines');
   else for line in select value from jsonb_array_elements(p_values->'lines')loop n:=n+1;
    if jsonb_typeof(line)<>'object'or exists(select 1 from jsonb_object_keys(line)as supplied(key)where not(supplied.key=any(array['id','line_no','configuration_version_id','ordered_quantity','estimated_unit_cost'])))then raise exception using errcode='22023',message='action_proposal_line_unknown_key';end if;
@@ -70,12 +78,14 @@ begin
   if jsonb_typeof(p_values->'lines')is distinct from'array'or jsonb_array_length(p_values->'lines')not between 1 and 100 then missing:=array_append(missing,'lines');
   else for line in select value from jsonb_array_elements(p_values->'lines')loop n:=n+1;
    if jsonb_typeof(line)<>'object'or exists(select 1 from jsonb_object_keys(line)as supplied(key)where not(supplied.key=any(array['purchase_kind','sales_channel','location_id','source_session_reference','capture_source','source_connection_id','source_line_id','activity_observation_id','product_master_id','configuration_version_id','unique_item_id','break_session_id','break_slot_id','quantity','merchandise_gross','merchandise_discount','shipping_amount','tax_amount','raw_evidence'])))then raise exception using errcode='22023',message='action_proposal_line_unknown_key';end if;
+   if exists(select 1 from jsonb_each(line)where key in('purchase_kind','sales_channel','source_session_reference','capture_source','source_connection_id','source_line_id')and jsonb_typeof(value)not in('string','null'))or line?'raw_evidence'and jsonb_typeof(line->'raw_evidence')not in('object','null')then raise exception using errcode='22023',message='action_proposal_line_type_invalid';end if;
    if coalesce(line->>'purchase_kind','')not in('retail','break','unclassified')then missing:=array_append(missing,format('lines[%s].purchase_kind',n));end if;
    if coalesce(line->>'capture_source','')not in('manual','import','native')then missing:=array_append(missing,format('lines[%s].capture_source',n));end if;
    if coalesce(btrim(line->>'source_line_id'),'')=''then missing:=array_append(missing,format('lines[%s].source_line_id',n));end if;
    if jsonb_typeof(line->'quantity')is distinct from'number'or(line->>'quantity')::numeric<=0 or(line->>'quantity')in('NaN','Infinity','-Infinity')then missing:=array_append(missing,format('lines[%s].quantity',n));end if;
    if jsonb_typeof(line->'merchandise_gross')is distinct from'number'or(line->>'merchandise_gross')::numeric<0 or(line->>'merchandise_gross')in('NaN','Infinity','-Infinity')then missing:=array_append(missing,format('lines[%s].merchandise_gross',n));end if;
    for k in select unnest(array['merchandise_discount','shipping_amount','tax_amount'])loop if line?k and jsonb_typeof(line->k)not in('number','null')then raise exception using errcode='22023',message='action_proposal_money_type_invalid';end if;if line->>k is not null and((line->>k)::numeric<0 or(line->>k)in('NaN','Infinity','-Infinity'))then raise exception using errcode='22023',message='action_proposal_money_invalid';end if;end loop;
+   if line->>'merchandise_discount'is not null and(line->>'merchandise_discount')::numeric>(line->>'merchandise_gross')::numeric then raise exception using errcode='22023',message='action_proposal_discount_invalid';end if;
    for v in select key from jsonb_each(line)where key in('activity_observation_id','location_id','product_master_id','configuration_version_id','unique_item_id','break_session_id','break_slot_id')and jsonb_typeof(value)not in('string','null')loop raise exception using errcode='22023',message='action_proposal_reference_type_invalid';end loop;
    if nullif(line->>'activity_observation_id','')is not null then u:=(line->>'activity_observation_id')::uuid;select jsonb_build_object('relation','e10_customer_activity_observations','id',a.id,'request_fingerprint',a.request_fingerprint,'effective_customer',e10.customer_activity_effective_customer(p_org,a.id))into state from public.e10_customer_activity_observations a where a.organization_id=p_org and a.id=u;if state is null or(state->>'effective_customer')is distinct from coalesce(p_values->>'customer_id','')then missing:=array_append(missing,format('lines[%s].activity_observation_id',n));else refs:=refs||jsonb_build_array(state);end if;end if;
    if nullif(line->>'location_id','')is not null then u:=(line->>'location_id')::uuid;select jsonb_build_object('relation','e10_locations','id',l.id,'status',l.status,'updated_at',l.updated_at)into state from public.e10_locations l where l.organization_id=p_org and l.id=u;if state is null then missing:=array_append(missing,format('lines[%s].location_id',n));else refs:=refs||jsonb_build_array(state);end if;end if;

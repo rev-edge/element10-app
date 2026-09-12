@@ -194,6 +194,7 @@ jobs:
         run: |
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x8b_action_draft_test.sql
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x8b_commit_delegation_test.sql
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x8b_permission_matrix_test.sql
           node tests/ta_x8b_concurrent_test.js
       - name: A7 hostile two-org matrix (every identity class x both orgs x every census family, real JWTs, specific refusals)
         # docs/A7_HOSTILE_MATRIX.md proven: F1-F8 cross-org denials + legitimate positives under real authenticated JWTs;

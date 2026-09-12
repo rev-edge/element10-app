@@ -20,7 +20,8 @@ begin
  po_values:=jsonb_build_object('supplier_id',supplier,'destination_location_id',loc,'order_number','X8B-PO','currency','CAD','expected_at',null,'lines',jsonb_build_array(jsonb_build_object('line_no',1,'configuration_version_id',version,'ordered_quantity',2,'estimated_unit_cost',12.50)));
  j:=public.e10_org_create_action_draft(o,'purchase_order.create',po_values,'{"supplier_id":{"source":"operator"}}','[]','po-propose');d:=(j->>'draft_id')::uuid;
  if jsonb_array_length(j->'missing_fields')<>0 then raise exception'valid PO reported missing %',j;end if;
- perform public.e10_org_approve_action_draft(o,d,1,'po-approve');
+ perform public.e10_org_approve_action_draft(o,d,1,'po-approve');j2:=public.e10_org_approve_action_draft(o,d,1,'po-approve');if not(j2->>'replay')::boolean then raise exception'approve replay failed %',j2;end if;
+ begin perform public.e10_org_approve_action_draft(o,d,2,'po-approve');raise exception'changed approve replay accepted';exception when invalid_parameter_value then null;end;
  j:=public.e10_org_amend_action_draft(o,d,1,po_values,'{"supplier_id":{"source":"operator"}}','[]','po-amend-after-approval');if j->>'status'<>'draft'or(j->>'revision')::int<>2 then raise exception'amend did not invalidate approval %',j;end if;
  begin perform public.e10_org_commit_action_draft(o,d,1,'po-old-commit');raise exception'old approval committed';exception when serialization_failure then null;end;
  perform public.e10_org_approve_action_draft(o,d,2,'po-approve-2');
@@ -32,6 +33,7 @@ begin
  if j->>'status'<>'committed'or po is null or not exists(select 1 from public.e10_purchase_orders where organization_id=o and id=po and status='draft'and revision=1)then raise exception'PO delegation failed %',j;end if;
  set local role authenticated;
  j2:=public.e10_org_commit_action_draft(o,d,2,'po-commit');if not(j2->>'replay')::boolean or j2#>>'{ordinary_result,purchase_order_id}'<>po::text then raise exception'PO commit replay failed %',j2;end if;
+ begin perform public.e10_org_commit_action_draft(o,d,1,'po-commit');raise exception'changed PO commit replay accepted';exception when invalid_parameter_value then null;end;
  reset role;
  if exists(select 1 from public.e10_stock_receipts where organization_id=o)then raise exception'PO proposal received stock';end if;
 
@@ -39,12 +41,13 @@ begin
  customer_values:=jsonb_build_object('customer_id',customer,'currency','CAD','occurred_at',null,'precision','unknown','note','proposed only','lines',jsonb_build_array(jsonb_build_object('purchase_kind','unclassified','capture_source','manual','source_line_id','x8b-line-1','product_master_id',product,'configuration_version_id',version,'quantity',1,'merchandise_gross',20)));
  j:=public.e10_org_create_action_draft(o,'customer_transaction.create_draft',customer_values,'{"note":{"source":"operator"}}','[]','customer-propose');d:=(j->>'draft_id')::uuid;
  if jsonb_array_length(j->'missing_fields')<>0 then raise exception'valid customer proposal reported missing %',j;end if;
- perform public.e10_org_approve_action_draft(o,d,1,'customer-approve');
+ perform public.e10_org_approve_action_draft(o,d,1,'customer-approve');j2:=public.e10_org_approve_action_draft(o,d,1,'customer-approve');if not(j2->>'replay')::boolean then raise exception'customer approve replay failed %',j2;end if;
  j:=public.e10_org_commit_action_draft(o,d,1,'customer-commit');cd:=(j#>>'{ordinary_result,draft_id}')::uuid;
  reset role;
  if j->>'status'<>'committed'or cd is null or not exists(select 1 from public.e10_customer_transaction_drafts where organization_id=o and id=cd and status='draft'and current_revision=1)then raise exception'customer draft delegation failed %',j;end if;
  set local role authenticated;
  j2:=public.e10_org_commit_action_draft(o,d,1,'customer-commit');if not(j2->>'replay')::boolean or j2#>>'{ordinary_result,draft_id}'<>cd::text then raise exception'customer commit replay failed %',j2;end if;
+ begin perform public.e10_org_commit_action_draft(o,d,2,'customer-commit');raise exception'changed customer commit replay accepted';exception when invalid_parameter_value then null;end;
  reset role;
  if exists(select 1 from public.e10_customer_transactions where organization_id=o)or exists(select 1 from public.e10_commercial_events where organization_id=o and event_type='customer_transaction_posted')then raise exception'customer proposal posted spend';end if;
  if(select count(*)from public.e10_action_draft_commands where organization_id=o and command_type='commit')<>2 then raise exception'commit command count invalid';end if;
