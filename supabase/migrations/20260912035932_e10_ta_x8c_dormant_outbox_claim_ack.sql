@@ -77,6 +77,7 @@ alter table public.e10_outbox_consumers enable row level security;
 alter table public.e10_outbox_claim_commands enable row level security;
 alter table public.e10_outbox_acknowledgements enable row level security;
 revoke all on table public.e10_outbox_consumers,public.e10_outbox_claim_commands,public.e10_outbox_acknowledgements from public,anon,authenticated;
+revoke all on table public.e10_outbox_consumers,public.e10_outbox_claim_commands,public.e10_outbox_acknowledgements from service_role;
 grant select,insert,update on table public.e10_outbox_consumers to service_role;
 grant select on table public.e10_outbox_claim_commands,public.e10_outbox_acknowledgements to service_role;
 create trigger e10_outbox_claim_commands_append_only_trg before update or delete on public.e10_outbox_claim_commands
@@ -146,7 +147,7 @@ declare v_fp text; v_error_digest text; v_existing public.e10_outbox_acknowledge
   v_outbox public.e10_integration_outbox%rowtype; v_now timestamptz; v_retry_at timestamptz; v_result jsonb;
 begin
   if p_org is null or p_consumer_id is null or p_outbox_id is null or p_claim_token is null or p_claim_generation is null then raise exception using errcode='22004',message='outbox_ack_scope_required'; end if;
-  if p_outcome not in ('delivered','retry','dead') then raise exception using errcode='22023',message='outbox_ack_outcome_invalid'; end if;
+  if p_outcome is null or p_outcome not in ('delivered','retry','dead') then raise exception using errcode='22023',message='outbox_ack_outcome_invalid'; end if;
   if p_error is not null and octet_length(p_error)>2000 then raise exception using errcode='22023',message='outbox_ack_error_too_long'; end if;
   if (p_outcome='delivered' and (p_retry_after_seconds is not null or p_error is not null))
      or (p_outcome='retry' and (p_retry_after_seconds is null or p_retry_after_seconds not between 5 and 86400 or p_error is null or btrim(p_error)=''))

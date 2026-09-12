@@ -18,6 +18,20 @@ async function main(){const s=new Client({connectionString:db}),a=new Client({co
   const wi=Number(single[0].count)===1?0:1,winnerConsumer=x.consumers[wi],claim=single[wi].claims[0];
   console.log('[proof] two consumers racing one eligible row produced one active owner');
 
+  const winnerClaimKey=`single-${wi===0?'a':'b'}-${x.org}`;
+  await lock.query('begin');await lock.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[`${x.org}|x8c-claim|${winnerConsumer}|${winnerClaimKey}`]);
+  const claimReplayPid=(await a.query('select pg_backend_pid()pid')).rows[0].pid;
+  const disabledClaimReplay=settled(a.query('select e10_claim_outbox($1,$2,1,60,$3)j',[x.org,winnerConsumer,winnerClaimKey]));pending.push(disabledClaimReplay);
+  await blocked(observer,claimReplayPid,'disabled claim-command replay');await s.query('update e10_outbox_consumers set enabled=false where organization_id=$1 and id=$2',[x.org,winnerConsumer]);await lock.query('commit');
+  const claimReplayDenied=await disabledClaimReplay;if(claimReplayDenied.ok||claimReplayDenied.error.code!=='42501'||claimReplayDenied.error.message!=='outbox_consumer_denied')throw Error('claim replay did not recheck disabled consumer after command wait');
+  await s.query('update e10_outbox_consumers set enabled=true where organization_id=$1 and id=$2',[x.org,winnerConsumer]);
+  await lock.query('begin');await lock.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[`${x.org}|x8c-claim|${winnerConsumer}|${winnerClaimKey}`]);
+  const removedClaimReplay=settled(a.query('select e10_claim_outbox($1,$2,1,60,$3)j',[x.org,winnerConsumer,winnerClaimKey]));pending.push(removedClaimReplay);await blocked(observer,claimReplayPid,'destination-removed claim-command replay');
+  await s.query("update e10_outbox_consumers set allowed_destination_keys='{}' where organization_id=$1 and id=$2",[x.org,winnerConsumer]);await lock.query('commit');const removedClaimDenied=await removedClaimReplay;
+  if(removedClaimDenied.ok||removedClaimDenied.error.code!=='42501'||removedClaimDenied.error.message!=='outbox_destination_denied')throw Error('claim replay did not recheck destination after command wait');
+  await s.query("update e10_outbox_consumers set allowed_destination_keys=array['destination-a'] where organization_id=$1 and id=$2",[x.org,winnerConsumer]);
+  console.log('[proof] claim-command replay rechecked consumer and destination revocation after exact waits');
+
   const ackKey='exact-ack-'+x.org;
   const [ackA,ackB]=await Promise.all([
     a.query("select e10_ack_outbox($1,$2,$3,$4,$5,'delivered',null,null,$6)j",[x.org,winnerConsumer,x.rows[0],claim.claim_token,claim.claim_generation,ackKey]),
@@ -25,6 +39,14 @@ async function main(){const s=new Client({connectionString:db}),a=new Client({co
   const acks=[ackA.rows[0].j,ackB.rows[0].j];if(acks.filter(j=>j.replay===false).length!==1||acks.filter(j=>j.replay===true).length!==1)throw Error('exact ack race was not one transition plus replay '+JSON.stringify(acks));
   const receipt=await s.query('select count(*)::int n from e10_outbox_acknowledgements where organization_id=$1 and outbox_id=$2',[x.org,x.rows[0]]);if(receipt.rows[0].n!==1)throw Error('exact ack race duplicated receipt');
   console.log('[proof] concurrent exact acknowledgements produced one immutable receipt and one replay');
+
+  await lock.query('begin');await lock.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[`${x.org}|x8c-ack|${winnerConsumer}|${ackKey}`]);
+  const ackReplayPid=(await a.query('select pg_backend_pid()pid')).rows[0].pid;
+  const disabledAckReplay=settled(a.query("select e10_ack_outbox($1,$2,$3,$4,$5,'delivered',null,null,$6)j",[x.org,winnerConsumer,x.rows[0],claim.claim_token,claim.claim_generation,ackKey]));pending.push(disabledAckReplay);
+  await blocked(observer,ackReplayPid,'disabled acknowledgement replay');await s.query('update e10_outbox_consumers set enabled=false where organization_id=$1 and id=$2',[x.org,winnerConsumer]);await lock.query('commit');
+  const ackReplayDenied=await disabledAckReplay;if(ackReplayDenied.ok||ackReplayDenied.error.code!=='42501'||ackReplayDenied.error.message!=='outbox_consumer_denied')throw Error('ack replay did not recheck disabled consumer after command wait');
+  await s.query('update e10_outbox_consumers set enabled=true where organization_id=$1 and id=$2',[x.org,winnerConsumer]);
+  console.log('[proof] exact acknowledgement replay rechecked revocation after its command wait');
 
   await s.query('update e10_integration_outbox set next_attempt_at=null where organization_id=$1 and id=any($2::uuid[])',[x.org,x.rows.slice(1,3)]);
   const [batchA,batchB]=await Promise.all([
@@ -53,6 +75,20 @@ async function main(){const s=new Client({connectionString:db}),a=new Client({co
   await lock.query('commit');const removedDenied=await removedAck;if(removedDenied.ok||removedDenied.error.code!=='42501'||removedDenied.error.message!=='outbox_destination_denied')throw Error('post-row-lock destination removal did not fail closed');
   const removedState=await s.query('select status,delivered_at from e10_integration_outbox where organization_id=$1 and id=$2',[x.org,removed.outbox_id]);if(removedState.rows[0].status!=='pending'||removedState.rows[0].delivered_at!==null)throw Error('destination-removed ack changed row');
   console.log('[proof] row-lock waiter rechecked removed destination entitlement with no acknowledgement');
+
+  await s.query("update e10_outbox_consumers set enabled=true,allowed_destination_keys=array['destination-a'] where organization_id=$1 and id=any($2::uuid[])",[x.org,x.consumers]);
+  await s.query('update e10_integration_outbox set next_attempt_at=null where organization_id=$1 and id=$2',[x.org,x.rows[3]]);
+  const expiring=(await a.query('select e10_claim_outbox($1,$2,1,5,$3)j',[x.org,x.consumers[0],'expiring-'+x.org])).rows[0].j.claims[0];
+  await lock.query('begin');await lock.query('select 1 from e10_integration_outbox where organization_id=$1 and id=$2 for update',[x.org,x.rows[3]]);
+  const expiryPid=(await a.query('select pg_backend_pid()pid')).rows[0].pid;
+  const expiringAck=settled(a.query("select e10_ack_outbox($1,$2,$3,$4,$5,'delivered',null,null,$6)j",[x.org,x.consumers[0],x.rows[3],expiring.claim_token,expiring.claim_generation,'expired-wait-'+x.org]));pending.push(expiringAck);
+  await blocked(observer,expiryPid,'lease-expiring acknowledgement');await new Promise(resolve=>setTimeout(resolve,5200));await lock.query('commit');const expired=await expiringAck;
+  if(expired.ok||expired.error.code!=='40001'||expired.error.message!=='outbox_claim_expired')throw Error('waiting acknowledgement used stale pre-wait time');
+  const replacement=(await b.query('select e10_claim_outbox($1,$2,1,60,$3)j',[x.org,x.consumers[1],'replacement-'+x.org])).rows[0].j.claims[0];
+  if(replacement.outbox_id!==x.rows[3]||Number(replacement.claim_generation)!==Number(expiring.claim_generation)+1||replacement.claim_token===expiring.claim_token)throw Error('expired lease did not produce a fresh replacement generation');
+  const staleAfterReplacement=await settled(a.query("select e10_ack_outbox($1,$2,$3,$4,$5,'delivered',null,null,$6)j",[x.org,x.consumers[0],x.rows[3],expiring.claim_token,expiring.claim_generation,'stale-after-replace-'+x.org]));
+  if(staleAfterReplacement.ok||staleAfterReplacement.error.code!=='42501'||staleAfterReplacement.error.message!=='outbox_claim_not_owned')throw Error('stale generation acknowledged after replacement');
+  console.log('[proof] fresh post-wait clock expired the ack, then reclaim wrote a new generation and rejected the stale token');
  }finally{
   await Promise.allSettled(pending);await lock.query('rollback').catch(()=>{});await s.query('set session_replication_role=replica').catch(()=>{});
   for(const table of['e10_outbox_acknowledgements','e10_outbox_claim_commands','e10_integration_outbox','e10_outbox_consumers','e10_commercial_events'])await s.query(`delete from ${table} where organization_id=$1`,[x.org]).catch(()=>{});

@@ -20,31 +20,45 @@ begin
     (q1,oa,ev1,'destination-a','{"event":"1"}',null), (q2,oa,ev2,'destination-a','{"event":"2"}',now()+interval '1 hour'),
     (qb,ob,evb,'destination-a','{"event":"b"}',null);
 
-  begin perform public.e10_claim_outbox(oa,ca,1,301,'bad-lease'); raise exception 'lease 301 accepted';
+  begin perform public.e10_claim_outbox(oa,ca,0,60,'bad-limit-low'); raise exception 'limit 0 accepted';
+  exception when sqlstate '22023' then if sqlerrm<>'outbox_claim_limit_out_of_range' then raise; end if; end;
+  begin perform public.e10_claim_outbox(oa,ca,101,60,'bad-limit-high'); raise exception 'limit 101 accepted';
+  exception when sqlstate '22023' then if sqlerrm<>'outbox_claim_limit_out_of_range' then raise; end if; end;
+  begin perform public.e10_claim_outbox(oa,ca,1,4,'bad-lease-low'); raise exception 'lease 4 accepted';
+  exception when sqlstate '22023' then if sqlerrm<>'outbox_claim_lease_out_of_range' then raise; end if; end;
+  begin perform public.e10_claim_outbox(oa,ca,1,301,'bad-lease-high'); raise exception 'lease 301 accepted';
   exception when sqlstate '22023' then if sqlerrm<>'outbox_claim_lease_out_of_range' then raise; end if; end;
   begin perform public.e10_claim_outbox(oa,cb,1,60,'foreign'); raise exception 'foreign consumer accepted';
   exception when sqlstate '42501' then if sqlerrm<>'outbox_consumer_denied' then raise; end if; end;
 
-  j:=public.e10_claim_outbox(oa,ca,1,60,'claim-1');
+  update public.e10_organizations set status='suspended' where id=ob;
+  begin perform public.e10_claim_outbox(ob,cb,1,60,'inactive'); raise exception 'inactive org claimed';
+  exception when sqlstate '42501' then if sqlerrm<>'outbox_consumer_denied' then raise; end if; end;
+  update public.e10_organizations set status='active' where id=ob;
+
+  j:=public.e10_claim_outbox(oa,ca,100,5,'claim-1');
   tok1:=(j#>>'{claims,0,claim_token}')::uuid; gen1:=(j#>>'{claims,0,claim_generation}')::integer;
   if (j->>'count')::integer<>1 or not (j->>'authoritative')::boolean or (j#>>'{claims,0,outbox_id}')::uuid<>q1 or gen1<>1 then
     raise exception 'first bounded claim malformed: %',j; end if;
-  j2:=public.e10_claim_outbox(oa,ca,1,60,'claim-1');
+  j2:=public.e10_claim_outbox(oa,ca,100,5,'claim-1');
   if not (j2->>'replay')::boolean or not (j2->>'authoritative')::boolean or j2->'claims'<>j->'claims' then raise exception 'claim replay changed result: %',j2; end if;
   if (select attempt_count from public.e10_integration_outbox where id=q1)<>1 then raise exception 'claim replay incremented attempt'; end if;
   update public.e10_outbox_consumers set allowed_destination_keys='{}' where id=ca;
-  begin perform public.e10_claim_outbox(oa,ca,1,60,'claim-1'); raise exception 'claim replay survived destination removal';
+  begin perform public.e10_claim_outbox(oa,ca,100,5,'claim-1'); raise exception 'claim replay survived destination removal';
   exception when sqlstate '42501' then if sqlerrm<>'outbox_destination_denied' then raise; end if; end;
   update public.e10_outbox_consumers set allowed_destination_keys=array['destination-a'] where id=ca;
   update public.e10_outbox_consumers set enabled=false where id=ca;
-  begin perform public.e10_claim_outbox(oa,ca,1,60,'claim-1'); raise exception 'claim replay survived consumer disablement';
+  begin perform public.e10_claim_outbox(oa,ca,100,5,'claim-1'); raise exception 'claim replay survived consumer disablement';
   exception when sqlstate '42501' then if sqlerrm<>'outbox_consumer_denied' then raise; end if; end;
   update public.e10_outbox_consumers set enabled=true where id=ca;
-  begin perform public.e10_claim_outbox(oa,ca,1,61,'claim-1'); raise exception 'changed claim key accepted';
+  begin perform public.e10_claim_outbox(oa,ca,100,6,'claim-1'); raise exception 'changed claim key accepted';
   exception when sqlstate '22023' then if sqlerrm<>'outbox_claim_idempotency_mismatch' then raise; end if; end;
 
+  begin perform public.e10_ack_outbox(oa,ca,q1,tok1,gen1,null,null,null,'null-outcome'); raise exception 'null outcome accepted';
+  exception when sqlstate '22023' then if sqlerrm<>'outbox_ack_outcome_invalid' then raise; end if; end;
+
   update public.e10_integration_outbox set claimed_at=clock_timestamp()-interval '2 seconds',claim_expires_at=clock_timestamp()-interval '1 second' where id=q1;
-  j2:=public.e10_claim_outbox(oa,ca,1,60,'claim-1');
+  j2:=public.e10_claim_outbox(oa,ca,100,5,'claim-1');
   if (j2->>'authoritative')::boolean then raise exception 'expired historical claim remained authoritative'; end if;
   j2:=public.e10_claim_outbox(oa,ca2,1,60,'claim-2'); tok2:=(j2#>>'{claims,0,claim_token}')::uuid; gen2:=(j2#>>'{claims,0,claim_generation}')::integer;
   if gen2<>2 or tok2=tok1 then raise exception 'replacement lacked new generation/token: %',j2; end if;
@@ -63,10 +77,24 @@ begin
   begin perform public.e10_ack_outbox(oa,ca2,q1,tok2,gen2,'dead',null,'changed','ack-delivered'); raise exception 'changed ack key accepted';
   exception when sqlstate '22023' then if sqlerrm<>'outbox_ack_idempotency_mismatch' then raise; end if; end;
 
-  update public.e10_integration_outbox set next_attempt_at=null where id=q2;
+  update public.e10_integration_outbox set next_attempt_at=null,attempt_count=2147483647 where id=q2;
+  begin perform public.e10_claim_outbox(oa,ca,1,60,'overflow'); raise exception 'attempt counter overflow accepted';
+  exception when sqlstate '22003' then if sqlerrm<>'outbox_claim_counter_overflow' then raise; end if; end;
+  if exists(select 1 from public.e10_outbox_claim_commands where idempotency_key='overflow') then raise exception 'overflow left command residue'; end if;
+  update public.e10_integration_outbox set attempt_count=0,claim_generation=2147483647 where id=q2;
+  begin perform public.e10_claim_outbox(oa,ca,1,60,'overflow-generation'); raise exception 'generation counter overflow accepted';
+  exception when sqlstate '22003' then if sqlerrm<>'outbox_claim_counter_overflow' then raise; end if; end;
+  if exists(select 1 from public.e10_outbox_claim_commands where idempotency_key='overflow-generation') then raise exception 'generation overflow left command residue'; end if;
+  update public.e10_integration_outbox set claim_generation=0 where id=q2;
   j:=public.e10_claim_outbox(oa,ca,1,60,'claim-retry'); tok1:=(j#>>'{claims,0,claim_token}')::uuid; gen1:=(j#>>'{claims,0,claim_generation}')::integer;
-  j:=public.e10_ack_outbox(oa,ca,q2,tok1,gen1,'retry',5,'temporary failure','ack-retry');
-  if (select status from public.e10_integration_outbox where id=q2)<>'failed' or (select last_error from public.e10_integration_outbox where id=q2)<>'temporary failure'
+  begin perform public.e10_ack_outbox(oa,ca,q2,tok1,gen1,'retry',4,'temporary','retry-low'); raise exception 'retry 4 accepted';
+  exception when sqlstate '22023' then if sqlerrm<>'outbox_ack_outcome_fields_invalid' then raise; end if; end;
+  begin perform public.e10_ack_outbox(oa,ca,q2,tok1,gen1,'retry',86401,'temporary','retry-high'); raise exception 'retry 86401 accepted';
+  exception when sqlstate '22023' then if sqlerrm<>'outbox_ack_outcome_fields_invalid' then raise; end if; end;
+  begin perform public.e10_ack_outbox(oa,ca,q2,tok1,gen1,'retry',5,repeat('é',1001),'error-long'); raise exception '2002-byte error accepted';
+  exception when sqlstate '22023' then if sqlerrm<>'outbox_ack_error_too_long' then raise; end if; end;
+  j:=public.e10_ack_outbox(oa,ca,q2,tok1,gen1,'retry',86400,repeat('é',1000),'ack-retry');
+  if (select status from public.e10_integration_outbox where id=q2)<>'failed' or octet_length((select last_error from public.e10_integration_outbox where id=q2))<>2000
      or (select next_attempt_at from public.e10_integration_outbox where id=q2) is null then raise exception 'retry outcome malformed'; end if;
   update public.e10_integration_outbox set next_attempt_at=clock_timestamp()-interval '1 second' where id=q2;
   j:=public.e10_claim_outbox(oa,ca,1,60,'claim-dead'); tok1:=(j#>>'{claims,0,claim_token}')::uuid; gen1:=(j#>>'{claims,0,claim_generation}')::integer;
@@ -89,5 +117,18 @@ begin
     or has_function_privilege('anon','public.e10_ack_outbox(uuid,uuid,uuid,uuid,integer,text,integer,text,text)','execute')
     or has_function_privilege('authenticated','public.e10_ack_outbox(uuid,uuid,uuid,uuid,integer,text,integer,text,text)','execute') then raise exception 'X8c API client exposed'; end if;
 end $$;
+
+set local role service_role;
+do $$ begin
+  if not has_table_privilege('service_role','public.e10_outbox_consumers','select,insert,update')
+     or has_table_privilege('service_role','public.e10_outbox_consumers','delete,truncate') then raise exception 'consumer service ACL mismatch'; end if;
+  if not has_table_privilege('service_role','public.e10_outbox_claim_commands','select')
+     or has_table_privilege('service_role','public.e10_outbox_claim_commands','insert,update,delete,truncate') then raise exception 'claim receipt service ACL mismatch'; end if;
+  if not has_table_privilege('service_role','public.e10_outbox_acknowledgements','select')
+     or has_table_privilege('service_role','public.e10_outbox_acknowledgements','insert,update,delete,truncate') then raise exception 'ack receipt service ACL mismatch'; end if;
+  begin execute 'truncate table public.e10_outbox_acknowledgements'; raise exception 'service role truncated immutable receipts';
+  exception when sqlstate '42501' then null; end;
+end $$;
+reset role;
 rollback;
 select 'TA-X8c exact dormant outbox contract PASS' result;
