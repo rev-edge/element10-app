@@ -16,6 +16,9 @@ begin
   v:=public.e10_org_create_configuration_version(o,config_id,0,'draft','box','each',24,'R5-BC','{}','r5-version');
   begin perform public.e10_org_create_configuration_version(o,config_id,0,'draft','box','each',24,null,'{}','r5-version-stale');raise exception'stale configuration version accepted';exception when sqlstate'40001'then null;end;
   i:=public.e10_org_create_unique_item(o,null,null,'collectible','new',null,null,null,null,'{}','{}','r5-item');
+  begin perform public.e10_org_create_configuration_version(o,config_id,1,null,'box','each',1,null,'{}','r5-null-state');raise exception'null configuration state accepted';exception when sqlstate'22023'then null;end;
+  begin perform public.e10_org_create_configuration_version(o,config_id,1,'draft','box','each','Infinity'::numeric,null,'{}','r5-infinite');raise exception'infinite package quantity accepted';exception when sqlstate'22023'then null;end;
+  begin perform public.e10_org_create_unique_item(o,null,null,'collectible',null,null,null,null,null,'{}',jsonb_build_object('oversized',repeat('x',66000)),'r5-oversized');raise exception'oversized attributes accepted';exception when sqlstate'22023'then null;end;
   if product_id is null or config_id is null or (v->>'version_no')::integer<>1 or i->>'unique_item_id'is null then raise exception'X1 writer result invalid';end if;
   begin perform public.e10_org_create_product_master(o,'changed',null,'{}','r5-product');raise exception'idempotency mismatch accepted';exception when sqlstate'22023'then null;end;
   begin perform public.e10_org_create_product_master(other_o,'foreign',null,'{}','r5-foreign');raise exception'cross-org create accepted';exception when sqlstate'42501'then null;end;

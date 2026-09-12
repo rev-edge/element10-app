@@ -19,6 +19,10 @@ R5 closes the X1 integration boundary with additive migrations only:
 Local clean replay and self-failing tests prove valid creation and replay,
 changed-payload mismatch, stale version refusal, cross-organization denial,
 non-admin platform denial, malformed subject refusal, immutable-history guards,
-single-current mapping revision history and client ACL closure.
+single-current mapping history across three revisions, rejection of direct
+historical resurrection and client ACL closure. The two-connection suite proves
+exact lock-holder overlap for same-key convergence, competing configuration
+version CAS, tenant-authority revocation and platform-admin revocation, with
+zero denied-write residue.
 
 No hosted environment or production was contacted.
