@@ -70,6 +70,58 @@ All tests rolled back or removed their fixtures. Staging residue after the suite
 
 `cases=0|candidates=0|decisions=0|test_users=0`
 
+### Reproducible invocation and captured output
+
+The verification used the staging session-pooler URL only through an environment
+variable. No credential was printed or recorded:
+
+```sh
+cd /Users/tsconnely/dev/element10-app
+set -a
+. ./.env.local
+set +a
+STAGING_URL="postgresql://postgres.csmbjfmoxkexcyssntbg:${SUPABASE_STAGING_DB_PASSWORD}@aws-0-us-east-1.pooler.supabase.com:5432/postgres"
+psql "$STAGING_URL" -v ON_ERROR_STOP=1 -f tests/ta_f4_identity_ambiguity_review_test.sql
+psql "$STAGING_URL" -v ON_ERROR_STOP=1 -f tests/ta_f4_identity_ambiguity_review_guards_test.sql
+E10_DB_URL="$STAGING_URL" node tests/ta_f4_identity_ambiguity_review_concurrent_test.js
+psql "$STAGING_URL" -v ON_ERROR_STOP=1 -f tests/probe_defpriv.sql
+```
+
+Captured output excerpts from that run:
+
+```text
+BEGIN
+DO
+ROLLBACK
+TA-F4 identity ambiguity review PASS
+
+BEGIN
+DO
+ROLLBACK
+TA-F4 identity ambiguity guards PASS
+
+TA-F4 identity ambiguity concurrency: PASS (proposal idempotency/source races; proposal/reject post-lock revocation; one reject winner; zero denied residue)
+
+NOTICE: default-privileges probe: PASS (born-locked 4/4 + zero anon/PUBLIC-executable functions)
+DO
+```
+
+The explicit migration apply used the same `STAGING_URL` and one transaction:
+
+```sh
+cd /Users/tsconnely/dev/element10-app
+psql "$STAGING_URL" -v ON_ERROR_STOP=1 --single-transaction \
+  -f supabase/migrations/20260912093000_e10_ta_f4_identity_ambiguity_review.sql \
+  -c "insert into supabase_migrations.schema_migrations(version,statements,name) values('20260912093000',array[]::text[],'e10_ta_f4_identity_ambiguity_review')"
+```
+
+Its captured terminal result completed every DDL statement, the final ledger
+insert returned `INSERT 0 1`, and the subsequent exact query returned:
+
+```text
+20260912093000|e10_ta_f4_identity_ambiguity_review|0
+```
+
 ## Function parity and access control
 
 Local and staging function-definition SHA-256 values match:
