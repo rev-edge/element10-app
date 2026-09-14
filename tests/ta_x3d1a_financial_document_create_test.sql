@@ -29,9 +29,9 @@ begin
   insert into public.e10_product_configurations(id,organization_id,product_master_id,name)
     values('d3100000-0000-4000-8000-000000000021',o,'d3100000-0000-4000-8000-000000000020','X3d1a unit');
   insert into public.e10_product_configuration_versions
-    (id,organization_id,configuration_id,version_no,state,packaging_kind,base_unit,base_units_per_package)
+    (id,organization_id,configuration_id,version_no,state,packaging_kind,base_unit,base_units_per_package,quantity_increment)
     values('d3100000-0000-4000-8000-000000000022',o,'d3100000-0000-4000-8000-000000000021',
-      1,'active','unit','unit',1);
+      1,'active','unit','unit',1,0.5);
   set local session_replication_role='replica';
   insert into public.e10_supplier_invoices(organization_id,supplier_id,supplier_document_number,currency,total_amount)
     values(o,'d3100000-0000-4000-8000-000000000010','LEGACY-AMB','CAD',1),

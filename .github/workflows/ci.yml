@@ -299,6 +299,9 @@ jobs:
         run: |
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3d1c_financial_document_transitions_test.sql
           node tests/ta_x3d1c_financial_document_transitions_concurrent_test.js
+      - name: Vendor bill contract guards (BILL-06 and BILL-11)
+        run: |
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/vendor_bill_contract_guards_test.sql
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3d1d_financial_allocations_test.sql
           psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f tests/ta_x3d1d_allocation_lifecycle_test.sql
           node tests/ta_x3d1d_financial_allocations_concurrent_test.js

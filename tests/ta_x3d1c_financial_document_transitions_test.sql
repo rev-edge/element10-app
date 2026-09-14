@@ -6,6 +6,7 @@ declare
   o constant uuid:='d31d0000-0000-4000-8000-000000000001';
   other_org constant uuid:='d31d0000-0000-4000-8000-000000000002';
   actor constant uuid:='d31d0000-0000-4000-8000-000000000003';
+  approver constant uuid:='d31d0000-0000-4000-8000-000000000023';
   prepare_only constant uuid:='d31d0000-0000-4000-8000-000000000004';
   suspended_actor constant uuid:='d31d0000-0000-4000-8000-000000000024';
   no_member_actor constant uuid:='d31d0000-0000-4000-8000-000000000025';
@@ -31,6 +32,7 @@ begin
     (o,'X3d1c org','x3d1c-org'),(other_org,'X3d1c other','x3d1c-other');
   insert into auth.users(id,instance_id,aud,role,email,created_at,updated_at) values
     (actor,'00000000-0000-0000-0000-000000000000','authenticated','authenticated','x3d1c@example.invalid',now(),now()),
+    (approver,'00000000-0000-0000-0000-000000000000','authenticated','authenticated','x3d1c-approver@example.invalid',now(),now()),
     (prepare_only,'00000000-0000-0000-0000-000000000000','authenticated','authenticated','x3d1c-prepare@example.invalid',now(),now()),
     (suspended_actor,'00000000-0000-0000-0000-000000000000','authenticated','authenticated','x3d1c-suspended@example.invalid',now(),now()),
     (no_member_actor,'00000000-0000-0000-0000-000000000000','authenticated','authenticated','x3d1c-none@example.invalid',now(),now());
@@ -39,7 +41,7 @@ begin
     (suspended_role,o,'x3d1c-suspended','X3d1c suspended'),
     (other_role,other_org,'x3d1c-other','X3d1c other');
   insert into public.e10_organization_memberships(organization_id,user_id,role_id,status) values
-    (o,actor,all_role,'active'),(other_org,actor,other_role,'active'),
+    (o,actor,all_role,'active'),(o,approver,all_role,'active'),(other_org,actor,other_role,'active'),
     (o,prepare_only,prepare_role,'active'),(o,suspended_actor,suspended_role,'suspended');
   insert into public.e10_organization_role_permissions(organization_id,role_id,capability,allowed) values
     (o,all_role,'act.purchasing_prepare',true),(o,all_role,'act.purchasing_approve',true),
@@ -81,6 +83,10 @@ begin
   if result->>'status'<>'reviewed' or result->>'revision'<>'2' then raise exception 'invoice review failed: %',result; end if;
   replay:=public.e10_org_review_supplier_invoice(o,invoice_id,1,'invoice reviewed','x3d1c-invoice-review');
   if replay->>'replay'<>'true' or replay->>'revision'<>'2' then raise exception 'review replay failed: %',replay; end if;
+  begin
+    perform public.e10_org_approve_supplier_invoice(o,invoice_id,2,'same actor','x3d1c-invoice-same-actor');
+    raise exception 'same actor approved invoice'; exception when insufficient_privilege then null; end;
+  perform set_config('request.jwt.claims',jsonb_build_object('sub',approver,'role','authenticated')::text,true);
   result:=public.e10_org_approve_supplier_invoice(o,invoice_id,2,'invoice approved','x3d1c-invoice-approve');
   if result->>'status'<>'approved' or result->>'revision'<>'3' then raise exception 'invoice approve failed: %',result; end if;
   replay:=public.e10_org_review_supplier_invoice(o,invoice_id,1,'invoice reviewed','x3d1c-invoice-review');
@@ -97,10 +103,13 @@ begin
     perform public.e10_org_review_supplier_invoice(o,invoice_id,1,'changed replay','x3d1c-invoice-review');
     raise exception 'changed idempotency payload accepted'; exception when sqlstate '22023' then null; end;
 
+  perform set_config('request.jwt.claims',jsonb_build_object('sub',actor,'role','authenticated')::text,true);
   result:=public.e10_org_review_supplier_credit(o,credit_id,1,'credit reviewed','x3d1c-credit-review');
   if result->>'status'<>'reviewed' or result->>'revision'<>'2' then raise exception 'credit review failed'; end if;
+  perform set_config('request.jwt.claims',jsonb_build_object('sub',approver,'role','authenticated')::text,true);
   result:=public.e10_org_approve_supplier_credit(o,credit_id,2,'credit approved','x3d1c-credit-approve');
   if result->>'status'<>'approved' or result->>'revision'<>'3' then raise exception 'credit approve failed'; end if;
+  perform set_config('request.jwt.claims',jsonb_build_object('sub',actor,'role','authenticated')::text,true);
   result:=public.e10_org_review_supplier_invoice(o,void_invoice,1,'invoice reviewed before void','x3d1c-void-invoice-review');
   if result->>'status'<>'reviewed' or result->>'revision'<>'2' then raise exception 'void-invoice review failed'; end if;
   result:=public.e10_org_void_supplier_invoice(o,void_invoice,2,'reviewed invoice void','x3d1c-invoice-void');
@@ -136,12 +145,12 @@ begin
   reset role;
 
   if (select approved_revision from public.e10_supplier_invoices where id=invoice_id) is distinct from 3
-    or (select approved_by from public.e10_supplier_invoices where id=invoice_id) is distinct from actor
+    or (select approved_by from public.e10_supplier_invoices where id=invoice_id) is distinct from approver
     or (select approved_at from public.e10_supplier_invoices where id=invoice_id) is null
     or (select voided_by from public.e10_supplier_invoices where id=void_invoice) is distinct from actor
     or (select voided_at from public.e10_supplier_invoices where id=void_invoice) is null
     or (select approved_revision from public.e10_supplier_credits where id=credit_id) is distinct from 3
-    or (select approved_by from public.e10_supplier_credits where id=credit_id) is distinct from actor
+    or (select approved_by from public.e10_supplier_credits where id=credit_id) is distinct from approver
     or (select approved_at from public.e10_supplier_credits where id=credit_id) is null
     or (select voided_by from public.e10_supplier_credits where id=void_credit) is distinct from actor
     or (select voided_at from public.e10_supplier_credits where id=void_credit) is null
