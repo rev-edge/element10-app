@@ -4,7 +4,7 @@ do $$
 declare
   o uuid:=gen_random_uuid();reviewer uuid:=gen_random_uuid();approver uuid:=gen_random_uuid();role_id uuid:=gen_random_uuid();
   supplier uuid:=gen_random_uuid();location_id uuid:=gen_random_uuid();product_id uuid:=gen_random_uuid();config_id uuid:=gen_random_uuid();version_id uuid:=gen_random_uuid();
-  invoice_id uuid:=gen_random_uuid();invoice_line_id uuid:=gen_random_uuid();receipt_id uuid:=gen_random_uuid();v_receipt_line_id uuid:=gen_random_uuid();r jsonb;
+  invoice_id uuid:=gen_random_uuid();invoice_line_id uuid:=gen_random_uuid();receipt_id uuid:=gen_random_uuid();v_receipt_line_id uuid:=gen_random_uuid();zero_receipt_line uuid:=gen_random_uuid();r jsonb;
 begin
   insert into auth.users(id,instance_id,aud,role,email,created_at,updated_at) values
     (reviewer,'00000000-0000-0000-0000-000000000000','authenticated','authenticated','bill-reviewer-'||reviewer||'@example.invalid',now(),now()),
@@ -29,11 +29,15 @@ begin
     values(receipt_id,o,supplier,location_id,'posted',now(),reviewer);
   insert into public.e10_stock_receipt_lines(id,organization_id,stock_receipt_id,configuration_version_id,line_no,
     received_quantity,accepted_quantity,damaged_quantity,quarantined_quantity,actual_unit_cost,currency)
-    values(v_receipt_line_id,o,receipt_id,version_id,1,10,10,0,0,9,'CAD');
+    values(v_receipt_line_id,o,receipt_id,version_id,1,10,10,0,0,9,'CAD'),
+      (zero_receipt_line,o,receipt_id,version_id,2,1,0,1,0,7,'CAD');
   insert into public.e10_receipt_invoice_allocations(organization_id,receipt_line_id,invoice_line_id,allocated_quantity)
     values(o,v_receipt_line_id,invoice_line_id,10);
   if (select count(*) from public.e10_receipt_cost_evidence where receipt_line_id=v_receipt_line_id and evidence_basis='operator_entered')<>1 then
     raise exception 'operator receipt cost was not preserved as provisional evidence';
+  end if;
+  if exists(select 1 from public.e10_receipt_cost_evidence where receipt_line_id=zero_receipt_line)then
+    raise exception 'zero-accepted damaged receipt created positive-quantity cost evidence';
   end if;
   perform set_config('request.jwt.claims',jsonb_build_object('sub',approver,'role','authenticated')::text,true);
   set local role authenticated;

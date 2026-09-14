@@ -41,7 +41,7 @@ create function e10.capture_operator_receipt_cost() returns trigger
 language plpgsql security definer set search_path=public as $$
 declare fp text;
 begin
-  if new.actual_unit_cost is null then return new;end if;
+  if new.actual_unit_cost is null or new.accepted_quantity<=0 then return new;end if;
   fp:=md5(jsonb_build_array('receipt-cost-v1',new.organization_id,new.id,'operator_entered',
     new.accepted_quantity,new.actual_unit_cost,new.currency)::text);
   insert into public.e10_receipt_cost_evidence(organization_id,receipt_line_id,evidence_basis,
@@ -67,7 +67,7 @@ select l.organization_id,l.id,'operator_entered',l.accepted_quantity,l.actual_un
   r.created_by,l.created_at
 from public.e10_stock_receipt_lines l join public.e10_stock_receipts r
   on(r.organization_id,r.id)=(l.organization_id,l.stock_receipt_id)
-where l.actual_unit_cost is not null;
+where l.actual_unit_cost is not null and l.accepted_quantity>0;
 
 create function public.e10_org_record_approved_invoice_receipt_cost(
   p_org uuid,p_receipt_line_id uuid,p_invoice_line_id uuid,p_supported_quantity numeric,
