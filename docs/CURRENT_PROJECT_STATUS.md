@@ -1,5 +1,18 @@
 # Current project status
 
+## September 14 modular-scope reconciliation
+
+The owner-confirmed Inventory/Cards boundary is recorded in
+`MODULAR_SCOPE_2026-09-14.md` and reconciled against Track A source and the
+latest vendor-bill evidence in
+`MODULAR_SCOPE_RECONCILIATION_2026-09-14.md`. The shared backend core is
+substantial, but the dedicated Cards workspace, presentation modes, stable
+module transition behavior, and cross-channel listing reconciliation remain
+partial or missing. Solo-owner invoice approval is intentionally fail-closed
+pending an explicit owner policy; the existing reviewer/approver separation is
+not weakened. This documentation update changes no schema or environment and
+does not self-accept MOD-01 through MOD-10.
+
 Reconciled September 12, 2026 against canonical `foundation-a6` implementation at
 `6e4beb5a424f562e871726cfedf52ff7c393959e`, committed migrations/tests,
 explicit staging verification and the evidence documents below.
