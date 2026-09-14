@@ -2,7 +2,7 @@
 begin;
 do $$
 declare
- o uuid:=gen_random_uuid();actor uuid:=gen_random_uuid();role_id uuid:=gen_random_uuid();doc uuid;changed_doc uuid;attempt uuid;r jsonb;review jsonb;
+ o uuid:=gen_random_uuid();actor uuid:=gen_random_uuid();role_id uuid:=gen_random_uuid();doc uuid;changed_doc uuid;attempt uuid;r jsonb;review jsonb;inbound_id uuid;
  source jsonb:=jsonb_build_object('connection','fixture-provider','external_id','vendor-doc-1','revision','1','payload_fingerprint','source-fp-1');
  attachment jsonb:=jsonb_build_object('storage_bucket','vendor-documents','storage_path','org/test/invoice.pdf','content_sha256',repeat('a',64),'mime_type','application/pdf','byte_size',1234,'page_count',2);
 begin
@@ -23,10 +23,16 @@ begin
 
   perform set_config('request.jwt.claims',jsonb_build_object('sub',actor,'role','service_role')::text,true);set local role service_role;
  r:=public.e10_org_record_vendor_extraction(o,changed_doc,'deterministic_fixture','fixture-v1','failed','{"text":"untrusted"}',null,'fixture_failure','retryable fixture failure',clock_timestamp());
- r:=public.e10_org_record_vendor_extraction(o,changed_doc,'deterministic_fixture','fixture-v1','succeeded','{"text":"invoice total 12.00"}',
+  r:=public.e10_org_record_vendor_extraction(o,changed_doc,'deterministic_fixture','fixture-v1','succeeded','{"text":"invoice total 12.00"}',
    '{"document_type":"supplier_invoice","total":{"value":12.00,"confidence":0.51,"source":{"page":1,"text":"12.00"}},"lines":[]}',null,null,clock_timestamp());
- attempt:=(r->>'attempt_id')::uuid;
- if r->>'attempt_no'<>'2'or(select count(*)from public.e10_vendor_extraction_attempts where organization_id=o and document_id=changed_doc)<>2 then raise exception 'extraction retry history invalid';end if;
+  attempt:=(r->>'attempt_id')::uuid;
+  if r->>'attempt_no'<>'2'or(select count(*)from public.e10_vendor_extraction_attempts where organization_id=o and document_id=changed_doc)<>2 then raise exception 'extraction retry history invalid';end if;
+  r:=public.e10_org_record_vendor_inbound(o,'fixture-vendor','order_confirmation','order-1','1','inbound-fp-1','{"kind":"order_confirmation"}',changed_doc);
+  inbound_id:=(r->>'message_id')::uuid;
+  if r->>'payable_created'<>'false'or r->>'stock_changed'<>'false'then raise exception 'order confirmation caused side effect';end if;
+  if(public.e10_org_record_vendor_inbound(o,'fixture-vendor','order_confirmation','order-1','1','inbound-fp-1','{"kind":"order_confirmation"}',changed_doc)->>'message_id')<>inbound_id::text then raise exception 'inbound replay duplicated message';end if;
+  r:=public.e10_org_record_vendor_inbound(o,'fixture-vendor','order_confirmation','order-1','1','inbound-fp-2','{"kind":"order_confirmation","changed":true}',changed_doc);
+  if r->>'conflict'<>'true'or r->>'next_action'<>'review_changed_payload'then raise exception 'changed inbound payload did not enter review: %',r;end if;
  reset role;
 
  perform set_config('request.jwt.claims',jsonb_build_object('sub',actor,'role','authenticated')::text,true);set local role authenticated;

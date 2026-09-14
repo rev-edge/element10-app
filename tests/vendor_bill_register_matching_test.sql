@@ -8,7 +8,7 @@ declare
   config_id uuid:=gen_random_uuid(); version_id uuid:=gen_random_uuid(); receipt_id uuid:=gen_random_uuid();
   receipt_line uuid:=gen_random_uuid(); invoice_a uuid:=gen_random_uuid(); invoice_b uuid:=gen_random_uuid();
   line_a uuid:=gen_random_uuid(); line_b uuid:=gen_random_uuid(); case_id uuid:=gen_random_uuid();
-  before_movements bigint; before_lots bigint; r jsonb; page_1 jsonb; page_2 jsonb; decision jsonb;
+  before_movements bigint; before_lots bigint; r jsonb; page_1 jsonb; page_2 jsonb; detail jsonb; decision jsonb;
 begin
   insert into auth.users(id,instance_id,aud,role,email,created_at,updated_at)
     values(actor,'00000000-0000-0000-0000-000000000000','authenticated','authenticated','bill-register-'||actor||'@example.invalid',now(),now());
@@ -55,6 +55,9 @@ begin
     or page_1->>'payment_status'<>'unavailable_not_modeled' then raise exception 'bill page 1 invalid: %',page_1;end if;
   page_2:=public.e10_org_bill_register(o,null,null,null,null,null,1,page_1->>'next_cursor');
   if jsonb_array_length(page_2->'items')<>1 or page_2->>'has_more'<>'false' then raise exception 'bill page 2 invalid: %',page_2;end if;
+  detail:=public.e10_org_bill_detail(o,invoice_a,1,null);
+  if detail#>>'{header,invoice_id}'<>invoice_a::text or detail#>>'{header,payment_status}'<>'unavailable_not_modeled'
+    or jsonb_array_length(detail->'lines')<>1 or detail#>>'{lines,0,receipt_allocations,0,stock_receipt_id}'<>receipt_id::text then raise exception 'bill detail invalid: %',detail;end if;
 
   reset role;
   insert into public.e10_financial_document_reconciliation_cases
