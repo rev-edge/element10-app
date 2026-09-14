@@ -1,0 +1,22 @@
+-- Keep final referenced-parent authority checks scoped to the supported X1
+-- writers so internal reviewed workflows retain their existing table path.
+create or replace function e10.guard_unique_item_final_authority() returns trigger
+language plpgsql security definer set search_path=public as $$
+begin
+ if new.catalog_variant_id is not null then perform 1 from public.e10_catalog_variants v where v.id=new.catalog_variant_id for key share;if not found then raise exception using errcode='22023',message='catalog_variant_invalid';end if;end if;
+ if current_setting('e10.x1_unique_item_writer',true)='on' and not e10.has_org_cap(new.organization_id,'catalog.propose')then raise exception using errcode='42501',message='catalog_propose_denied';end if;return new;
+end $$;
+create or replace function e10.guard_variant_subject_final_authority() returns trigger
+language plpgsql security definer set search_path=public as $$
+begin
+ perform 1 from public.e10_players p where p.id=new.player_id for key share;if not found then raise exception using errcode='22023',message='catalog_variant_subject_invalid';end if;
+ if current_setting('e10.x1_variant_writer',true)='on' and not e10.is_platform_admin()then raise exception using errcode='42501',message='platform_catalog_write_denied';end if;return new;
+end $$;
+alter function public.e10_org_create_unique_item(uuid,text,uuid,text,text,text,text,text,integer,jsonb,jsonb,text) rename to _e10_org_create_unique_item_r5;
+revoke all on function public._e10_org_create_unique_item_r5(uuid,text,uuid,text,text,text,text,text,integer,jsonb,jsonb,text) from public,anon,authenticated;grant execute on function public._e10_org_create_unique_item_r5(uuid,text,uuid,text,text,text,text,text,integer,jsonb,jsonb,text) to service_role;
+create function public.e10_org_create_unique_item(p_org uuid,p_inventory_item_id text,p_catalog_variant_id uuid,p_item_kind text,p_condition text,p_grading_company text,p_grade text,p_certification_number text,p_serial_numerator integer,p_observed_markings jsonb,p_attrs jsonb,p_idempotency_key text)returns jsonb language plpgsql security definer set search_path=public as $$declare result jsonb;begin perform set_config('e10.x1_unique_item_writer','on',true);result:=public._e10_org_create_unique_item_r5(p_org,p_inventory_item_id,p_catalog_variant_id,p_item_kind,p_condition,p_grading_company,p_grade,p_certification_number,p_serial_numerator,p_observed_markings,p_attrs,p_idempotency_key);perform set_config('e10.x1_unique_item_writer','off',true);return result;exception when others then perform set_config('e10.x1_unique_item_writer','off',true);raise;end $$;
+alter function public.e10_platform_create_catalog_variant(uuid,text,text,text,text,text,text,boolean,integer,jsonb,jsonb,text) rename to _e10_platform_create_catalog_variant_r5;
+revoke all on function public._e10_platform_create_catalog_variant_r5(uuid,text,text,text,text,text,text,boolean,integer,jsonb,jsonb,text) from public,anon,authenticated;grant execute on function public._e10_platform_create_catalog_variant_r5(uuid,text,text,text,text,text,text,boolean,integer,jsonb,jsonb,text) to service_role;
+create function public.e10_platform_create_catalog_variant(p_release_id uuid,p_card_number text,p_exact_parallel text,p_color_family text,p_finish_pattern text,p_language text,p_edition text,p_rookie_designation boolean,p_print_run_denominator integer,p_attrs jsonb,p_subjects jsonb,p_idempotency_key text)returns jsonb language plpgsql security definer set search_path=public as $$declare result jsonb;begin perform set_config('e10.x1_variant_writer','on',true);result:=public._e10_platform_create_catalog_variant_r5(p_release_id,p_card_number,p_exact_parallel,p_color_family,p_finish_pattern,p_language,p_edition,p_rookie_designation,p_print_run_denominator,p_attrs,p_subjects,p_idempotency_key);perform set_config('e10.x1_variant_writer','off',true);return result;exception when others then perform set_config('e10.x1_variant_writer','off',true);raise;end $$;
+revoke all on function public.e10_org_create_unique_item(uuid,text,uuid,text,text,text,text,text,integer,jsonb,jsonb,text),public.e10_platform_create_catalog_variant(uuid,text,text,text,text,text,text,boolean,integer,jsonb,jsonb,text) from public,anon;
+grant execute on function public.e10_org_create_unique_item(uuid,text,uuid,text,text,text,text,text,integer,jsonb,jsonb,text),public.e10_platform_create_catalog_variant(uuid,text,text,text,text,text,text,boolean,integer,jsonb,jsonb,text) to authenticated,service_role;

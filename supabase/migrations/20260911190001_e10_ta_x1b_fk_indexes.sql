@@ -1,0 +1,5 @@
+-- TA-X1b covering indexes for foreign-key maintenance paths.
+create index e10_player_affiliation_team_idx on public.e10_player_affiliation_decisions(team_id);
+create index e10_player_affiliation_reviewer_idx on public.e10_player_affiliation_decisions(reviewed_by);
+create index e10_variant_subject_context_team_idx on public.e10_catalog_variant_subject_context_decisions(depicted_team_id);
+create index e10_variant_subject_context_reviewer_idx on public.e10_catalog_variant_subject_context_decisions(reviewed_by);

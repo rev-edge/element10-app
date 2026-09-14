@@ -1,5 +1,40 @@
 # Real-RLS integration test
 
+## Operator workflow browser tests
+
+UI workflow tests follow `docs/OPERATOR_LIFECYCLE.md` and
+`docs/UX_WORKFLOW_CONTRACT.md`, using the execution and evidence rules in
+`docs/OPERATOR_WALKTHROUGH_PROTOCOL.md`. A component-level click test or one
+linear browser run does not establish workflow acceptance. Each materially changed
+task loop covers:
+
+- first-time success and its next action;
+- repeated or bulk action;
+- incomplete exit and resume from the durable parent surface;
+- final-item completion;
+- edit and return with route/filter/selection context;
+- Cancel with no phantom mutation;
+- one denied, duplicate, stale, or conflicted path and recovery.
+
+Assertions include the committed business state, immediate rendered result,
+continuation offered, ending destination, and retained context. Render claims still
+require browser screenshots in the review package.
+
+Each workflow scenario has a stable ID and records its tour, pass, starting state,
+exact interaction order, expected result, actual result, persisted result, ending
+context, and evidence artifact. Test reports distinguish:
+
+- browser interaction and focus/navigation behavior;
+- direct mutator enforcement;
+- persisted business state and arithmetic;
+- settled rendered output;
+- organization, role, entitlement, and context-transition behavior.
+
+Run a baseline pass and a materially different adversarial pass. Static cards-off,
+role, or organization fixtures do not replace switching those boundaries while work
+is open. Every finding adds a regression for the original path and its sibling
+defect family.
+
 `rls_test.js` drives the **actual** `@supabase/supabase-js` client (including
 `.insert().select()` / `.upsert().select()` — i.e. `INSERT ... RETURNING`) against the
 **live** project's real Row Level Security, using **real** member and viewer accounts.
