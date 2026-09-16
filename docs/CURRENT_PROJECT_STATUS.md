@@ -1,5 +1,19 @@
 # Current project status
 
+## September 16 CRM data-layer reconciliation
+
+`CRM_DATA_LAYER_RECONCILIATION_2026-09-16.md` audits CRM-01 through CRM-05 and
+CRM-A01 through CRM-A10 against the canonical customer, transaction, native
+break-sale, reconciliation, and spend-reporting implementation. The current
+core is substantial, but two-way acquisition/consignment links, contact and
+shipping history, declared preferences and derived affinities,
+payment/settlement facts, validated Whatnot intake, field-level privacy, and
+module-disable behavior remain partial or missing. The document separates
+current local source from historical staging evidence and absent production
+verification, records official Whatnot export limits, and proposes additive
+increments only. No migration, database contact, integration activation, or
+production change is authorized.
+
 ## September 16 checklist ingestion design
 
 `CHECKLIST_INGESTION_DESIGN_2026-09-16.md` verifies all 43 supplied checklist
