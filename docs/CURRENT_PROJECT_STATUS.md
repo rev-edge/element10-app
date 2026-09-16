@@ -1,5 +1,18 @@
 # Current project status
 
+## September 16 configuration applicability proposal
+
+`CONFIGURATION_CHECKLIST_APPLICABILITY_RECONCILIATION_2026-09-16.md` reconciles
+the proposed many-to-many relationship between immutable Configuration Versions
+and versioned checklist entries. Current source has the product/configuration
+and canonical catalog foundations but no physical applicability contract. The
+proposal uses organization-owned revisioned reviews and immutable confirmed
+snapshots, explicit packaging composition, unknown-by-default semantics, and
+exact preparation pins. It preserves checklist-independent purchasing and
+receiving and optional source provenance for owned singles. Capability,
+confirmation, inheritance, completeness, and platform packaging decisions
+remain open. No migration or environment change is authorized.
+
 ## September 16 Product/checklist scope delta
 
 `PRODUCT_CHECKLIST_SCOPE_RECONCILIATION_2026-09-16.md` reconciles the permanent

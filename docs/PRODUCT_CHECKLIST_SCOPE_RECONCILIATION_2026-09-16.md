@@ -202,3 +202,12 @@ applied migration is rewritten.
 
 Existing vendor-bill, receipt, quantity-grain, cost-evidence, and
 reviewer/approver work remains valid and is not reopened by this delta.
+
+## Configuration applicability follow-up
+
+The many-to-many Configuration Version to Checklist Version Entry proposal,
+including packaging inheritance, immutable effective snapshots, preparation
+pinning, reader semantics, migration implications, and unresolved authority
+decisions, is reconciled in
+`CONFIGURATION_CHECKLIST_APPLICABILITY_RECONCILIATION_2026-09-16.md`. That
+document is plan-only and stops before implementation.
