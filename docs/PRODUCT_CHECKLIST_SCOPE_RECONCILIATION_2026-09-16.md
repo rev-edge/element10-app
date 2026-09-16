@@ -211,3 +211,7 @@ pinning, reader semantics, migration implications, and unresolved authority
 decisions, is reconciled in
 `CONFIGURATION_CHECKLIST_APPLICABILITY_RECONCILIATION_2026-09-16.md`. That
 document is plan-only and stops before implementation.
+
+Subject identity is a separate optional relationship, not a checklist
+completion prerequisite. The generic subject clarification and cross-product
+reporting plan are recorded in `SUBJECT_IDENTITY_RECONCILIATION_2026-09-16.md`.

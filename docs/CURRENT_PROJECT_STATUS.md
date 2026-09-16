@@ -1,5 +1,29 @@
 # Current project status
 
+## September 16 checklist ingestion design
+
+`CHECKLIST_INGESTION_DESIGN_2026-09-16.md` verifies all 43 supplied checklist
+samples and reconciles the operator lifecycle, card/release/variant identity,
+optional subject linking, provenance, bounded reporting, current catalog
+authority, and a small Panini Prizm first slice. The design separates an
+organization-approved checklist version from platform publication and creates
+no inventory or commercial facts. Eight owner decisions remain in
+`CHECKLIST_INGESTION_DESIGN_2026-09-16_COVER_NOTE.md`. No implementation or
+environment change is authorized.
+
+## September 16 subject identity clarification
+
+`SUBJECT_IDENTITY_RECONCILIATION_2026-09-16.md` records subject identity as an
+optional, zero-to-many relationship on exact catalog variants. Current source
+already supports multi-subject variant links and cross-product subject queries,
+but canonical storage and review remain player/sports-named and organization
+imports lack a durable unresolved-name path. The proposal preserves stable IDs,
+adds governed subject kinds, aliases/external IDs and private unresolved
+mentions, keeps canonical publication platform-controlled, and forbids implicit
+financial attribution or cross-organization business leakage. Missing subject
+links remain non-blocking. No implementation or environment change is
+authorized.
+
 ## September 16 configuration applicability proposal
 
 `CONFIGURATION_CHECKLIST_APPLICABILITY_RECONCILIATION_2026-09-16.md` reconciles

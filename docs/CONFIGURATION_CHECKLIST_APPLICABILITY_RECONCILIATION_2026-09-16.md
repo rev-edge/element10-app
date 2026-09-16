@@ -369,3 +369,13 @@ the applicable entitlement and capability independently.
 
 Stop after review of this plan. No implementation begins until explicitly
 approved.
+
+## Subject identity clarification
+
+Subject identity is optional and many-to-many at the exact catalog-variant
+level. Missing links do not block Product, checklist, applicability, or basic
+inventory workflows. Confirmed subject links may filter applicability readers,
+but they do not determine applicability, packaging composition, pull odds, or
+financial attribution. See `SUBJECT_IDENTITY_RECONCILIATION_2026-09-16.md` for
+the current player/subject evidence, unresolved-name path, authority boundary,
+reporting rules, and first implementation slice.
