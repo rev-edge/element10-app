@@ -6,6 +6,13 @@ owner-confirmed scope in `MODULAR_SCOPE_2026-09-14.md` against canonical source
 at `71864682262b03e9a723583e66eff939c2996f09`, the latest vendor-bill work, and
 the environment evidence recorded for that head.
 
+September 16 correction: release checklist creation and maintenance belongs to
+the permanent Products workspace. Cards retains specialist catalog browsing,
+owned-copy analysis, valuation, and listing workflows. Cards navigation or
+entitlement does not automatically control Product/checklist authority. See
+`PRODUCT_CHECKLIST_SCOPE_RECONCILIATION_2026-09-16.md` for the staged import,
+publication, readiness, and grid delta.
+
 ## Evidence boundary
 
 - Local source contains the A6 module/authorization spine, shared product and

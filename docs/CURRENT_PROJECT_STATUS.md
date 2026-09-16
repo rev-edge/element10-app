@@ -1,5 +1,17 @@
 # Current project status
 
+## September 16 Product/checklist scope delta
+
+`PRODUCT_CHECKLIST_SCOPE_RECONCILIATION_2026-09-16.md` reconciles the permanent
+Products workspace and staged checklist-import lifecycle against current Track
+A source. The product/configuration foundation and platform catalog promotion
+are real, but the organization-owned upload, mapping, row review, approved
+version, readiness, and full-grid contracts remain partial or missing. It also
+corrects the module boundary: Product checklist maintenance is not inherently a
+Cards entitlement. Shop operational approval, organization overlay publication,
+and platform canonical promotion are three distinct transitions. No schema or
+environment change is authorized by that document.
+
 ## September 14 modular-scope reconciliation
 
 The owner-confirmed Inventory/Cards boundary is recorded in
