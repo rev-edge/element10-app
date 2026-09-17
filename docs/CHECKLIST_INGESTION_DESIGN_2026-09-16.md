@@ -4,6 +4,11 @@ Status: investigation and documentation only, September 16, 2026. This
 document does not authorize application code, migrations, deployment, catalog
 publication, or production changes.
 
+September 17 shared-architecture follow-up:
+`SHARED_IMPORT_EXPORT_AI_ARCHITECTURE_2026-09-17.md` places this checklist
+lifecycle inside the provider-independent shared import/export and optional AI
+contract. It does not change the lifecycle or authorize implementation.
+
 Reconciled against repository head
 `73acc48a98d8dc1c11ec64b490207f56cfb32fc7`. Exact-head CI run `35094423156`
 was green. No database environment was contacted.

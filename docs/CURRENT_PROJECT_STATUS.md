@@ -1,5 +1,19 @@
 # Current project status
 
+## September 17 shared import, export, and AI architecture
+
+`SHARED_IMPORT_EXPORT_AI_ARCHITECTURE_2026-09-17.md` reconciles the existing
+checklist mapper, X5 intake, X8 assistant/query/draft seams, export authority,
+entitlements, and checklist-led product contracts against four owner-confirmed
+execution options: Element 10-managed AI, organization-funded AI, external
+assistant connectors, and fully manual operation. The current smart mapper is a
+useful prototype but not an accepted shared architecture: it is provider-bound
+and lacks organization policy, durable jobs, funding/usage accounting, governed
+import revisions, and deployment evidence. Companion requirements, acceptance,
+and dependency registers are recorded in the three `SHARED_IMPORT_EXPORT_AI_*`
+documents. No migration, credential connection, paid call, environment contact,
+integration activation, or deployment is authorized.
+
 ## September 16 CRM data-layer reconciliation
 
 `CRM_DATA_LAYER_RECONCILIATION_2026-09-16.md` audits CRM-01 through CRM-05 and
