@@ -5,13 +5,30 @@ This directory is the **canonical home** for Element 10's operational documents.
 been promoted here.
 
 ## Contents
+- **[OPERATOR_LIFECYCLE.md](OPERATOR_LIFECYCLE.md)** — end-to-end operator jobs,
+  business handoffs, multi-channel lifecycle, and task-loop completeness.
+- **[UX_WORKFLOW_CONTRACT.md](UX_WORKFLOW_CONTRACT.md)** — binding UI planning,
+  navigation, behavioral evidence, and workflow Definition of Done.
+- **[OPERATOR_WALKTHROUGH_PROTOCOL.md](OPERATOR_WALKTHROUGH_PROTOCOL.md)** —
+  binding multi-pass operator testing, adversarial tours, defect-family expansion,
+  evidence discipline, and independent acceptance. Includes **§6a** the mandatory
+  self-debug sweep, **§7a** the checkpoint working model (batched gates, hard
+  stops, provisional results), and **§8a** evidence-tooling independence.
 - **[DATABASE.md](DATABASE.md)** — the database blueprint: how production is reproduced from
   `supabase/migrations/`, the local workflow, and the reproducibility proof.
 - **[ROADMAP.md](ROADMAP.md)** — product direction, the Foundation Gate, Track A/B ordering.
+- **`../tests/harness/`** — the canonical evidence harness (node + jsdom, no
+  browser). `e10_harness.js` runs any prototype build headlessly;
+  **`selfdebug.js` is the mandatory pre-evidence sweep** (protocol §6a). Any
+  agent runs the same tool on the same build and gets the same result.
 - **[CODING_STANDARDS.md](CODING_STANDARDS.md)** — standing engineering + UX/QA standards.
 - **[Platform_Overview.md](Platform_Overview.md)** — system overview.
 - **[SPIKE_storage_decision.md](SPIKE_storage_decision.md)** — the S1 storage spike behind ADR 0001.
 - **[DOMAIN_MAP.md](DOMAIN_MAP.md)** / **[WORKFLOW_INVENTORY.md](WORKFLOW_INVENTORY.md)** — Track B inputs.
+- **[UIUX_REVIEW_BRIEF.md](UIUX_REVIEW_BRIEF.md)** — current prototype surfaces,
+  now reviewed against the operator lifecycle rather than as isolated screens.
+- **[product-first/](product-first/)** — the product-first model, workflow,
+  governance, checkpoint, and authority package with lifecycle cross-references.
 - **decisions/** — Architecture Decision Records:
   - [0001 — relational inventory (D1)](decisions/0001-relational-inventory.md)
   - [0002 — M4 blob retirement](decisions/0002-m4-blob-retirement.md)
@@ -26,3 +43,7 @@ been promoted here.
 - Functions are **born non-executable** (A5.1a): intended-public RPCs must `grant execute … to authenticated` explicitly (see SECURITY.md).
 - One-way / grant migrations ship a tested down-path (in `supabase/recovery/`) before the window closes.
 - **A pass is not complete until the canonical docs describe the world it leaves behind.**
+- UI and prototype passes must satisfy `UX_WORKFLOW_CONTRACT.md` and
+  `OPERATOR_WALKTHROUGH_PROTOCOL.md`; screenshots prove rendering, while
+  multi-pass tours, mutator probes, and persisted-state evidence prove task-loop
+  completion.

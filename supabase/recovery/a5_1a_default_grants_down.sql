@@ -4,6 +4,11 @@
 -- ⚠ Running this REOPENS the default-function-privileges factory: every newly created public function is again
 -- born EXECUTE-able by anon (via built-in PUBLIC) and authenticated. Only run to unwind A5.1a deliberately.
 -- Run as the migration role (postgres).
+--
+-- PRECISION NOTE: this restores the pre-A5.1a BEHAVIOR (anon + PUBLIC + authenticated can execute new/these
+-- functions), not necessarily a byte-identical `pg_default_acl` — re-granting to a role after a revoke leaves an
+-- explicit default-ACL row where PostgreSQL previously relied on the implicit built-in default. Behaviorally
+-- equivalent, not ACL-identical. The two invoker helpers below ARE restored exactly (PUBLIC, as before A5.1a).
 
 begin;
 
@@ -13,8 +18,8 @@ alter default privileges grant execute on functions to public;
 -- restore Supabase's explicit schema-level anon/authenticated default grants
 alter default privileges in schema public grant execute on functions to anon, authenticated;
 
--- restore the two invoker helpers to their pre-A5.1a PUBLIC-executable state
-grant execute on function public.e10_slot_cards(uuid, jsonb, integer) to anon;
-grant execute on function public.e10_slot_partition(uuid, jsonb)       to anon;
+-- restore the two invoker helpers to their pre-A5.1a state EXACTLY (they carried PUBLIC EXECUTE, not anon)
+grant execute on function public.e10_slot_cards(uuid, jsonb, integer) to public;
+grant execute on function public.e10_slot_partition(uuid, jsonb)       to public;
 
 commit;

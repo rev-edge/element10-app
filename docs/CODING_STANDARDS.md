@@ -4,9 +4,20 @@ These apply to EVERY coding change, always, whether or not they're asked for. Ev
 
 ## Proactive UX/QA pass (every change)
 On every surface a change touches (and its neighbors), audit and fix, in scope:
+- **Task-loop completeness** — read `OPERATOR_LIFECYCLE.md` and
+  `UX_WORKFLOW_CONTRACT.md`; inspect the operator step before and after the
+  requested change. Define the saved outcome, state-aware next action,
+  review/correction, Back/Cancel, repeat, incomplete exit, resume, and recovery.
+  A successful mutation may not end with only a toast.
+- **Scope versus observation** — do not silently implement an adjacent schema,
+  authority, or lifecycle contract, but always identify the gap and leave an
+  honest usable seam. “Out of scope” never means “do not notice.”
+- **Origin-aware navigation** — preserve the parent object, route, filters,
+  selection, unsaved state, and focus across detours and returns.
 - **Stale renders** — any field/dropdown/toggle whose change doesn't immediately update its dependent totals, labels, or headers. (Recurring bug class in this app.)
 - **Destructive-action confirms** — anything irreversible (end/delete/remove) gets a confirm.
 - **Async feedback** — loading state on searches/saves/loads; disable buttons in-flight; a success/error toast on every mutation. No silent success or failure.
+  A toast supplements the saved-result and continuation UI; it never replaces it.
 - **Quick-add ergonomics** — Enter-to-submit and sensible focus on add/search rows.
 - **Number/currency formatting** — consistent thousands separators; negatives in red; no formatting inconsistencies.
 - **Inline validation** — required fields, numeric fields reject junk, sane bounds (e.g. boxes/case ≥ 1, cost/qty ≥ 0); clear inline errors, never silent no-ops.
@@ -21,6 +32,9 @@ Fix the in-scope, low-risk ones. Anything bigger (a redesign, or a data/RLS chan
 - **Authoritative mutations are single-transaction server RPCs with mutation-level idempotency:** the idempotency key is checked BEFORE the mutation is applied; a replay performs zero additional mutation and returns the previously committed result. Never mutate client-side and emit separately; never treat emitter-level idempotency as mutation-level.
 - **Output encoding is context-aware** (post-H1): `esc()` for HTML text/attributes, `jsq()` composed with `esc()` for values inside inline-handler JS strings, `encodeURIComponent` in URL positions. Never interpolate a raw value into template-literal HTML.
 - Report: itemized change list (surface → issue → fix), screenshots of key surfaces, teardown proof, deploy status (main, Action green, live serves it), and a "flagged for follow-up" section for anything intentionally not done.
+- For workflow changes, report the preflight and the scenario evidence required by
+  `UX_WORKFLOW_CONTRACT.md`: first-time, repeat, incomplete/resume, final-item,
+  edit/return, Cancel-no-creation, and denial/conflict recovery.
 
 ## Copy & visual tidiness (universal — applies to every screen, always)
 - **Placeholders/examples**: only when the input is genuinely non-obvious. A labeled field does not need an "e.g. …" placeholder. Never duplicate the label as the placeholder. If a hint is truly needed (a non-obvious format like a dual grade "10 / 9.5"), keep it to ONE minimal example, not a list.
@@ -35,8 +49,13 @@ Fix the in-scope, low-risk ones. Anything bigger (a redesign, or a data/RLS chan
 ## Coding-agent prompt shape & decomposition
 - The product-direction review is a BACKLOG, not a prompt. Never hand an agent an unbounded "redesign the app" task. Each pass quotes only the relevant requirements and EXPLICITLY states what existing functionality must not be rebuilt.
 - Follow the dependency order in **`Element10_ROADMAP.md` — the single canonical sequence.** Do not let the agent choose section by section, and do not use any ordering from an older document (a previous version of this file put Whatnot orders and customers before the inventory ledger; that is obsolete). Current macro order: hotfixes (H1 encoding + cache, H2 workspace CAS) → storage spike/decision (S1/D1) → inventory foundation (2.6 naming → 2.7–2.9 transactional movements → 2.10–2.12) → break lifecycle → Home → nav review → player quality → grids → Whatnot orders → customers → revenue → analytics.
-- One prompt = one reviewable migration OR one coherent UI workflow, not both unless inseparable.
+- One prompt = one reviewable migration OR one complete coherent UI workflow, not
+  one isolated step from that workflow and not both unless inseparable.
 - Every coding-agent prompt uses this structure: **Objective** (one narrow outcome) · **Current behavior** (what exists and must be preserved) · **In scope** (exact functions/surfaces) · **Out of scope** (explicit exclusions) · **Data changes** (migrations/tables) · **Files likely affected** (from reconnaissance, not guesses) · **Implementation requirements** · **Regression risks** · **Verification queries** · **Manual test** · **Acceptance criteria** · **Rollback**.
+- Every UI prompt additionally names the **operator job**, **entry/origin**,
+  **commit point**, **success and continuation**, **review/return**, **repeat and
+  resume cases**, **recovery**, and **next lifecycle handoff**. The design agent
+  returns this workflow preflight for review before implementation.
 - Whatnot-first: model transactions extensibly but implement only Whatnot (Weekly Orders, buyer handles, shows). No eBay/multi-platform abstractions yet. Preserve current nav; add Breaks/Customers/Analytics only after their modules exist. Responsive/a11y are acceptance criteria within passes, not standalone projects.
 
 ## Independent review (Trent's side)

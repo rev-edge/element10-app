@@ -2,6 +2,59 @@
 
 Updated: 2026-07-14 (rev 3: Phase 6–11 subpasses restored; mutation-level idempotency contract added to 2.7; immediate queue rendered as a dependency graph; cross-cutting verification made proportional). This document supersedes the original roadmap. Progress is measured by whether a business action is **authoritative, recoverable, idempotent, and reconcilable** — not by whether a screen exists.
 
+**Lifecycle alignment, 2026-07-27:** `OPERATOR_LIFECYCLE.md` and
+`UX_WORKFLOW_CONTRACT.md` are binding on Track B planning and UI acceptance.
+Progress also requires a complete operator task loop: entry, commit, result,
+continuation, review/return, repeat, resume, recovery, and handoff. A screen or
+checkpoint-local control is not progress if the operator is stranded after using it.
+
+## Critical path and model gates (updated 2026-08-03)
+
+**Engine (Track A):** A6a → A6c.4 → A7 all ACCEPTED; the 97-policy census is
+closed and the multi-tenant model is proven against 11 hostile identity classes
+on staging. A8's cutover plan, C-REHEARSE, and A8-PREP are all ACCEPTED. Current
+work is **A8-DRILL2**: P4/P5 recovery rehearsed as a backup-restore drill with
+real recovery time, plus lock contention under concurrent writers. **Production
+is untouched and execution requires the operator's explicit go** — with F6 on
+the table: P4 is effectively irreversible, recovery is backup-restore plus a
+coordinated client revert.
+
+**Surface (Track B):** the singles arc — acquire → intake → identify → cost →
+list → sell — is complete through C-SELL.1. Current work is **C-POLISH**
+(friction fixes, connective links, duplicate/archive, bulk management,
+pagination): CPI audit passed 2026-08-11, awaiting operator acceptance. Then S4
+repack and S5 margin reporting close the arc.
+
+**Stale-status note (2026-08-11):** the two paragraphs above were four
+checkpoints out of date. Track status lives in BOARD.md; this file summarizes it
+and must be re-read against the board whenever a ledger row is written.
+
+**Model gates, in dependency order:**
+- **PF-M3.1** — listings; blocks S3 selling (in the C-SELL charter).
+- **PF-M4** — locations and transfers; **approved before PF-C4 physical
+  implementation and before PF-C5 receiving.**
+- **PF-M5** — checklist catalog: shared canonical + org-scoped overlays with a
+  curation workflow (operator ruling, 2026-07-31). **Now on the critical path
+  for production:** A8 phase P5 closes the catalog write hole, and the deployed
+  production client creates checklists and cards by direct table INSERT — so
+  P5 cannot run until the curation path ships and the client uses it. PF-M5
+  therefore gates the FINAL phase of the cutover.
+
+**Working model:** checkpoints, not per-gate stop/start. Agents self-review and
+continue between checkpoints; CPI audit, operator walkthrough, and outside
+review happen once per checkpoint. See `OPERATOR_WALKTHROUGH_PROTOCOL.md` §7a.
+
+## PF-M4 — Locations and transfers (model gate)
+
+Multi-location businesses are one organization with organization-owned facility
+locations (ruling 2026-07-27; see BOARD.md). PF-M4 settles inventory positions
+(split-lot question), transfer postings and their ledger invariants, reservation
+locality, in-transit behavior (reconciled with DOMAIN_MAP's custody axis),
+permissions, and event-time historical reporting. **Sequencing: approved before
+PF-C4 physical-schema implementation and before PF-C5 receiving.** Franchise /
+separate-legal-entity cases remain separate organizations; a reporting-group
+concept for cross-org rollup is future scope.
+
 ## Product direction (recorded 2026-07-15)
 
 Element 10 will eventually be **productized (multi-tenant SaaS) and verticalized across industries** beyond trading cards. Consequences, in force from now:
@@ -26,7 +79,13 @@ Element 10 will eventually be **productized (multi-tenant SaaS) and verticalized
    9. **Realtime scale strategy** — org-filtered operational subscriptions; Broadcast for high-fanout live audiences.
    10. **Load, recovery, production cutover** — 2× defined workload in staging, restore drill, migrate production to tenant zero, verify reconciliation.
 
-   **Track B order:** 0. Workflow inventory + complaints (Trent's homework — everything depends on it) → 1. Domain + module map, classifying every concept as core-SaaS / tenant-owned / global-reference / vertical-specific → 2. Navigation prototype → 3. Five critical journeys → 4. Realistic usability test → 5. Tenant-aware app skeleton → 6. First complete working slice → 7. Progressive migration.
+   **Track B order:** 0. Workflow inventory + complaints → 0.5. maintain the
+   operator lifecycle and UX workflow contract → 1. Domain + module map,
+   classifying every concept as core-SaaS / tenant-owned / global-reference /
+   vertical-specific → 2. Navigation prototype → 3. Critical journeys, each with
+   a reviewed workflow preflight → 4. Realistic task-loop usability tests,
+   including repeat/resume/recovery → 5. Tenant-aware app skeleton → 6. First
+   complete working slice → 7. Progressive migration.
 
    **Cross-track dependencies (binding):** Track B steps 0–4 run in parallel with Track A 1–5. The **app skeleton (B5) waits for a stable org/membership contract (A6)**. The **first slice (B6) waits for isolation proof (A7)**. **Progressive migration (B7) waits for bounded APIs, realtime strategy, CI, and staging verification (A8–A9 + A3)**. Production cutover (A10) precedes broad migration.
 
