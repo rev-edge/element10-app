@@ -7,6 +7,12 @@ only. No migration, service activation, credential connection, paid API call,
 deployment, or production change is authorized. This document does not accept
 the proposed architecture as implemented.
 
+September 18 background-agent follow-up:
+`BACKGROUND_AGENT_ARCHITECTURE_2026-09-18.md` extends this provider-independent
+job, policy, usage, and authority model to two predefined organization-controlled
+agents. It preserves the same funding and provider boundaries. A background
+worker, agent runtime, unattended grant, and finding lifecycle remain unimplemented.
+
 Evidence baseline: canonical `foundation-a6` source at
 `c585da739bc14d4f6ceaac0d550d0f4f92e6e5e4`. Current local source was inspected.
 No local database, staging, or production environment was contacted in this
@@ -430,3 +436,6 @@ independent verdict. Production remains a separate gate.
 - Keep new client surfaces private by default with RLS, explicit grants, and
   bounded permission-aware functions. Supabase public-schema auto-exposure is
   no longer a safe assumption.
+- Do not treat X8 query contexts, action drafts, or outbox rows as an autonomous
+  agent runtime. Unattended work requires a dedicated principal, revisioned org
+  grant, durable run/attempt/finding lifecycle, and final authority rereads.

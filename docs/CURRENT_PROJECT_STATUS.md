@@ -1,5 +1,20 @@
 # Current project status
 
+## September 18 background agent architecture
+
+`BACKGROUND_AGENT_ARCHITECTURE_2026-09-18.md` scopes two predefined,
+organization-controlled agents: supplier invoice reconciliation and card
+inventory hygiene/enrichment. Both begin in observe-and-propose mode. X8a reads,
+X8b proposals, and X8c leases are reusable foundations, but they are not a
+running agent service. Scheduler/worker, agent identity, org enablement, runs,
+findings, unattended grants, Home-task projection, and provider-backed execution
+remain missing or planned. The recommended first vertical slice is deterministic
+supplier reconciliation that creates one evidence-backed finding and no receipt,
+stock, invoice, credit, payment, or communication effect. Companion requirements,
+acceptance, and dependency registers record the gates and owner decisions. No
+migration, database contact, provider activation, credential connection,
+scheduler, worker, deployment, or production change is authorized.
+
 ## September 17 shared import, export, and AI architecture
 
 `SHARED_IMPORT_EXPORT_AI_ARCHITECTURE_2026-09-17.md` reconciles the existing
